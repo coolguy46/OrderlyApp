@@ -1,12 +1,12 @@
 'use client';
 
 import { MainLayout } from '@/components/layout';
-import { Dashboard } from '@/components/dashboard';
+import { ExamList } from '@/components/exams';
 
-export default function HomePage() {
+export default function ExamsPage() {
   return (
     <MainLayout>
-      <Dashboard />
+      <ExamList />
     </MainLayout>
   );
 }

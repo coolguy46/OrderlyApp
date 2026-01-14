@@ -1,12 +1,12 @@
 'use client';
 
 import { MainLayout } from '@/components/layout';
-import { Dashboard } from '@/components/dashboard';
+import { TaskList } from '@/components/tasks';
 
-export default function HomePage() {
+export default function TasksPage() {
   return (
     <MainLayout>
-      <Dashboard />
+      <TaskList />
     </MainLayout>
   );
 }

@@ -1,0 +1,823 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:icalendar-ruby
+CALSCALE:GREGORIAN
+METHOD:PUBLISH
+X-WR-CALNAME:Srinivas Kunnavakkam Vinchimoor Calendar (Canvas)
+X-WR-CALDESC:Calendar events for the user\, Srinivas Kunnavakkam Vinchimoor
+BEGIN:VEVENT
+DTSTAMP:20251216T231700Z
+UID:event-assignment-191379
+DTSTART;VALUE=DATE;VALUE=DATE:20251215
+CLASS:PUBLIC
+DESCRIPTION:Semester 1 Final Review \n------------------------\n\n* Use th
+ e online textbook for the assigned problems and page numbers.\n\n* Complet
+ e the problems on a separate piece of paper and show that you checked the 
+ answers using the back of the book. Make revisions as needed. Points will 
+ be deducted for not showing that you have checked and revised your work. 
+ \n\n* Upload pictures of your work and revisions to Canvas.\n\n* AP Practi
+ ce Test #1\n\n* pp. 313 AP 1-18\n\n* AP Practice Test #2\n\n* pp. 524 AP 1
+ -18
+SEQUENCE:0
+SUMMARY:Sem 1 Review [p+ A.P. Statistics - 25-26/YR]
+URL;VALUE=URI:https://moreau.instructure.com/calendar?include_contexts=cour
+ se_5223&month=12&year=2025#assignment_191379
+X-ALT-DESC;FMTTYPE=text/html:<h4><span>Semester 1 Final Review&nbsp\;</span
+ ></h4>\n<ul>\n<li><span>Use the online textbook for the assigned problems 
+ and page numbers.</span></li>\n<li><span>Complete the problems on a separa
+ te piece of paper and show that you checked the answers using the back of 
+ the book. Make revisions as needed. Points will be deducted for not showin
+ g that you have checked and revised your work.&nbsp\;</span></li>\n<li>\n<
+ span>Upload pictures of your work and revisions to Canvas.</span>\n<ul>\n<
+ li>\n<span>AP Practice Test #1</span>\n<ul>\n<li><span>pp. 313 AP 1-18</sp
+ an></li>\n</ul>\n</li>\n<li>\n<span>AP Practice Test #2</span>\n<ul>\n<li>
+ <span>pp. 524 AP 1-18</span></li>\n</ul>\n</li>\n</ul>\n</li>\n</ul>
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20251218T190500Z
+UID:event-assignment-191378
+DTSTART:20251216T192000Z
+DTEND:20251216T192000Z
+CLASS:PUBLIC
+DESCRIPTION:Semester 1 Final Exam\n---------------------\n\n*\n\n* 16 multi
+ ple choice questions from Units 1-5\n\n* 3 FRQs\n\n* 3 BONUS MCQs
+SEQUENCE:0
+SUMMARY:Sem 1 Final [p+ A.P. Statistics - 25-26/YR]
+URL;VALUE=URI:https://moreau.instructure.com/calendar?include_contexts=cour
+ se_5223&month=12&year=2025#assignment_191378
+X-ALT-DESC;FMTTYPE=text/html:<h4><span style="text-decoration: underline\;"
+ >Semester 1 Final Exam</span></h4>\n<ul>\n<li style="list-style-type: none
+ \;">\n<ul>\n<li>16 multiple choice questions from Units 1-5</li>\n<li>3 FR
+ Qs</li>\n<li>3 BONUS MCQs</li>\n</ul>\n</li>\n</ul>
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20251229T170300Z
+UID:event-assignment-204602
+DTSTART;VALUE=DATE;VALUE=DATE:20251216
+CLASS:PUBLIC
+DESCRIPTION:
+SEQUENCE:0
+SUMMARY:LEQ #3 [p+ A.P. United States History - 25-26/YR]
+URL;VALUE=URI:https://moreau.instructure.com/calendar?include_contexts=cour
+ se_5376&month=12&year=2025#assignment_204602
+X-ALT-DESC;FMTTYPE=text/html:
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20251219T231800Z
+UID:event-assignment-204601
+DTSTART;VALUE=DATE;VALUE=DATE:20251216
+CLASS:PUBLIC
+DESCRIPTION:
+SEQUENCE:0
+SUMMARY:Unit 5 MCQ [p+ A.P. United States History - 25-26/YR]
+URL;VALUE=URI:https://moreau.instructure.com/calendar?include_contexts=cour
+ se_5376&month=12&year=2025#assignment_204601
+X-ALT-DESC;FMTTYPE=text/html:
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20251218T233200Z
+UID:event-assignment-195955
+DTSTART:20251217T191500Z
+DTEND:20251217T191500Z
+CLASS:PUBLIC
+DESCRIPTION:
+SEQUENCE:0
+SUMMARY:Fall Semester Final Exam [p Physics - 25-26/YR]
+URL;VALUE=URI:https://moreau.instructure.com/calendar?include_contexts=cour
+ se_5423&month=12&year=2025#assignment_195955
+X-ALT-DESC;FMTTYPE=text/html:
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20251229T080900Z
+UID:event-assignment-204623
+DTSTART;VALUE=DATE;VALUE=DATE:20251217
+CLASS:PUBLIC
+DESCRIPTION:
+SEQUENCE:0
+SUMMARY:Presidents Test [p+ A.P. United States History - 25-26/YR]
+URL;VALUE=URI:https://moreau.instructure.com/calendar?include_contexts=cour
+ se_5376&month=12&year=2025#assignment_204623
+X-ALT-DESC;FMTTYPE=text/html:
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20251218T231500Z
+UID:event-assignment-204713
+DTSTART;VALUE=DATE;VALUE=DATE:20251218
+CLASS:PUBLIC
+DESCRIPTION:
+SEQUENCE:0
+SUMMARY:Fall Final MCQ [p+ A.P. United States History - 25-26/YR]
+URL;VALUE=URI:https://moreau.instructure.com/calendar?include_contexts=cour
+ se_5376&month=12&year=2025#assignment_204713
+X-ALT-DESC;FMTTYPE=text/html:
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20251229T170300Z
+UID:event-assignment-204810
+DTSTART;VALUE=DATE;VALUE=DATE:20251218
+CLASS:PUBLIC
+DESCRIPTION:
+SEQUENCE:0
+SUMMARY:Fall Final SAQ's [p+ A.P. United States History - 25-26/YR]
+URL;VALUE=URI:https://moreau.instructure.com/calendar?include_contexts=cour
+ se_5376&month=12&year=2025#assignment_204810
+X-ALT-DESC;FMTTYPE=text/html:
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20260108T081400Z
+UID:event-assignment-override-88868
+DTSTART:20251219T160000Z
+DTEND:20251219T160000Z
+CLASS:PUBLIC
+DESCRIPTION:Hola estudiantes. The final exam will be in 3 parts. First the 
+ Oral exam which it consist in answering individually some of the questions
+  here on this link: [Oral part of the Final] (https://docs.google.com/docu
+ ment/d/1AFq696rt-PpchqT5Q6tTsG9hdLqPw8Lyb0fjULTZB6g/edit?tab=t.0) . The se
+ cond part will be writing which will focus on conjugations of Preterit and
+  Imperfect\; and the last part\, which it will be the day of the final wil
+ l be multiple choice. \n\nThe written exam will be Period 6: December 8.
+    Period 1 December 9. You can practice the spelling on Colby\, and if
+  you do three repetitions of each of the 50 verbs in the Preterit verb con
+ jugations chart\, you will have a couple of extra credit points. But the r
+ epetitions must be written in either red or green pen.\n\nThe Oral exam wi
+ ll be Period 6 December 10.   Period 1 December 11.\n\n \n\n* For the g
+ rammar\, you need to review the conjugations of Preterit and Imperfect. Yo
+ u will write sentences for the written part of the exam.\n\n* The day of y
+ our Final it will be multiple choice. Study and review: vocabulary Lesson 
+ 4\, Difference between Por vs Para. and when to use Preterit vs Imperfect.
+SEQUENCE:0
+SUMMARY:Final (Period 1) [p Spanish 3 - 25-26/YR]
+URL;VALUE=URI:https://moreau.instructure.com/calendar?include_contexts=cour
+ se_5217&month=12&year=2025#assignment_204089
+X-ALT-DESC;FMTTYPE=text/html:<p><span style="font-size: 14pt\;">Hola estudi
+ antes. The final exam will be in 3 parts. First the Oral exam which it con
+ sist in answering individually some of the questions here on this link: <a
+  class="inline_disabled" title="Link" href="https://docs.google.com/docume
+ nt/d/1AFq696rt-PpchqT5Q6tTsG9hdLqPw8Lyb0fjULTZB6g/edit?tab=t.0" target="_b
+ lank">Oral part of the Final</a> . The second part will be writing which w
+ ill focus on conjugations of Preterit and Imperfect\; and the last part\, 
+ which it will be the day of the final will be multiple choice.&nbsp\;</spa
+ n></p>\n<p><span style="font-size: 14pt\;">The written exam will be <stron
+ g>Period 6: December 8</strong>.&nbsp\; &nbsp\;<strong>Period 1 December 9
+ .&nbsp\;</strong>You can practice the spelling on Colby\, and if you do th
+ ree repetitions of each of the 50 verbs in the Preterit verb conjugations 
+ chart\, you will have a couple of extra credit points. But the repetitions
+  must be written in either red or green pen.</span></p>\n<p><span style="f
+ ont-size: 14pt\;">The Oral exam will be Period <strong>6 December 10.&nbsp
+ \;</strong> &nbsp\;<strong>Period 1 December 11.</strong></span></p>\n<p>&
+ nbsp\;</p>\n<ul>\n<li><span style="font-size: 14pt\;">For the grammar\, yo
+ u need to review the conjugations of <strong>Preterit and Imperfect.</stro
+ ng> You will write sentences for the written part of the exam.</span></li>
+ \n<li><span style="font-size: 14pt\;">The day of your Final it will be mul
+ tiple choice. Study and review: <strong>vocabulary Lesson 4\,</strong> Dif
+ ference between <strong>Por vs Para.</strong> and when to use <strong>Pret
+ erit vs Imperfect.</strong></span></li>\n</ul>
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20251231T215700Z
+UID:event-assignment-204715
+DTSTART;VALUE=DATE;VALUE=DATE:20251219
+CLASS:PUBLIC
+SEQUENCE:0
+SUMMARY:Final Socratic Seminar [p English 11 - 25-26/YR]
+URL;VALUE=URI:https://moreau.instructure.com/calendar?include_contexts=cour
+ se_5362&month=12&year=2025#assignment_204715
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20251226T204300Z
+UID:event-assignment-204341
+DTSTART;VALUE=DATE;VALUE=DATE:20251219
+CLASS:PUBLIC
+DESCRIPTION:
+SEQUENCE:0
+SUMMARY:Semester 1 Final [p Pre Calculus - 25-26/YR]
+URL;VALUE=URI:https://moreau.instructure.com/calendar?include_contexts=cour
+ se_5330&month=12&year=2025#assignment_204341
+X-ALT-DESC;FMTTYPE=text/html:
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20260109T231000Z
+UID:event-assignment-override-89696
+DTSTART:20260106T192500Z
+DTEND:20260106T192500Z
+CLASS:PUBLIC
+DESCRIPTION:Due at the end of the lesson \n\n[Podcast Worksheet] (https://
+ docs.google.com/document/d/1pzDIX8XLujTcrz3etyE4X1knQ-wLafpXDEonB-CiB8M/ed
+ it?tab=t.0)
+SEQUENCE:0
+SUMMARY:Podcast - Aron Ralston (Period 4) [p English 11 - 25-26/YR]
+URL;VALUE=URI:https://moreau.instructure.com/calendar?include_contexts=cour
+ se_5362&month=01&year=2026#assignment_206430
+X-ALT-DESC;FMTTYPE=text/html:<p>Due at the end of the lesson&nbsp\;</p>\n<p
+ ><a class="inline_disabled" href="https://docs.google.com/document/d/1pzDI
+ X8XLujTcrz3etyE4X1knQ-wLafpXDEonB-CiB8M/edit?tab=t.0" target="_blank">Podc
+ ast Worksheet</a></p>
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20260106T154900Z
+UID:event-assignment-191350
+DTSTART;VALUE=DATE;VALUE=DATE:20260107
+CLASS:PUBLIC
+DESCRIPTION:TEXTBOOK - Complete the problems on a separate piece of paper.
+  Check your work in the back of the book and make any corrections/revision
+ s. Submit your completed work to Canvas. \n\n* Practice #33: pg 538 #'s 1
+ \, 3\, 5\, 7\, 9\, 11\, 13
+SEQUENCE:0
+SUMMARY:Practice #33 [p+ A.P. Statistics - 25-26/YR]
+URL;VALUE=URI:https://moreau.instructure.com/calendar?include_contexts=cour
+ se_5223&month=01&year=2026#assignment_191350
+X-ALT-DESC;FMTTYPE=text/html:<p><strong>TEXTBOOK</strong><span>&nbsp\;</spa
+ n>- Complete the problems on a separate piece of paper. Check your work in
+  the back of the book and make any corrections/revisions. Submit your comp
+ leted work to Canvas.&nbsp\;</p>\n<ul>\n<li>Practice #33: pg 538 #'s 1\, 3
+ \, 5\, 7\, 9\, 11\, 13</li>\n</ul>
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20260106T211600Z
+UID:event-assignment-206434
+DTSTART:20260108T160000Z
+DTEND:20260108T160000Z
+CLASS:PUBLIC
+DESCRIPTION:Hello Semester 2 Social Justice Students!\n\nI am excited to ta
+ rt off this course with you all! For next class you will need to bring the
+  following items:\n\n1. 1 Inch - 1.5 Inch Binder\n2. Dividers (At least 5)
+ \n3. Lined College Ruled Paper\n\nPlease let me know if you have any quest
+ ions or concerns\, 
+SEQUENCE:0
+SUMMARY:Materials  [p Social Justice - 25-26/S2]
+URL;VALUE=URI:https://moreau.instructure.com/calendar?include_contexts=cour
+ se_5337&month=01&year=2026#assignment_206434
+X-ALT-DESC;FMTTYPE=text/html:<p>Hello Semester 2 Social Justice Students!</
+ p>\n<p>I am excited to tart off this course with you all! For next class y
+ ou will need to bring the following items:</p>\n<p>1. 1 Inch - 1.5 Inch Bi
+ nder<br>2. Dividers (At least 5)<br>3. Lined College Ruled Paper</p>\n<p>P
+ lease let me know if you have any questions or concerns\,&nbsp\;</p>
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20260112T231100Z
+UID:event-assignment-override-89669
+DTSTART:20260108T163000Z
+DTEND:20260108T163000Z
+CLASS:PUBLIC
+DESCRIPTION:Hola Estudiantes.  You need to find the definitions with detai
+ ls (in English) for the words in section "El medio Ambiente" with an examp
+ le. This section is on lesson 6\, page 267 of your VText.   It is import
+ ant not to just know the translation\, but also know the accurate meaning 
+ of these words in English.  You need to write them on paper.
+SEQUENCE:0
+SUMMARY:Tarea Definiciones (Period 1) [p Spanish 3 - 25-26/YR]
+URL;VALUE=URI:https://moreau.instructure.com/calendar?include_contexts=cour
+ se_5217&month=01&year=2026#assignment_206309
+X-ALT-DESC;FMTTYPE=text/html:<p><span style="font-size: 14pt\;">Hola Estudi
+ antes.&nbsp\; You need to find the definitions with details (in English) f
+ or the words in section "El medio Ambiente" with an example. This section 
+ is on lesson 6\, page 267 of your VText.&nbsp\; &nbsp\;It is important not
+  to just know the translation\, but also know the accurate meaning of thes
+ e words in English.&nbsp\; You need to write them on paper.</span></p>
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20260108T163300Z
+UID:event-assignment-206578
+DTSTART;VALUE=DATE;VALUE=DATE:20260108
+CLASS:PUBLIC
+DESCRIPTION:[Getting to Know Me Survey] (https://docs.google.com/forms/d/e/
+ 1FAIpQLSfaWERwrGZG7F8oupDvJDxwAlpSfpJPEvkSNusJRqtZd7uLUw/viewform?usp=sf_l
+ ink)
+SEQUENCE:0
+SUMMARY:Getting to Know Me [p Social Justice - 25-26/S2]
+URL;VALUE=URI:https://moreau.instructure.com/calendar?include_contexts=cour
+ se_5337&month=01&year=2026#assignment_206578
+X-ALT-DESC;FMTTYPE=text/html:<p><a class="inline_disabled" href="https://do
+ cs.google.com/forms/d/e/1FAIpQLSfaWERwrGZG7F8oupDvJDxwAlpSfpJPEvkSNusJRqtZ
+ d7uLUw/viewform?usp=sf_link" target="_blank">Getting to Know Me Survey</a>
+ </p>
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20260112T230700Z
+UID:event-assignment-override-89846
+DTSTART:20260109T182500Z
+DTEND:20260109T182500Z
+CLASS:PUBLIC
+DESCRIPTION:Complete the worksheet as we listen to Jeremy Evans' narrative 
+ about his bear attack survival\n\n \n\nhttps://podcasts.apple.com/ca/podc
+ ast/what-if-you-were-mauled-by-a-grizzly-bear-rebroadcast-262/id497227384?
+ i=1000726091099\n\n \n\nhttps://docs.google.com/document/d/1KLzlTBBCthaGG
+ UIZauocyuQDj9AdedumtnBLDMNm5Xo/edit?usp=sharing 
+SEQUENCE:0
+SUMMARY:Podcast - Jeremy Evans (Period 4) [p English 11 - 25-26/YR]
+URL;VALUE=URI:https://moreau.instructure.com/calendar?include_contexts=cour
+ se_5362&month=01&year=2026#assignment_206737
+X-ALT-DESC;FMTTYPE=text/html:<p>Complete the worksheet as we listen to Jere
+ my Evans' narrative about his bear attack survival</p>\n<p>&nbsp\;</p>\n<p
+ ><a href="https://podcasts.apple.com/ca/podcast/what-if-you-were-mauled-by
+ -a-grizzly-bear-rebroadcast-262/id497227384?i=1000726091099" target="_blan
+ k">https://podcasts.apple.com/ca/podcast/what-if-you-were-mauled-by-a-griz
+ zly-bear-rebroadcast-262/id497227384?i=1000726091099</a></p>\n<p>&nbsp\;</
+ p>\n<p><a href="https://docs.google.com/document/d/1KLzlTBBCthaGGUIZauocyu
+ QDj9AdedumtnBLDMNm5Xo/edit?usp=sharing" target="_blank">https://docs.googl
+ e.com/document/d/1KLzlTBBCthaGGUIZauocyuQDj9AdedumtnBLDMNm5Xo/edit?usp=sha
+ ring</a>&nbsp\;</p>
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20260107T220000Z
+UID:event-assignment-195913
+DTSTART:20260109T193000Z
+DTEND:20260109T193000Z
+CLASS:PUBLIC
+DESCRIPTION:Read through section 5-1 (Work)\, fill out your notes\, and mak
+ e sure you can:\n\n* Recognize the difference between the scientific defin
+ ition and ordinary definitions of work.\n\n* Define work by relating it to
+  force and displacement.\n\n* Identify where work is being performed in a 
+ variety of situations\n\n* Calculate the net work done when many forces ar
+ e acting on an object.\n\nThen\, do problems 1-6 on page 157 (Formative As
+ sessment).\n\nNext\, read through the first part of section 5-2 (up to\, a
+ nd including\, page 162)\, fill out your notes\, and make sure you can:\n\
+ n* Calculate the kinetic energy of an object.\n\n* Apply the work-energy t
+ heorem to solve problem.\n\nFinally\, do problems 1-5 on page 160 (practic
+ e) and 1-4 on page 162 (practice).
+SEQUENCE:0
+SUMMARY:4.1 HW (Work and KE) [p Physics - 25-26/YR]
+URL;VALUE=URI:https://moreau.instructure.com/calendar?include_contexts=cour
+ se_5423&month=01&year=2026#assignment_195913
+X-ALT-DESC;FMTTYPE=text/html:<p>Read through section 5-1 (Work)\, fill out 
+ your notes\, and make sure you can:</p>\n<ul>\n<li>Recognize the differenc
+ e between the scientific definition and ordinary definitions of work.</li>
+ \n<li>Define work by relating it to force and displacement.</li>\n<li>Iden
+ tify where work is being performed in a variety of situations</li>\n<li>Ca
+ lculate the net work done when many forces are acting on an object.</li>\n
+ </ul>\n<p>Then\, do problems 1-6 on page 157 (Formative Assessment).</p>\n
+ <p>Next\, read through the first part of section 5-2 (up to\, and includin
+ g\, page 162)\, fill out your notes\, and make sure you can:</p>\n<ul>\n<l
+ i>Calculate the kinetic energy of an object.</li>\n<li>Apply the work-ener
+ gy theorem to solve problem.</li>\n</ul>\n<p>Finally\, do problems 1-5 on 
+ page 160 (practice) and 1-4 on page 162 (practice).</p>
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20260112T231400Z
+UID:event-assignment-override-89609
+DTSTART;VALUE=DATE;VALUE=DATE:20260109
+CLASS:PUBLIC
+DESCRIPTION:How was your break? What what was the best thing you did over t
+ he break?
+SEQUENCE:0
+SUMMARY:1/6 Welcome back! (Period 2) [p Pre Calculus - 25-26/YR]
+URL;VALUE=URI:https://moreau.instructure.com/calendar?include_contexts=cour
+ se_5330&month=01&year=2026#assignment_206281
+X-ALT-DESC;FMTTYPE=text/html:<p>How was your break? What what was the best 
+ thing you did over the break?</p>
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20260108T080000Z
+UID:event-assignment-191351
+DTSTART;VALUE=DATE;VALUE=DATE:20260111
+CLASS:PUBLIC
+DESCRIPTION:TEXTBOOK - Complete the problems on a separate piece of paper.
+  Check your work in the back of the book and make any corrections/revision
+ s. Submit your completed work to Canvas. \n\n* Practice #34: pg 556 #'s 1
+ \, 3\, 5\, 7\, 11\, 13\, 15\, 17\, 21\, 23\, 25\, 27
+SEQUENCE:0
+SUMMARY:Practice #34 [p+ A.P. Statistics - 25-26/YR]
+URL;VALUE=URI:https://moreau.instructure.com/calendar?include_contexts=cour
+ se_5223&month=01&year=2026#assignment_191351
+X-ALT-DESC;FMTTYPE=text/html:<p><strong>TEXTBOOK</strong><span>&nbsp\;</spa
+ n>- Complete the problems on a separate piece of paper. Check your work in
+  the back of the book and make any corrections/revisions. Submit your comp
+ leted work to Canvas.&nbsp\;</p>\n<ul>\n<li>Practice #34: pg 556 #'s 1\, 3
+ \, 5\, 7\, 11\, 13\, 15\, 17\, 21\, 23\, 25\, 27</li>\n</ul>
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20260106T172400Z
+UID:event-assignment-override-89628
+DTSTART:20260112T163000Z
+DTEND:20260112T163000Z
+CLASS:PUBLIC
+DESCRIPTION:Vocabulary quiz\, lesson 6. Page 267. Section "La Naturaleza".
+  
+SEQUENCE:0
+SUMMARY:Vocab quiz Lesson 6 (Period 1) [p Spanish 3 - 25-26/YR]
+URL;VALUE=URI:https://moreau.instructure.com/calendar?include_contexts=cour
+ se_5217&month=01&year=2026#assignment_206293
+X-ALT-DESC;FMTTYPE=text/html:<p><span style="font-size: 14pt\;">Vocabulary 
+ quiz\, lesson 6. Page 267. Section "La Naturaleza".&nbsp\;</span></p>
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20260112T173000Z
+UID:event-assignment-override-89922
+DTSTART:20260112T220000Z
+DTEND:20260112T220000Z
+CLASS:PUBLIC
+DESCRIPTION:Critical Approach \n\n*CLICK [HERE] (https://docs.google.com/d
+ ocument/d/1YyVCH2Mfrdu7vBMd8uYfr4TU8Igd07hrfToyos0Wq0E/edit?usp=sharing) F
+ OR THE ASSIGNMENT WORKSHEET. MAKE A COPY AND SUBMIT THIS AS YOUR ASSIGNMEN
+ T \n\n - - - - - - - - - - - - - - - - - - - - - - - - \n\nUNDERSTANDIN
+ G THE GUIDELINES\n1. Choose two of the Guidelines from the reading and ans
+ wer the following question: How is this guideline relevant to me and why i
+ s it important to build a critical approach?\n\n2. Which of the various gu
+ idelines detailed in this essay are the most challenging to me\, and why?
+  How can I meet these challenges?\n\n3. What degree of responsibility am I
+  willing to take for getting the most out of this course (e.g.\, coming to
+  class prepared and having completed the reading\, engaging in large-group
+  discussions\, not dominating discussions\, asking questions for clarity\,
+  speaking respectfully in class\, and using academic rather than colloquia
+ l discourse)?\n\n4. What degree of responsibility am I willing to take to 
+ support my peers in getting the most from this course (e.g.\, engaging in 
+ discussions\, not dominating discussions\, listening respectfully when oth
+ ers speak and building on their ideas\, taking the small-group discussions
+  seriously\, coming to class prepared and having completed the reading)?\n
+ \n5. Many students think about higher education solely as a stepping-stone
+  to employment\, and thus the only knowledge that is worthwhile is knowled
+ ge they see as directly connected to getting a job. We ask you to consider
+  what other kinds of skills higher education can provide\, and how these s
+ kills are also connected to future employment. If you think beyond a stric
+ tly vocational approach\, what skills do citizens in a global democracy ne
+ ed? How are these skills also important to any future work you do?\n\n \n
+ \nRUBRIC\n\n---------------------------------------\nReflection & Critical
+  Engagement Rubric\n---------------------------------------\n\nAssignment:
+  Understanding the Guidelines Reflection\nTotal Points: 20 points\n\nCrite
+ ria\n\nExemplary (4)\n\nProficient (3)\n\nDeveloping (2)\n\nBeginning (1)\
+ n\nUnderstanding of the Guidelines\n\nDemonstrates a clear\, accurate\, an
+ d thoughtful understanding of the selected guidelines\; explains them in o
+ wn words with depth and insight.\n\nDemonstrates a solid understanding of 
+ the guidelines with minor gaps or surface-level explanation.\n\nShows part
+ ial or unclear understanding of the guidelines\; explanations may be vague
+  or overly general.\n\nShows little to no understanding of the guidelines 
+ or misrepresents their meaning.\n\nPersonal Reflection & Relevance\n\nProv
+ ides deep\, honest reflection on personal challenges\, responsibilities\, 
+ and growth\; clearly connects the guidelines to personal experience and le
+ arning.\n\nProvides meaningful reflection with some personal connection an
+ d insight.\n\nReflection is limited\, descriptive\, or lacks personal dept
+ h.\n\nReflection is minimal\, generic\, or missing personal connection.\n\
+ nCritical Thinking & Application\n\nThoughtfully analyzes how the guidelin
+ es contribute to building a critical approach\; makes strong connections t
+ o civic responsibility\, democracy\, and future work.\n\nMakes clear conne
+ ctions to critical thinking and broader skills\, though analysis may lack 
+ depth.\n\nConnections to critical thinking or broader skills are weak or u
+ nderdeveloped.\n\nLittle to no attempt to apply guidelines to critical thi
+ nking\, citizenship\, or future work.\n\nResponsibility to Self & Communit
+ y\n\nClearly articulates a strong sense of responsibility to personal lear
+ ning and to supporting peers\; responses are specific and intentional.\n\n
+ Articulates responsibility to self and peers with some specificity.\n\nMen
+ tions responsibility but lacks clarity or concrete examples.\n\nDoes not m
+ eaningfully address responsibility to self or peers.\n\nClarity\, Organiza
+ tion & Academic Tone\n\nWriting is well-organized\, clear\, and coherent\;
+  uses respectful\, academic language throughout.\n\nWriting is mostly clea
+ r and organized with minor issues\; tone is generally appropriate.\n\nWrit
+ ing lacks organization or clarity at times\; tone may be inconsistent or i
+ nformal.\n\nWriting is unclear\, disorganized\, or uses inappropriate tone
+  or language.
+SEQUENCE:0
+SUMMARY:Critical Approach (Period 3) [p Social Justice - 25-26/S2]
+URL;VALUE=URI:https://moreau.instructure.com/calendar?include_contexts=cour
+ se_5337&month=01&year=2026#assignment_206832
+X-ALT-DESC;FMTTYPE=text/html:<p><span style="font-size: 24pt\;"><strong>Cri
+ tical Approach</strong></span><strong>&nbsp\;</strong></p>\n<p>*CLICK <a c
+ lass="inline_disabled" href="https://docs.google.com/document/d/1YyVCH2Mfr
+ du7vBMd8uYfr4TU8Igd07hrfToyos0Wq0E/edit?usp=sharing" target="_blank">HERE<
+ /a> FOR THE ASSIGNMENT WORKSHEET. MAKE A COPY AND SUBMIT THIS AS YOUR ASSI
+ GNMENT&nbsp\;</p>\n<p>&nbsp\;- - - - - - - - - - - - - - - - - - - - - - -
+  -<span class="Apple-converted-space">&nbsp\;</span></p>\n<p><span style="
+ text-decoration: underline\;"><strong>UNDERSTANDING THE GUIDELINES</strong
+ ></span><br>1. Choose two of the Guidelines from the reading and answer th
+ e following question: <em>How is this guideline relevant to me and why is 
+ it important to build a critical approach?</em></p>\n<p class="p1">2. Whic
+ h of the various guidelines detailed in this essay are the most challengin
+ g&nbsp\;to me\, and why? How can I meet these challenges?</p>\n<p class="p
+ 1">3. What degree of responsibility am I willing to take for getting the m
+ ost out of this course (e.g.\, coming to class prepared and having complet
+ ed the reading\, engaging in large-group discussions\, not dominating disc
+ ussions\, asking questions for clarity\, speaking respectfully in class\, 
+ and using academic rather than colloquial discourse)?</p>\n<p class="p1">4
+ . What degree of responsibility am I willing to take to support my peers i
+ n getting the most from this course (e.g.\, engaging in discussions\, not 
+ dominating discussions\, listening respectfully when others speak and buil
+ ding on their ideas\, taking the small-group discussions seriously\, comin
+ g to class prepared and having completed the reading)?</p>\n<p class="p1">
+ 5. Many students think about higher education solely as a stepping-stone t
+ o employment\, and thus the only knowledge that is worthwhile is knowledge
+  they see as directly connected to getting a job. We ask you to consider w
+ hat other kinds of skills higher education can provide\, and how these ski
+ lls are also connected to future employment. If you think beyond a strictl
+ y vocational approach\, what skills do citizens in a global democracy need
+ ? How are these skills also important to any future work you do?</p>\n<p c
+ lass="p1">&nbsp\;</p>\n<p><span style="font-size: 18pt\;"><strong>RUBRIC</
+ strong></span></p>\n<table style="border-collapse: collapse\; width: 100%\
+ ; height: 410.667px\;" border="1">\n<tbody>\n<tr style="height: 29.333334p
+ x\;">\n<td style="width: 100%\; height: 29.3333px\;">\n<h2 data-start="231
+ " data-end="277"><strong data-start="234" data-end="277">Reflection &amp\;
+  Critical Engagement Rubric</strong></h2>\n<p data-start="279" data-end="3
+ 64"><strong data-start="279" data-end="294">Assignment:</strong> Understan
+ ding the Guidelines Reflection<br data-start="334" data-end="337"><strong 
+ data-start="337" data-end="354">Total Points:</strong> 20 points</p>\n<div
+  class="TyagGW_tableContainer">\n<div class="group TyagGW_tableWrapper fle
+ x flex-col-reverse w-fit">\n<table class="w-fit min-w-(--thread-content-wi
+ dth)" data-start="366" data-end="2695">\n<thead data-start="366" data-end=
+ "464">\n<tr data-start="366" data-end="464">\n<th data-start="366" data-en
+ d="381" data-col-size="sm"><strong data-start="368" data-end="380">Criteri
+ a</strong></th>\n<th data-start="381" data-end="401" data-col-size="xl"><s
+ trong data-start="383" data-end="400">Exemplary (4)</strong></th>\n<th dat
+ a-start="401" data-end="422" data-col-size="md"><strong data-start="403" d
+ ata-end="421">Proficient (3)</strong></th>\n<th data-start="422" data-end=
+ "443" data-col-size="lg"><strong data-start="424" data-end="442">Developin
+ g (2)</strong></th>\n<th data-start="443" data-end="464" data-col-size="md
+ "><strong data-start="445" data-end="462">Beginning (1)</strong></th>\n</t
+ r>\n</thead>\n<tbody data-start="559" data-end="2695">\n<tr data-start="55
+ 9" data-end="1031">\n<td data-start="559" data-end="597" data-col-size="sm
+ "><strong data-start="561" data-end="596">Understanding of the Guidelines<
+ /strong></td>\n<td data-col-size="xl" data-start="597" data-end="739">Demo
+ nstrates a clear\, accurate\, and thoughtful understanding of the selected
+  guidelines\; explains them in own words with depth and insight.</td>\n<td
+  data-col-size="md" data-start="739" data-end="840">Demonstrates a solid u
+ nderstanding of the guidelines with minor gaps or surface-level explanatio
+ n.</td>\n<td data-col-size="lg" data-start="840" data-end="945">Shows part
+ ial or unclear understanding of the guidelines\; explanations may be vague
+  or overly general.</td>\n<td data-col-size="md" data-start="945" data-end
+ ="1031">Shows little to no understanding of the guidelines or misrepresent
+ s their meaning.</td>\n</tr>\n<tr data-start="1032" data-end="1434">\n<td 
+ data-start="1032" data-end="1070" data-col-size="sm"><strong data-start="1
+ 034" data-end="1069">Personal Reflection &amp\; Relevance</strong></td>\n<
+ td data-col-size="xl" data-start="1070" data-end="1228">Provides deep\, ho
+ nest reflection on personal challenges\, responsibilities\, and growth\; c
+ learly connects the guidelines to personal experience and learning.</td>\n
+ <td data-col-size="md" data-start="1228" data-end="1304">Provides meaningf
+ ul reflection with some personal connection and insight.</td>\n<td data-co
+ l-size="lg" data-start="1304" data-end="1367">Reflection is limited\, desc
+ riptive\, or lacks personal depth.</td>\n<td data-col-size="md" data-start
+ ="1367" data-end="1434">Reflection is minimal\, generic\, or missing perso
+ nal connection.</td>\n</tr>\n<tr data-start="1435" data-end="1913">\n<td d
+ ata-start="1435" data-end="1473" data-col-size="sm"><strong data-start="14
+ 37" data-end="1472">Critical Thinking &amp\; Application</strong></td>\n<t
+ d data-col-size="xl" data-start="1473" data-end="1638">Thoughtfully analyz
+ es how the guidelines contribute to building a critical approach\; makes s
+ trong connections to civic responsibility\, democracy\, and future work.</
+ td>\n<td data-col-size="md" data-start="1638" data-end="1737">Makes clear 
+ connections to critical thinking and broader skills\, though analysis may 
+ lack depth.</td>\n<td data-col-size="lg" data-start="1737" data-end="1818"
+ >Connections to critical thinking or broader skills are weak or underdevel
+ oped.</td>\n<td data-col-size="md" data-start="1818" data-end="1913">Littl
+ e to no attempt to apply guidelines to critical thinking\, citizenship\, o
+ r future work.</td>\n</tr>\n<tr data-start="1914" data-end="2298">\n<td da
+ ta-start="1914" data-end="1955" data-col-size="sm"><strong data-start="191
+ 6" data-end="1954">Responsibility to Self &amp\; Community</strong></td>\n
+ <td data-col-size="xl" data-start="1955" data-end="2096">Clearly articulat
+ es a strong sense of responsibility to personal learning and to supporting
+  peers\; responses are specific and intentional.</td>\n<td data-col-size="
+ md" data-start="2096" data-end="2166">Articulates responsibility to self a
+ nd peers with some specificity.</td>\n<td data-col-size="lg" data-start="2
+ 166" data-end="2232">Mentions responsibility but lacks clarity or concrete
+  examples.</td>\n<td data-col-size="md" data-start="2232" data-end="2298">
+ Does not meaningfully address responsibility to self or peers.</td>\n</tr>
+ \n<tr data-start="2299" data-end="2695">\n<td data-start="2299" data-end="
+ 2343" data-col-size="sm"><strong data-start="2301" data-end="2342">Clarity
+ \, Organization &amp\; Academic Tone</strong></td>\n<td data-col-size="xl"
+  data-start="2343" data-end="2440">Writing is well-organized\, clear\, and
+  coherent\; uses respectful\, academic language throughout.</td>\n<td data
+ -col-size="md" data-start="2440" data-end="2530">Writing is mostly clear a
+ nd organized with minor issues\; tone is generally appropriate.</td>\n<td 
+ data-col-size="lg" data-start="2530" data-end="2618">Writing lacks organiz
+ ation or clarity at times\; tone may be inconsistent or informal.</td>\n<t
+ d data-col-size="md" data-start="2618" data-end="2695">Writing is unclear\
+ , disorganized\, or uses inappropriate tone or language.</td>\n</tr>\n</tb
+ ody>\n</table>\n</div>\n</div>\n</td>\n</tr>\n</tbody>\n</table>
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20260112T183900Z
+UID:event-assignment-override-89970
+DTSTART:20260113T192500Z
+DTEND:20260113T192500Z
+CLASS:PUBLIC
+DESCRIPTION:Students will read and highlight every event that Edith Ingasia
+ ni's survives. \n\n[Link to Article] (https://docs.google.com/document/d/
+ 1RSY74ecLavuvyycLt1zhVY6lJz9aKYvWewj9TjZk6_g/edit?usp=sharing)
+SEQUENCE:0
+SUMMARY:NYTimes - Edith Ingasiani (Period 4) [p English 11 - 25-26/YR]
+URL;VALUE=URI:https://moreau.instructure.com/calendar?include_contexts=cour
+ se_5362&month=01&year=2026#assignment_206861
+X-ALT-DESC;FMTTYPE=text/html:<p><span style="font-size: 18pt\;">Students wi
+ ll read and highlight every event that Edith Ingasiani's survives.&nbsp\;<
+ /span></p>\n<p><span style="font-size: 18pt\;"><a class="inline_disabled" 
+ href="https://docs.google.com/document/d/1RSY74ecLavuvyycLt1zhVY6lJz9aKYvW
+ ewj9TjZk6_g/edit?usp=sharing" target="_blank">Link to Article</a></span></
+ p>
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20260109T203100Z
+UID:event-assignment-195914
+DTSTART:20260113T193000Z
+DTEND:20260113T193000Z
+CLASS:PUBLIC
+DESCRIPTION:First\, read the rest of section 5-2 and fill out your notes on
+  Potential Energy.  Make sure you can:\n\n* Distinguish between potential
+  and kinetic energy.\n\n* Classify different types of potential energy.\n\
+ n* Calculate the potential energy associated with an object's position.\n\
+ nThen\, do problems 1-3 (practice) on page 166 and 1-5 (Formative Assessme
+ nt) on page 166.
+SEQUENCE:0
+SUMMARY:4.2 HW (PE) [p Physics - 25-26/YR]
+URL;VALUE=URI:https://moreau.instructure.com/calendar?include_contexts=cour
+ se_5423&month=01&year=2026#assignment_195914
+X-ALT-DESC;FMTTYPE=text/html:<p>First\, read the rest of section 5-2 and fi
+ ll out your notes on Potential Energy. &nbsp\;Make sure you can:</p>\n<ul>
+ \n<li>Distinguish between potential and kinetic energy.</li>\n<li>Classify
+  different types of potential energy.</li>\n<li>Calculate the potential en
+ ergy associated with an object's position.</li>\n</ul>\n<p>Then\, do probl
+ ems 1-3 (practice) on page 166 and 1-5 (Formative Assessment) on page 166.
+ </p>
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20260109T163000Z
+UID:event-assignment-override-89728
+DTSTART;VALUE=DATE;VALUE=DATE:20260113
+CLASS:PUBLIC
+DESCRIPTION:[Sine and Cosine Graphs] (https://moreau.instructure.com/course
+ s/5330/files/2019848?wrap=1)\n\nPage 648\n\n#6-14 (ALL)  + 23-25 (All) JU
+ ST GRAPH
+SEQUENCE:0
+SUMMARY:1/8 Lesson 6.1 (Period 2) [p Pre Calculus - 25-26/YR]
+URL;VALUE=URI:https://moreau.instructure.com/calendar?include_contexts=cour
+ se_5330&month=01&year=2026#assignment_206440
+X-ALT-DESC;FMTTYPE=text/html:<p><a class="instructure_file_link instructure
+ _scribd_file inline_disabled" title="Lesson 6.1-1.pdf" href="https://morea
+ u.instructure.com/courses/5330/files/2019848?wrap=1" target="_blank" data-
+ canvas-previewable="false" data-api-endpoint="https://moreau.instructure.c
+ om/api/v1/courses/5330/files/2019848" data-api-returntype="File">Sine and 
+ Cosine Graphs</a></p>\n<p>Page 648</p>\n<p>#6-14 <strong>(ALL)&nbsp\; + </
+ strong>23-25 <strong>(All) JUST GRAPH</strong></p>
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20260112T080000Z
+UID:event-assignment-191352
+DTSTART;VALUE=DATE;VALUE=DATE:20260113
+CLASS:PUBLIC
+DESCRIPTION:TEXTBOOK - Complete the problems on a separate piece of paper.
+  Check your work in the back of the book and make any corrections/revision
+ s. Submit your completed work to Canvas. \n\n*\n\n* Practice #35: pg 570 
+ #'s 1\, 3\, 5\, 7\, 9\, 11\, 13
+SEQUENCE:0
+SUMMARY:Practice #35 [p+ A.P. Statistics - 25-26/YR]
+URL;VALUE=URI:https://moreau.instructure.com/calendar?include_contexts=cour
+ se_5223&month=01&year=2026#assignment_191352
+X-ALT-DESC;FMTTYPE=text/html:<p><strong>TEXTBOOK</strong><span>&nbsp\;</spa
+ n>- Complete the problems on a separate piece of paper. Check your work in
+  the back of the book and make any corrections/revisions. Submit your comp
+ leted work to Canvas.&nbsp\;</p>\n<ul>\n<li style="list-style-type: none\;
+ ">\n<ul>\n<li>Practice #35: pg 570 #'s 1\, 3\, 5\, 7\, 9\, 11\, 13</li>\n<
+ /ul>\n</li>\n</ul>
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20260112T221600Z
+UID:event-assignment-override-89730
+DTSTART;VALUE=DATE;VALUE=DATE:20260115
+CLASS:PUBLIC
+SEQUENCE:0
+SUMMARY:1/12 Lesson 6.2 (Period 2) [p Pre Calculus - 25-26/YR]
+URL;VALUE=URI:https://moreau.instructure.com/calendar?include_contexts=cour
+ se_5330&month=01&year=2026#assignment_206441
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20260106T154900Z
+UID:event-assignment-191353
+DTSTART;VALUE=DATE;VALUE=DATE:20260115
+CLASS:PUBLIC
+SEQUENCE:0
+SUMMARY:Practice #36 [p+ A.P. Statistics - 25-26/YR]
+URL;VALUE=URI:https://moreau.instructure.com/calendar?include_contexts=cour
+ se_5223&month=01&year=2026#assignment_191353
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20260106T154900Z
+UID:event-assignment-191354
+DTSTART;VALUE=DATE;VALUE=DATE:20260119
+CLASS:PUBLIC
+SEQUENCE:0
+SUMMARY:Practice #37 [p+ A.P. Statistics - 25-26/YR]
+URL;VALUE=URI:https://moreau.instructure.com/calendar?include_contexts=cour
+ se_5223&month=01&year=2026#assignment_191354
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20260108T154900Z
+UID:event-assignment-override-89785
+DTSTART;VALUE=DATE;VALUE=DATE:20260120
+CLASS:PUBLIC
+SEQUENCE:0
+SUMMARY:1/14 Lesson 6.3 (Period 2) [p Pre Calculus - 25-26/YR]
+URL;VALUE=URI:https://moreau.instructure.com/calendar?include_contexts=cour
+ se_5330&month=01&year=2026#assignment_206570
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20260106T154900Z
+UID:event-assignment-191355
+DTSTART;VALUE=DATE;VALUE=DATE:20260122
+CLASS:PUBLIC
+SEQUENCE:0
+SUMMARY:Practice #38 [p+ A.P. Statistics - 25-26/YR]
+URL;VALUE=URI:https://moreau.instructure.com/calendar?include_contexts=cour
+ se_5223&month=01&year=2026#assignment_191355
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20260106T154900Z
+UID:event-assignment-191403
+DTSTART;VALUE=DATE;VALUE=DATE:20260122
+CLASS:PUBLIC
+DESCRIPTION:Topic Questions for 6.1-6.7.\n\nBased on completion from AP Cla
+ ssroom. 
+SEQUENCE:0
+SUMMARY:Unit 6 P1 Topic Questions [p+ A.P. Statistics - 25-26/YR]
+URL;VALUE=URI:https://moreau.instructure.com/calendar?include_contexts=cour
+ se_5223&month=01&year=2026#assignment_191403
+X-ALT-DESC;FMTTYPE=text/html:<p>Topic Questions for 6.1-6.7.</p>\n<p>Based 
+ on completion from AP Classroom.&nbsp\;</p>
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20260106T154900Z
+UID:event-assignment-206282
+DTSTART;VALUE=DATE;VALUE=DATE:20260122
+CLASS:PUBLIC
+SEQUENCE:0
+SUMMARY:Unit 6 Part 1 Review [p+ A.P. Statistics - 25-26/YR]
+URL;VALUE=URI:https://moreau.instructure.com/calendar?include_contexts=cour
+ se_5223&month=01&year=2026#assignment_206282
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20260106T154900Z
+UID:event-assignment-191405
+DTSTART:20260123T224000Z
+DTEND:20260123T224000Z
+CLASS:PUBLIC
+DESCRIPTION:Unit 6 Part 1 Test\n\n* Multiple Choice (50%) on AP Classroom\n
+ \n* 16 multiple choice questions \n\n* 36 minutes\n\n* Free Response (50%
+ ) on paper\n\n* 2 questions similar to AP Free Response Questions\n\n* 26 
+ minutes
+SEQUENCE:0
+SUMMARY:Unit 6 Part 1 Test [p+ A.P. Statistics - 25-26/YR]
+URL;VALUE=URI:https://moreau.instructure.com/calendar?include_contexts=cour
+ se_5223&month=01&year=2026#assignment_191405
+X-ALT-DESC;FMTTYPE=text/html:<p><span style="text-decoration: underline\;">
+ <strong>Unit 6 Part 1 Test</strong></span></p>\n<ul>\n<li>\n<strong>Multip
+ le Choice (50%) on AP Classroom</strong>\n<ul>\n<li>16 multiple choice que
+ stions&nbsp\;</li>\n<li>36 minutes</li>\n</ul>\n</li>\n<li>\n<strong>Free 
+ Response (50%) on paper</strong><br>\n<ul>\n<li><span>2 questions similar 
+ to AP Free Response Questions</span></li>\n<li><span>26 minutes</span></li
+ >\n</ul>\n</li>\n</ul>
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20260108T174300Z
+UID:event-assignment-override-89664
+DTSTART:20260127T160000Z
+DTEND:20260127T160000Z
+CLASS:PUBLIC
+DESCRIPTION:Hola estudiantes.  Using the Simple future tense that we will 
+ learned in class.  You are going to put together a Chinese Horoscope\, ju
+ st like the example I show you. You may work by yourself or have one partn
+ er\; however\, if you have a partner you have to write double of sentences
+ . These are the Rubrics:\n\n* Write a slide per animal with the name in Sp
+ anish and the picture of it with at least 3 years for that animal (example
+ : El Gallo\, 217\, 2029...) 4 points.\n\n* In each slide\, write the pred
+ iction of the person from that symbol (animal) in future tense\, for the f
+ ollowing aspects: AMOR\, SALUD\, PROFESION.  One sentence per aspect and 
+ DO NOT repeat verbs ( 36 points ) \n\n* NOTE: If you are going to work w
+ ith one partner\, then you must write 2 sentences per Aspect for each symb
+ ol. \n\n* You must submit your project here on Canvas no later than the d
+ ue date and time.\n\nI WON'T ACCEPT ANYTHING LATE
+SEQUENCE:0
+SUMMARY:Chinese Horoscope (Period 1) [p Spanish 3 - 25-26/YR]
+URL;VALUE=URI:https://moreau.instructure.com/calendar?include_contexts=cour
+ se_5217&month=01&year=2026#assignment_206306
+X-ALT-DESC;FMTTYPE=text/html:<p><span style="font-size: 14pt\;">Hola estudi
+ antes.&nbsp\; Using the Simple future tense that we will learned in class.
+ &nbsp\; You are going to put together a Chinese Horoscope\, just like the 
+ example I show you. You may work by yourself or have one partner\; however
+ \, if you have a partner you have to write double of sentences. These are 
+ the Rubrics:</span></p>\n<ul>\n<li><span style="font-size: 14pt\;">Write a
+  slide per animal with the name in Spanish and the picture of it with at l
+ east 3 years for that animal (example: El Gallo\, 217\, 2029...) <strong>4
+ &nbsp\;points.</strong></span></li>\n<li><span style="font-size: 14pt\;">I
+ n each slide\, write the prediction of the person from that symbol (animal
+ ) in future tense\, for the following aspects: AMOR\, SALUD\, PROFESION.&n
+ bsp\; One sentence per aspect and <strong>DO NOT repeat verbs</strong> (<s
+ trong> 36 points )&nbsp\;</strong></span></li>\n<li><span style="font-size
+ : 14pt\;"><strong>NOTE:&nbsp\;</strong>If you are going to work with one p
+ artner\, then you must write <strong>2 sentences per Aspect for each symbo
+ l</strong>.&nbsp\;</span></li>\n<li><span style="font-size: 14pt\;">You mu
+ st submit your project here on Canvas no later than the due date and time.
+ </span></li>\n</ul>\n<p><span style="font-size: 14pt\;"><strong>I WON'T AC
+ CEPT ANYTHING LATE</strong></span></p>
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20260107T221900Z
+UID:event-assignment-206562
+DTSTART;VALUE=DATE;VALUE=DATE:20260130
+CLASS:PUBLIC
+DESCRIPTION:[River to Cross Episode #3] (https://www.youtube.com/watch?v=Xh
+ zN70JAeQo&list=PL-MsOcDNdmxYLYhTaxsnaS5cdKaSIHqa9&rco=1)\n\nComplete Corne
+ ll Notes
+SEQUENCE:0
+SUMMARY:Rivers to Cross Episode 3 [p+ A.P. United States History - 25-26/YR
+ ]
+URL;VALUE=URI:https://moreau.instructure.com/calendar?include_contexts=cour
+ se_5376&month=01&year=2026#assignment_206562
+X-ALT-DESC;FMTTYPE=text/html:<p><a class="inline_disabled" title="Link" hre
+ f="https://www.youtube.com/watch?v=XhzN70JAeQo&amp\;list=PL-MsOcDNdmxYLYhT
+ axsnaS5cdKaSIHqa9&amp\;rco=1" target="_blank">River to Cross Episode #3</a
+ ></p>\n<p>Complete Cornell Notes</p>
+END:VEVENT
+END:VCALENDAR

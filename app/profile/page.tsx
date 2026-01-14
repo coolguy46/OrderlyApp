@@ -1,12 +1,12 @@
 'use client';
 
 import { MainLayout } from '@/components/layout';
-import { Dashboard } from '@/components/dashboard';
+import { Profile } from '@/components/social';
 
-export default function HomePage() {
+export default function ProfilePage() {
   return (
     <MainLayout>
-      <Dashboard />
+      <Profile />
     </MainLayout>
   );
 }

@@ -1,12 +1,12 @@
 'use client';
 
 import { MainLayout } from '@/components/layout';
-import { Dashboard } from '@/components/dashboard';
+import { Calendar } from '@/components/calendar';
 
-export default function HomePage() {
+export default function CalendarPage() {
   return (
     <MainLayout>
-      <Dashboard />
+      <Calendar />
     </MainLayout>
   );
 }

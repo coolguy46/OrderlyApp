@@ -1,12 +1,12 @@
 'use client';
 
 import { MainLayout } from '@/components/layout';
-import { Dashboard } from '@/components/dashboard';
+import { GoalList } from '@/components/goals';
 
-export default function HomePage() {
+export default function GoalsPage() {
   return (
     <MainLayout>
-      <Dashboard />
+      <GoalList />
     </MainLayout>
   );
 }

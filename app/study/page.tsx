@@ -1,12 +1,12 @@
 'use client';
 
 import { MainLayout } from '@/components/layout';
-import { Dashboard } from '@/components/dashboard';
+import { StudySession } from '@/components/study';
 
-export default function HomePage() {
+export default function StudyPage() {
   return (
     <MainLayout>
-      <Dashboard />
+      <StudySession />
     </MainLayout>
   );
 }

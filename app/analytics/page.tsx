@@ -1,12 +1,12 @@
 'use client';
 
 import { MainLayout } from '@/components/layout';
-import { Dashboard } from '@/components/dashboard';
+import { Analytics } from '@/components/analytics';
 
-export default function HomePage() {
+export default function AnalyticsPage() {
   return (
     <MainLayout>
-      <Dashboard />
+      <Analytics />
     </MainLayout>
   );
 }
