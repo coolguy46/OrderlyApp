@@ -39,17 +39,17 @@ export function TaskDetailViewer({ task, open, onOpenChange, onEdit }: TaskDetai
   const subject = subjects.find((s) => s.id === task.subject_id);
   const daysUntil = task.due_date ? getDaysUntil(task.due_date) : null;
 
-  const handleComplete = () => {
+  const handleComplete = async () => {
     if (task.status === 'completed') {
-      updateTask(task.id, { status: 'pending', completed_at: null });
+      await updateTask(task.id, { status: 'pending', completed_at: null });
     } else {
-      completeTask(task.id);
+      await completeTask(task.id);
     }
     onOpenChange(false);
   };
 
-  const handleStartProgress = () => {
-    updateTask(task.id, { status: 'in_progress' });
+  const handleStartProgress = async () => {
+    await updateTask(task.id, { status: 'in_progress' });
   };
 
   // Get source badge info

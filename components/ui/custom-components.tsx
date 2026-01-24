@@ -151,3 +151,58 @@ export function StatCard({
     </Card>
   );
 }
+
+// Simple Select Field with label and options (for forms)
+interface SelectFieldOption {
+  value: string;
+  label: string;
+}
+
+interface SelectFieldProps {
+  label?: string;
+  options: SelectFieldOption[];
+  value: string;
+  onChange: (e: { target: { value: string } }) => void;
+  placeholder?: string;
+  className?: string;
+  required?: boolean;
+}
+
+export function SelectField({ 
+  label, 
+  options, 
+  value, 
+  onChange, 
+  placeholder,
+  className,
+  required 
+}: SelectFieldProps) {
+  return (
+    <div className="space-y-1.5">
+      {label && (
+        <label className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 text-foreground">
+          {label}
+        </label>
+      )}
+      <select
+        value={value}
+        onChange={(e) => onChange({ target: { value: e.target.value } })}
+        required={required}
+        className={cn(
+          "flex h-10 w-full items-center justify-between gap-2 rounded-lg border border-input bg-transparent px-3 py-2 text-sm shadow-xs transition-[color,box-shadow] outline-none",
+          "focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]",
+          "disabled:cursor-not-allowed disabled:opacity-50",
+          "dark:bg-input/30",
+          className
+        )}
+      >
+        {placeholder && <option value="">{placeholder}</option>}
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}

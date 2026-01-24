@@ -1,217 +1,15 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { persist, createJSONStorage } from 'zustand/middleware';
 import type { Task, Goal, StudySession, Exam, Subject, Profile } from '@/lib/supabase/types';
-
-// Demo user for local development
-const DEMO_USER: Profile = {
-  id: 'demo-user-id',
-  email: 'demo@student.com',
-  full_name: 'Demo Student',
-  avatar_url: null,
-  total_study_time: 1250,
-  tasks_completed: 47,
-  current_streak: 5,
-  longest_streak: 14,
-  created_at: new Date().toISOString(),
-  updated_at: new Date().toISOString(),
-};
-
-// Default subjects
-const DEFAULT_SUBJECTS: Subject[] = [
-  { id: '1', user_id: 'demo-user-id', name: 'Mathematics', color: '#ef4444', created_at: new Date().toISOString() },
-  { id: '2', user_id: 'demo-user-id', name: 'Physics', color: '#3b82f6', created_at: new Date().toISOString() },
-  { id: '3', user_id: 'demo-user-id', name: 'Computer Science', color: '#8b5cf6', created_at: new Date().toISOString() },
-  { id: '4', user_id: 'demo-user-id', name: 'English', color: '#10b981', created_at: new Date().toISOString() },
-  { id: '5', user_id: 'demo-user-id', name: 'History', color: '#f59e0b', created_at: new Date().toISOString() },
-];
-
-// Sample tasks
-const SAMPLE_TASKS: Task[] = [
-  {
-    id: '1',
-    user_id: 'demo-user-id',
-    subject_id: '1',
-    title: 'Complete Calculus Assignment',
-    description: 'Finish problems 1-20 from Chapter 5',
-    priority: 'high',
-    status: 'pending',
-    due_date: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString(),
-    completed_at: null,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-  {
-    id: '2',
-    user_id: 'demo-user-id',
-    subject_id: '3',
-    title: 'Build React Project',
-    description: 'Create a todo app with React and TypeScript',
-    priority: 'medium',
-    status: 'in_progress',
-    due_date: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString(),
-    completed_at: null,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-  {
-    id: '3',
-    user_id: 'demo-user-id',
-    subject_id: '4',
-    title: 'Read Shakespeare Essay',
-    description: 'Read and annotate the assigned essay',
-    priority: 'low',
-    status: 'pending',
-    due_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-    completed_at: null,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-  {
-    id: '4',
-    user_id: 'demo-user-id',
-    subject_id: '2',
-    title: 'Physics Lab Report',
-    description: 'Write up the pendulum experiment results',
-    priority: 'high',
-    status: 'pending',
-    due_date: new Date(Date.now() + 1 * 24 * 60 * 60 * 1000).toISOString(),
-    completed_at: null,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-];
-
-// Sample goals
-const SAMPLE_GOALS: Goal[] = [
-  {
-    id: '1',
-    user_id: 'demo-user-id',
-    title: 'Study 20 hours this week',
-    description: 'Focus on exam preparation',
-    target_value: 1200,
-    current_value: 450,
-    unit: 'minutes',
-    goal_type: 'short_term',
-    deadline: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-    status: 'active',
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-  {
-    id: '2',
-    user_id: 'demo-user-id',
-    title: 'Complete 50 tasks',
-    description: 'Finish all assignments before semester end',
-    target_value: 50,
-    current_value: 32,
-    unit: 'tasks',
-    goal_type: 'long_term',
-    deadline: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-    status: 'active',
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-  {
-    id: '3',
-    user_id: 'demo-user-id',
-    title: 'Maintain 7-day streak',
-    description: 'Study every day for a week',
-    target_value: 7,
-    current_value: 5,
-    unit: 'days',
-    goal_type: 'short_term',
-    deadline: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString(),
-    status: 'active',
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-];
-
-// Sample exams
-const SAMPLE_EXAMS: Exam[] = [
-  {
-    id: '1',
-    user_id: 'demo-user-id',
-    subject_id: '1',
-    title: 'Calculus Midterm',
-    description: 'Covers chapters 1-5',
-    exam_date: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
-    location: 'Room 301',
-    preparation_progress: 45,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-  {
-    id: '2',
-    user_id: 'demo-user-id',
-    subject_id: '2',
-    title: 'Physics Final',
-    description: 'Comprehensive exam',
-    exam_date: new Date(Date.now() + 21 * 24 * 60 * 60 * 1000).toISOString(),
-    location: 'Science Building, Room 102',
-    preparation_progress: 20,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-  {
-    id: '3',
-    user_id: 'demo-user-id',
-    subject_id: '3',
-    title: 'Programming Quiz',
-    description: 'Data structures and algorithms',
-    exam_date: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString(),
-    location: 'Online',
-    preparation_progress: 75,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-];
-
-// Sample study sessions for analytics
-const generateStudySessions = (): StudySession[] => {
-  const sessions: StudySession[] = [];
-  const now = new Date();
-  
-  for (let i = 0; i < 30; i++) {
-    const date = new Date(now);
-    date.setDate(date.getDate() - i);
-    
-    // Generate 1-4 sessions per day
-    const sessionCount = Math.floor(Math.random() * 4) + 1;
-    
-    for (let j = 0; j < sessionCount; j++) {
-      const startHour = 8 + Math.floor(Math.random() * 12);
-      const duration = [25, 45, 60, 90][Math.floor(Math.random() * 4)];
-      
-      const startedAt = new Date(date);
-      startedAt.setHours(startHour, 0, 0, 0);
-      
-      const endedAt = new Date(startedAt);
-      endedAt.setMinutes(endedAt.getMinutes() + duration);
-      
-      sessions.push({
-        id: `session-${i}-${j}`,
-        user_id: 'demo-user-id',
-        subject_id: DEFAULT_SUBJECTS[Math.floor(Math.random() * DEFAULT_SUBJECTS.length)].id,
-        task_id: null,
-        duration_minutes: duration,
-        session_type: Math.random() > 0.3 ? 'pomodoro' : 'free_study',
-        started_at: startedAt.toISOString(),
-        ended_at: endedAt.toISOString(),
-        notes: null,
-        created_at: startedAt.toISOString(),
-      });
-    }
-  }
-  
-  return sessions;
-};
+import { supabase } from '@/lib/supabase/client';
+import * as db from '@/lib/supabase/services';
 
 type Theme = 'light' | 'dark' | 'system';
 
 interface AppState {
   // Auth
   isAuthenticated: boolean;
+  isLoading: boolean;
   
   // Theme
   theme: Theme;
@@ -238,12 +36,21 @@ interface AppState {
   sidebarOpen: boolean;
   currentView: string;
   
+  // Data loading state
+  dataLoaded: boolean;
+  
   // Auth actions
   login: (email: string, password: string) => Promise<boolean>;
-  logout: () => void;
+  register: (email: string, password: string, fullName?: string) => Promise<boolean>;
+  logout: () => Promise<void>;
+  initializeAuth: () => Promise<void>;
   
   // Theme actions
   setTheme: (theme: Theme) => void;
+  
+  // Data loading
+  loadUserData: (userId: string) => Promise<void>;
+  refreshData: () => Promise<void>;
   
   // Actions
   setUser: (user: Profile | null) => void;
@@ -251,31 +58,34 @@ interface AppState {
   setCurrentView: (view: string) => void;
   
   // Task actions
-  addTask: (task: Omit<Task, 'id' | 'created_at' | 'updated_at'>) => void;
-  updateTask: (id: string, updates: Partial<Task>) => void;
-  deleteTask: (id: string) => void;
-  completeTask: (id: string) => void;
+  addTask: (task: Omit<Task, 'id' | 'created_at' | 'updated_at'>) => Promise<Task | null>;
+  updateTask: (id: string, updates: Partial<Task>) => Promise<void>;
+  deleteTask: (id: string) => Promise<void>;
+  completeTask: (id: string) => Promise<void>;
   
   // Goal actions
-  addGoal: (goal: Omit<Goal, 'id' | 'created_at' | 'updated_at'>) => void;
-  updateGoal: (id: string, updates: Partial<Goal>) => void;
-  deleteGoal: (id: string) => void;
+  addGoal: (goal: Omit<Goal, 'id' | 'created_at' | 'updated_at'>) => Promise<void>;
+  updateGoal: (id: string, updates: Partial<Goal>) => Promise<void>;
+  deleteGoal: (id: string) => Promise<void>;
   
   // Exam actions
-  addExam: (exam: Omit<Exam, 'id' | 'created_at' | 'updated_at'>) => void;
-  updateExam: (id: string, updates: Partial<Exam>) => void;
-  deleteExam: (id: string) => void;
+  addExam: (exam: Omit<Exam, 'id' | 'created_at' | 'updated_at'>) => Promise<void>;
+  updateExam: (id: string, updates: Partial<Exam>) => Promise<void>;
+  deleteExam: (id: string) => Promise<void>;
   
   // Subject actions
-  addSubject: (subject: Omit<Subject, 'id' | 'created_at'>) => void;
-  updateSubject: (id: string, updates: Partial<Subject>) => void;
-  deleteSubject: (id: string) => void;
+  addSubject: (subject: Omit<Subject, 'id' | 'created_at'>) => Promise<void>;
+  updateSubject: (id: string, updates: Partial<Subject>) => Promise<void>;
+  deleteSubject: (id: string) => Promise<void>;
   
   // Study session actions
-  addStudySession: (session: Omit<StudySession, 'id' | 'created_at'>) => void;
+  addStudySession: (session: Omit<StudySession, 'id' | 'created_at'>) => Promise<void>;
   
   // Pomodoro actions
   updatePomodoroSettings: (settings: Partial<AppState['pomodoroSettings']>) => void;
+  
+  // Canvas sync actions
+  removeOrphanedCanvasTasks: (currentCanvasIds: string[]) => Promise<number>;
 }
 
 export const useAppStore = create<AppState>()(
@@ -283,13 +93,15 @@ export const useAppStore = create<AppState>()(
     (set, get) => ({
       // Initial state
       isAuthenticated: false,
+      isLoading: true,
       theme: 'light',
       user: null,
-      subjects: DEFAULT_SUBJECTS,
-      tasks: SAMPLE_TASKS,
-      goals: SAMPLE_GOALS,
-      studySessions: generateStudySessions(),
-      exams: SAMPLE_EXAMS,
+      subjects: [],
+      tasks: [],
+      goals: [],
+      studySessions: [],
+      exams: [],
+      dataLoaded: false,
       
       pomodoroSettings: {
         focusDuration: 25,
@@ -301,24 +113,133 @@ export const useAppStore = create<AppState>()(
       sidebarOpen: true,
       currentView: 'dashboard',
       
-      // Auth actions
-      login: async (email: string, password: string) => {
-        // Simulate API call - replace with actual Supabase auth
-        await new Promise(resolve => setTimeout(resolve, 1000));
+      // Initialize auth state
+      initializeAuth: async () => {
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          
+          if (session?.user) {
+            const profile = await db.getProfile(session.user.id);
+            set({ 
+              isAuthenticated: true, 
+              user: profile,
+              isLoading: false,
+            });
+            
+            // Load user data
+            await get().loadUserData(session.user.id);
+          } else {
+            set({ isAuthenticated: false, user: null, isLoading: false });
+          }
+        } catch (error) {
+          console.error('Error initializing auth:', error);
+          set({ isAuthenticated: false, user: null, isLoading: false });
+        }
         
-        // For demo purposes, accept any email/password
-        const user: Profile = {
-          ...DEMO_USER,
-          email: email,
-          full_name: email.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
-        };
-        
-        set({ isAuthenticated: true, user });
-        return true;
+        // Listen for auth changes
+        supabase.auth.onAuthStateChange(async (event, session) => {
+          if (event === 'SIGNED_IN' && session?.user) {
+            const profile = await db.getProfile(session.user.id);
+            set({ isAuthenticated: true, user: profile });
+            await get().loadUserData(session.user.id);
+          } else if (event === 'SIGNED_OUT') {
+            set({ 
+              isAuthenticated: false, 
+              user: null,
+              tasks: [],
+              goals: [],
+              studySessions: [],
+              exams: [],
+              subjects: [],
+              dataLoaded: false,
+            });
+          }
+        });
       },
       
-      logout: () => {
-        set({ isAuthenticated: false, user: null });
+      // Load all user data from Supabase
+      loadUserData: async (userId: string) => {
+        try {
+          const [tasks, goals, studySessions, exams, subjects] = await Promise.all([
+            db.getTasks(userId),
+            db.getGoals(userId),
+            db.getStudySessions(userId),
+            db.getExams(userId),
+            db.getSubjects(userId),
+          ]);
+          
+          set({
+            tasks,
+            goals,
+            studySessions,
+            exams,
+            subjects,
+            dataLoaded: true,
+          });
+        } catch (error) {
+          console.error('Error loading user data:', error);
+        }
+      },
+      
+      // Refresh data from database
+      refreshData: async () => {
+        const user = get().user;
+        if (user) {
+          await get().loadUserData(user.id);
+        }
+      },
+      
+      // Auth actions
+      login: async (email: string, password: string) => {
+        try {
+          const { user } = await db.signIn(email, password);
+          if (user) {
+            const profile = await db.getProfile(user.id);
+            set({ isAuthenticated: true, user: profile });
+            await get().loadUserData(user.id);
+            return true;
+          }
+          return false;
+        } catch (error) {
+          console.error('Login error:', error);
+          throw error;
+        }
+      },
+      
+      register: async (email: string, password: string, fullName?: string) => {
+        try {
+          const { user } = await db.signUp(email, password, fullName);
+          if (user) {
+            // Wait a moment for the trigger to create the profile
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            const profile = await db.getProfile(user.id);
+            set({ isAuthenticated: true, user: profile });
+            await get().loadUserData(user.id);
+            return true;
+          }
+          return false;
+        } catch (error) {
+          console.error('Registration error:', error);
+          throw error;
+        }
+      },
+      
+      logout: async () => {
+        try {
+          await db.signOut();
+          set({ 
+            isAuthenticated: false, 
+            user: null,
+            tasks: [],
+            goals: [],
+            studySessions: [],
+            exams: [],
+            subjects: [],
+            dataLoaded: false,
+          });
+        } catch (error) {
+          console.error('Logout error:', error);
+        }
       },
       
       // Theme actions
@@ -330,144 +251,193 @@ export const useAppStore = create<AppState>()(
       setCurrentView: (view) => set({ currentView: view }),
       
       // Task actions
-      addTask: (task) => {
-        const newTask: Task = {
-          ...task,
-          id: Math.random().toString(36).substring(2),
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        };
-        set((state) => ({ tasks: [...state.tasks, newTask] }));
+      addTask: async (taskData) => {
+        const user = get().user;
+        if (!user) return null;
+        
+        const newTask = await db.createTask({
+          ...taskData,
+          user_id: user.id,
+        });
+        
+        if (newTask) {
+          set((state) => ({ tasks: [newTask, ...state.tasks] }));
+        }
+        
+        return newTask;
       },
       
-      updateTask: (id, updates) => {
-        set((state) => ({
-          tasks: state.tasks.map((task) =>
-            task.id === id
-              ? { ...task, ...updates, updated_at: new Date().toISOString() }
-              : task
-          ),
-        }));
+      updateTask: async (id, updates) => {
+        const result = await db.updateTask(id, updates);
+        if (result) {
+          set((state) => ({
+            tasks: state.tasks.map((task) =>
+              task.id === id ? { ...task, ...result } : task
+            ),
+          }));
+        }
       },
       
-      deleteTask: (id) => {
-        set((state) => ({
-          tasks: state.tasks.filter((task) => task.id !== id),
-        }));
+      deleteTask: async (id) => {
+        const success = await db.deleteTask(id);
+        if (success) {
+          set((state) => ({
+            tasks: state.tasks.filter((task) => task.id !== id),
+          }));
+        }
       },
       
-      completeTask: (id) => {
-        set((state) => ({
-          tasks: state.tasks.map((task) =>
-            task.id === id
-              ? {
-                  ...task,
-                  status: 'completed' as const,
-                  completed_at: new Date().toISOString(),
-                  updated_at: new Date().toISOString(),
-                }
-              : task
-          ),
-          user: state.user
-            ? { ...state.user, tasks_completed: state.user.tasks_completed + 1 }
-            : null,
-        }));
+      completeTask: async (id) => {
+        const result = await db.completeTask(id);
+        const user = get().user;
+        
+        if (result) {
+          set((state) => ({
+            tasks: state.tasks.map((task) =>
+              task.id === id ? result : task
+            ),
+          }));
+          
+          // Update user stats
+          if (user) {
+            const updatedProfile = await db.updateProfile(user.id, {
+              tasks_completed: user.tasks_completed + 1,
+            });
+            if (updatedProfile) {
+              set({ user: updatedProfile });
+            }
+          }
+        }
       },
       
       // Goal actions
-      addGoal: (goal) => {
-        const newGoal: Goal = {
-          ...goal,
-          id: Math.random().toString(36).substring(2),
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        };
-        set((state) => ({ goals: [...state.goals, newGoal] }));
+      addGoal: async (goalData) => {
+        const user = get().user;
+        if (!user) return;
+        
+        const newGoal = await db.createGoal({
+          ...goalData,
+          user_id: user.id,
+        });
+        
+        if (newGoal) {
+          set((state) => ({ goals: [newGoal, ...state.goals] }));
+        }
       },
       
-      updateGoal: (id, updates) => {
-        set((state) => ({
-          goals: state.goals.map((goal) =>
-            goal.id === id
-              ? { ...goal, ...updates, updated_at: new Date().toISOString() }
-              : goal
-          ),
-        }));
+      updateGoal: async (id, updates) => {
+        const result = await db.updateGoal(id, updates);
+        if (result) {
+          set((state) => ({
+            goals: state.goals.map((goal) =>
+              goal.id === id ? { ...goal, ...result } : goal
+            ),
+          }));
+        }
       },
       
-      deleteGoal: (id) => {
-        set((state) => ({
-          goals: state.goals.filter((goal) => goal.id !== id),
-        }));
+      deleteGoal: async (id) => {
+        const success = await db.deleteGoal(id);
+        if (success) {
+          set((state) => ({
+            goals: state.goals.filter((goal) => goal.id !== id),
+          }));
+        }
       },
       
       // Exam actions
-      addExam: (exam) => {
-        const newExam: Exam = {
-          ...exam,
-          id: Math.random().toString(36).substring(2),
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        };
-        set((state) => ({ exams: [...state.exams, newExam] }));
+      addExam: async (examData) => {
+        const user = get().user;
+        if (!user) return;
+        
+        const newExam = await db.createExam({
+          ...examData,
+          user_id: user.id,
+        });
+        
+        if (newExam) {
+          set((state) => ({ exams: [...state.exams, newExam] }));
+        }
       },
       
-      updateExam: (id, updates) => {
-        set((state) => ({
-          exams: state.exams.map((exam) =>
-            exam.id === id
-              ? { ...exam, ...updates, updated_at: new Date().toISOString() }
-              : exam
-          ),
-        }));
+      updateExam: async (id, updates) => {
+        const result = await db.updateExam(id, updates);
+        if (result) {
+          set((state) => ({
+            exams: state.exams.map((exam) =>
+              exam.id === id ? { ...exam, ...result } : exam
+            ),
+          }));
+        }
       },
       
-      deleteExam: (id) => {
-        set((state) => ({
-          exams: state.exams.filter((exam) => exam.id !== id),
-        }));
+      deleteExam: async (id) => {
+        const success = await db.deleteExam(id);
+        if (success) {
+          set((state) => ({
+            exams: state.exams.filter((exam) => exam.id !== id),
+          }));
+        }
       },
       
       // Subject actions
-      addSubject: (subject) => {
-        const newSubject: Subject = {
-          ...subject,
-          id: Math.random().toString(36).substring(2),
-          created_at: new Date().toISOString(),
-        };
-        set((state) => ({ subjects: [...state.subjects, newSubject] }));
+      addSubject: async (subjectData) => {
+        const user = get().user;
+        if (!user) return;
+        
+        const newSubject = await db.createSubject({
+          ...subjectData,
+          user_id: user.id,
+        });
+        
+        if (newSubject) {
+          set((state) => ({ subjects: [...state.subjects, newSubject] }));
+        }
       },
       
-      updateSubject: (id, updates) => {
-        set((state) => ({
-          subjects: state.subjects.map((subject) =>
-            subject.id === id ? { ...subject, ...updates } : subject
-          ),
-        }));
+      updateSubject: async (id, updates) => {
+        const result = await db.updateSubject(id, updates);
+        if (result) {
+          set((state) => ({
+            subjects: state.subjects.map((subject) =>
+              subject.id === id ? { ...subject, ...result } : subject
+            ),
+          }));
+        }
       },
       
-      deleteSubject: (id) => {
-        set((state) => ({
-          subjects: state.subjects.filter((subject) => subject.id !== id),
-        }));
+      deleteSubject: async (id) => {
+        const success = await db.deleteSubject(id);
+        if (success) {
+          set((state) => ({
+            subjects: state.subjects.filter((subject) => subject.id !== id),
+          }));
+        }
       },
       
       // Study session actions
-      addStudySession: (session) => {
-        const newSession: StudySession = {
-          ...session,
-          id: Math.random().toString(36).substring(2),
-          created_at: new Date().toISOString(),
-        };
-        set((state) => ({
-          studySessions: [...state.studySessions, newSession],
-          user: state.user
-            ? {
-                ...state.user,
-                total_study_time: state.user.total_study_time + session.duration_minutes,
-              }
-            : null,
-        }));
+      addStudySession: async (sessionData) => {
+        const user = get().user;
+        if (!user) return;
+        
+        const newSession = await db.createStudySession({
+          ...sessionData,
+          user_id: user.id,
+        });
+        
+        if (newSession) {
+          set((state) => ({
+            studySessions: [newSession, ...state.studySessions],
+          }));
+          
+          // Update user's total study time
+          const updatedProfile = await db.updateProfile(user.id, {
+            total_study_time: user.total_study_time + sessionData.duration_minutes,
+          });
+          if (updatedProfile) {
+            set({ user: updatedProfile });
+          }
+        }
       },
       
       // Pomodoro actions
@@ -476,17 +446,31 @@ export const useAppStore = create<AppState>()(
           pomodoroSettings: { ...state.pomodoroSettings, ...settings },
         }));
       },
+      
+      // Canvas sync - remove tasks that no longer exist in Canvas
+      removeOrphanedCanvasTasks: async (currentCanvasIds: string[]) => {
+        const user = get().user;
+        if (!user) return 0;
+        
+        const removedCount = await db.removeOrphanedCanvasTasks(user.id, currentCanvasIds);
+        
+        if (removedCount > 0) {
+          // Refresh tasks from database
+          const tasks = await db.getTasks(user.id);
+          set({ tasks });
+        }
+        
+        return removedCount;
+      },
     }),
     {
-      name: 'study-app-storage',
+      name: 'orderly-app-storage',
+      storage: createJSONStorage(() => localStorage),
       partialize: (state) => ({
-        tasks: state.tasks,
-        goals: state.goals,
-        exams: state.exams,
-        subjects: state.subjects,
-        studySessions: state.studySessions,
+        // Only persist UI preferences and settings locally
+        theme: state.theme,
         pomodoroSettings: state.pomodoroSettings,
-        user: state.user,
+        sidebarOpen: state.sidebarOpen,
       }),
     }
   )

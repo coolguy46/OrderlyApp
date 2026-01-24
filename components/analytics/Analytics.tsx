@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useEffect } from 'react';
 import { useAppStore } from '@/lib/store';
-import { Card, CardHeader, ProgressBar } from '@/components/ui';
+import { Card, CardHeader, CardTitle, CardDescription, ProgressBar } from '@/components/ui';
 import { motion } from 'framer-motion';
 import { formatDuration, cn } from '@/lib/utils';
 import {
@@ -236,11 +236,13 @@ export function Analytics() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Daily Study Time Chart */}
         <Card>
-          <CardHeader
-            title="Study Time This Week"
-            subtitle="Daily study hours for the past 7 days"
-            icon={<Calendar className="w-5 h-5 text-indigo-400" />}
-          />
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <Calendar className="w-5 h-5 text-indigo-400" />
+              <CardTitle>Study Time This Week</CardTitle>
+            </div>
+            <CardDescription>Daily study hours for the past 7 days</CardDescription>
+          </CardHeader>
           <div className="h-72 mt-4">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={dailyData}>
@@ -280,11 +282,13 @@ export function Analytics() {
 
         {/* Study Time by Subject */}
         <Card>
-          <CardHeader
-            title="Time by Subject"
-            subtitle="Distribution of study time across subjects"
-            icon={<BookOpen className="w-5 h-5 text-indigo-400" />}
-          />
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <BookOpen className="w-5 h-5 text-indigo-400" />
+              <CardTitle>Time by Subject</CardTitle>
+            </div>
+            <CardDescription>Distribution of study time across subjects</CardDescription>
+          </CardHeader>
           <div className="h-72 mt-4 flex items-center">
             <div className="w-1/2">
               <ResponsiveContainer width="100%" height={200}>
@@ -335,11 +339,13 @@ export function Analytics() {
 
         {/* Task Completion by Priority */}
         <Card>
-          <CardHeader
-            title="Task Completion"
-            subtitle="Progress by priority level"
-            icon={<Target className="w-5 h-5 text-indigo-400" />}
-          />
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <Target className="w-5 h-5 text-indigo-400" />
+              <CardTitle>Task Completion</CardTitle>
+            </div>
+            <CardDescription>Progress by priority level</CardDescription>
+          </CardHeader>
           <div className="space-y-6 mt-4">
             <div>
               <div className="flex items-center justify-between mb-2">
@@ -408,15 +414,17 @@ export function Analytics() {
 
         {/* Productivity by Hour */}
         <Card>
-          <CardHeader
-            title="Peak Productivity Hours"
-            subtitle={
-              peakHour
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <TrendingUp className="w-5 h-5 text-indigo-400" />
+              <CardTitle>Peak Productivity Hours</CardTitle>
+            </div>
+            <CardDescription>
+              {peakHour
                 ? `Your most productive time: ${peakHour.label}`
-                : 'Start studying to see your patterns'
-            }
-            icon={<TrendingUp className="w-5 h-5 text-indigo-400" />}
-          />
+                : 'Start studying to see your patterns'}
+            </CardDescription>
+          </CardHeader>
           <div className="h-48 mt-4">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={hourlyData.filter((h) => h.hour >= 6 && h.hour <= 23)}>

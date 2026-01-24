@@ -4,8 +4,9 @@ import { useState, useEffect } from 'react';
 import { MainLayout } from '@/components/layout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, Button, Badge, Input } from '@/components/ui';
 import { CanvasAssignment } from '@/lib/integrations/canvas';
-import { useCanvasSync, formatTimeUntilSync, formatLastSync } from '@/lib/integrations/useCanvasSync';
+import { useCanvasSyncSupabase, formatTimeUntilSync, formatLastSync } from '@/lib/integrations/useCanvasSyncSupabase';
 import { useAppStore } from '@/lib/store';
+import * as db from '@/lib/supabase/services';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Link2,
@@ -38,9 +39,10 @@ function CanvasIcon({ className }: { className?: string }) {
 }
 
 export default function IntegrationsPage() {
-  const { addTask, tasks } = useAppStore();
+  const { addTask, tasks, user, refreshData } = useAppStore();
+  const [removedCount, setRemovedCount] = useState(0);
 
-  // Canvas live sync hook
+  // Canvas live sync hook with Supabase
   const {
     assignments: canvasAssignments,
     isLoading: isCanvasLoading,
@@ -54,14 +56,17 @@ export default function IntegrationsPage() {
     toggleAutoSync,
     setSyncInterval,
     clearData,
-  } = useCanvasSync({
+    removedAssignmentsCount,
+  } = useCanvasSyncSupabase({
+    userId: user?.id || null,
     defaultInterval: 15, // 15 minutes
-    onSyncComplete: (allAssignments) => {
-      // Check against actual tasks in the store, not a separate tracking array
-      // This allows re-importing tasks that were deleted
-      let importedCount = 0;
+    onSyncComplete: async (allAssignments, removed) => {
+      if (!user) return;
       
-      // Get existing Canvas task external IDs from the store
+      let importedCount = 0;
+      setRemovedCount(removed);
+      
+      // Get existing Canvas task external IDs from the database
       const existingCanvasExternalIds = new Set(
         tasks
           .filter(t => t.source === 'canvas' && t.external_id)
@@ -76,8 +81,9 @@ export default function IntegrationsPage() {
         // Skip if already exists in the store (by external_id)
         if (existingCanvasExternalIds.has(assignment.id)) continue;
 
-        addTask({
-          user_id: 'demo-user',
+        // Create task in Supabase
+        await addTask({
+          user_id: user.id,
           title: `[Canvas] ${assignment.title}`,
           description: assignment.description || `Course: ${assignment.courseName}`,
           priority: assignment.type === 'exam' ? 'high' : 'medium',
@@ -85,7 +91,6 @@ export default function IntegrationsPage() {
           due_date: dueDate.toISOString(),
           subject_id: null,
           completed_at: null,
-          // Store Canvas metadata for duplicate detection
           source: 'canvas',
           external_id: assignment.id,
           external_url: assignment.url || null,
@@ -94,8 +99,11 @@ export default function IntegrationsPage() {
         });
         importedCount++;
       }
-      if (importedCount > 0) {
-        console.log(`Canvas sync: imported ${importedCount} new assignments`);
+      
+      if (importedCount > 0 || removed > 0) {
+        console.log(`Canvas sync: imported ${importedCount} new assignments, removed ${removed} submitted/deleted assignments`);
+        // Refresh data to reflect changes
+        await refreshData();
       }
     },
   });

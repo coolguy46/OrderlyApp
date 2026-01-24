@@ -63,4 +63,4 @@ export { Checkbox } from './checkbox';
 // Custom components
 export { Modal } from './Modal';
 export { CircularProgress, ProgressBar } from './custom-progress';
-export { PriorityBadge, StatusBadge, SubjectBadge, StatCard } from './custom-components';
+export { PriorityBadge, StatusBadge, SubjectBadge, StatCard, SelectField } from './custom-components';

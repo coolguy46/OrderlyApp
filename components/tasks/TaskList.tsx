@@ -20,31 +20,28 @@ import {
   ListFilter,
   CheckCircle2,
   Clock,
-  AlertCircle,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 type SortOption = 'due_date' | 'priority' | 'created_at' | 'title';
-type FilterOption = 'all' | TaskStatus | TaskPriority;
+type FilterOption = 'pending' | 'completed';
 
 export function TaskList() {
   const { tasks, subjects } = useAppStore();
   const [showForm, setShowForm] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [sortBy, setSortBy] = useState<SortOption>('due_date');
-  const [filterBy, setFilterBy] = useState<FilterOption>('all');
+  const [filterBy, setFilterBy] = useState<FilterOption>('pending');
   const [filterSubject, setFilterSubject] = useState<string>('all');
 
   const filteredAndSortedTasks = useMemo(() => {
     let filtered = [...tasks];
 
-    // Filter by status or priority
-    if (filterBy !== 'all') {
-      if (['pending', 'in_progress', 'completed'].includes(filterBy)) {
-        filtered = filtered.filter((t) => t.status === filterBy);
-      } else if (['high', 'medium', 'low'].includes(filterBy)) {
-        filtered = filtered.filter((t) => t.priority === filterBy);
-      }
+    // Filter by status - pending includes both pending and in_progress
+    if (filterBy === 'pending') {
+      filtered = filtered.filter((t) => t.status === 'pending' || t.status === 'in_progress');
+    } else if (filterBy === 'completed') {
+      filtered = filtered.filter((t) => t.status === 'completed');
     }
 
     // Filter by subject
@@ -77,8 +74,7 @@ export function TaskList() {
   const stats = useMemo(() => {
     return {
       total: tasks.length,
-      pending: tasks.filter((t) => t.status === 'pending').length,
-      inProgress: tasks.filter((t) => t.status === 'in_progress').length,
+      pending: tasks.filter((t) => t.status === 'pending' || t.status === 'in_progress').length,
       completed: tasks.filter((t) => t.status === 'completed').length,
     };
   }, [tasks]);
@@ -88,70 +84,54 @@ export function TaskList() {
     setShowForm(true);
   };
 
-  const filterOptions = ['all', 'pending', 'in_progress', 'completed'] as const;
+  const filterOptions = ['pending', 'completed'] as const;
 
   return (
-    <div className="space-y-8">
-      {/* Stats */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-        <motion.div whileHover={{ scale: 1.02 }}>
+    <div className="space-y-5">
+      {/* Stats - Compact */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <motion.div whileHover={{ scale: 1.01 }}>
           <Card className="bg-card/50 backdrop-blur-xl border-border/50">
-            <CardContent className="p-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2.5 bg-indigo-500/20 rounded-lg">
-                  <ListFilter className="w-5 h-5 text-indigo-400" />
+            <CardContent className="p-3">
+              <div className="flex items-center gap-2">
+                <div className="p-2 bg-indigo-500/20 rounded-lg">
+                  <ListFilter className="w-4 h-4 text-indigo-400" />
                 </div>
                 <div>
-                  <p className="text-2xl font-bold">{stats.total}</p>
-                  <p className="text-sm text-muted-foreground">Total Tasks</p>
+                  <p className="text-lg font-bold">{stats.total}</p>
+                  <p className="text-xs text-muted-foreground">Total Tasks</p>
                 </div>
               </div>
             </CardContent>
           </Card>
         </motion.div>
 
-        <motion.div whileHover={{ scale: 1.02 }}>
+        <motion.div whileHover={{ scale: 1.01 }}>
           <Card className="bg-card/50 backdrop-blur-xl border-border/50">
-            <CardContent className="p-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2.5 bg-gray-500/20 rounded-lg">
-                  <Clock className="w-5 h-5 text-gray-400" />
+            <CardContent className="p-3">
+              <div className="flex items-center gap-2">
+                <div className="p-2 bg-amber-500/20 rounded-lg">
+                  <Clock className="w-4 h-4 text-amber-400" />
                 </div>
                 <div>
-                  <p className="text-2xl font-bold">{stats.pending}</p>
-                  <p className="text-sm text-muted-foreground">Pending</p>
+                  <p className="text-lg font-bold">{stats.pending}</p>
+                  <p className="text-xs text-muted-foreground">Pending</p>
                 </div>
               </div>
             </CardContent>
           </Card>
         </motion.div>
 
-        <motion.div whileHover={{ scale: 1.02 }}>
+        <motion.div whileHover={{ scale: 1.01 }}>
           <Card className="bg-card/50 backdrop-blur-xl border-border/50">
-            <CardContent className="p-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2.5 bg-blue-500/20 rounded-lg">
-                  <AlertCircle className="w-5 h-5 text-blue-400" />
+            <CardContent className="p-3">
+              <div className="flex items-center gap-2">
+                <div className="p-2 bg-green-500/20 rounded-lg">
+                  <CheckCircle2 className="w-4 h-4 text-green-400" />
                 </div>
                 <div>
-                  <p className="text-2xl font-bold">{stats.inProgress}</p>
-                  <p className="text-sm text-muted-foreground">In Progress</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </motion.div>
-
-        <motion.div whileHover={{ scale: 1.02 }}>
-          <Card className="bg-card/50 backdrop-blur-xl border-border/50">
-            <CardContent className="p-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2.5 bg-green-500/20 rounded-lg">
-                  <CheckCircle2 className="w-5 h-5 text-green-400" />
-                </div>
-                <div>
-                  <p className="text-2xl font-bold">{stats.completed}</p>
-                  <p className="text-sm text-muted-foreground">Completed</p>
+                  <p className="text-lg font-bold">{stats.completed}</p>
+                  <p className="text-xs text-muted-foreground">Completed</p>
                 </div>
               </div>
             </CardContent>
@@ -160,31 +140,29 @@ export function TaskList() {
       </div>
 
       {/* Filters and Actions */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div className="flex flex-wrap items-center gap-3">
-          {/* Filter by Status */}
-          <div className="flex items-center gap-2 bg-muted/50 rounded-lg p-1.5">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Filter by Status - Only Pending and Completed */}
+          <div className="flex items-center gap-1 bg-muted/50 rounded-lg p-1">
             {filterOptions.map((filter) => (
               <button
                 key={filter}
-                onClick={() => setFilterBy(filter as FilterOption)}
+                onClick={() => setFilterBy(filter)}
                 className={cn(
-                  'px-4 py-2 text-[clamp(0.65rem,1.5vw,0.75rem)] font-medium rounded-md transition-all',
+                  'px-3 py-1.5 text-xs font-medium rounded-md transition-all',
                   filterBy === filter
                     ? 'bg-primary text-primary-foreground shadow-sm'
                     : 'text-muted-foreground hover:text-foreground hover:bg-muted'
                 )}
               >
-                {filter === 'all' 
-                  ? 'All' 
-                  : filter.replace('_', ' ').replace(/\b\w/g, (l) => l.toUpperCase())}
+                {filter.charAt(0).toUpperCase() + filter.slice(1)}
               </button>
             ))}
           </div>
 
           {/* Filter by Subject */}
           <Select value={filterSubject} onValueChange={setFilterSubject}>
-            <SelectTrigger className="w-[160px]">
+            <SelectTrigger className="w-[140px] h-8 text-xs">
               <SelectValue placeholder="All Subjects" />
             </SelectTrigger>
             <SelectContent>
@@ -199,7 +177,7 @@ export function TaskList() {
 
           {/* Sort */}
           <Select value={sortBy} onValueChange={(v) => setSortBy(v as SortOption)}>
-            <SelectTrigger className="w-[160px]">
+            <SelectTrigger className="w-[120px] h-8 text-xs">
               <SelectValue placeholder="Sort by" />
             </SelectTrigger>
             <SelectContent>
@@ -211,26 +189,26 @@ export function TaskList() {
           </Select>
         </div>
 
-        <Button onClick={() => setShowForm(true)}>
-          <Plus className="w-4 h-4 mr-2" />
+        <Button onClick={() => setShowForm(true)} size="sm">
+          <Plus className="w-4 h-4 mr-1" />
           Add Task
         </Button>
       </div>
 
       {/* Task List */}
-      <div className="space-y-4">
+      <div className="space-y-2">
         <AnimatePresence mode="popLayout">
           {filteredAndSortedTasks.length === 0 ? (
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
-              className="text-center py-16"
+              className="text-center py-12"
             >
-              <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-muted flex items-center justify-center">
-                <CheckCircle2 className="w-8 h-8 text-muted-foreground" />
+              <div className="w-12 h-12 mx-auto mb-3 rounded-full bg-muted flex items-center justify-center">
+                <CheckCircle2 className="w-6 h-6 text-muted-foreground" />
               </div>
-              <p className="text-foreground font-medium">No tasks found</p>
-              <p className="text-sm text-muted-foreground mt-1">
+              <p className="text-foreground font-medium text-sm">No tasks found</p>
+              <p className="text-xs text-muted-foreground mt-1">
                 Create a new task to get started
               </p>
             </motion.div>

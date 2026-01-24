@@ -3,7 +3,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import { Exam } from '@/lib/supabase/types';
 import { useAppStore } from '@/lib/store';
-import { Card, CardHeader, ProgressBar, Button, Modal, Input, Textarea, Select, SubjectBadge } from '@/components/ui';
+import { Card, CardHeader, ProgressBar, Button, Modal, Input, Textarea, SelectField, SubjectBadge } from '@/components/ui';
 import { motion, AnimatePresence } from 'framer-motion';
 import { formatDate, getDaysUntil, cn } from '@/lib/utils';
 import {
@@ -31,8 +31,8 @@ function ExamCard({ exam, onEdit }: ExamCardProps) {
   const isUrgent = daysUntil <= 7 && daysUntil >= 0;
   const isPast = daysUntil < 0;
 
-  const handleProgressChange = (value: number) => {
-    updateExam(exam.id, { preparation_progress: Math.min(100, Math.max(0, value)) });
+  const handleProgressChange = async (value: number) => {
+    await updateExam(exam.id, { preparation_progress: Math.min(100, Math.max(0, value)) });
   };
 
   return (
@@ -205,11 +205,11 @@ function ExamForm({ isOpen, onClose, exam }: ExamFormProps) {
   const [subjectId, setSubjectId] = useState(exam?.subject_id || '');
   const [progress, setProgress] = useState(exam?.preparation_progress?.toString() || '0');
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     const examData = {
-      user_id: user?.id || 'demo-user-id',
+      user_id: user?.id || '',
       title,
       description: description || null,
       exam_date: new Date(examDate).toISOString(),
@@ -219,9 +219,9 @@ function ExamForm({ isOpen, onClose, exam }: ExamFormProps) {
     };
 
     if (exam) {
-      updateExam(exam.id, examData);
+      await updateExam(exam.id, examData);
     } else {
-      addExam(examData);
+      await addExam(examData);
     }
 
     onClose();
@@ -281,7 +281,7 @@ function ExamForm({ isOpen, onClose, exam }: ExamFormProps) {
         </div>
 
         <div className="grid grid-cols-2 gap-4">
-          <Select
+          <SelectField
             label="Subject"
             options={[
               { value: '', label: 'Select Subject' },
@@ -312,7 +312,7 @@ function ExamForm({ isOpen, onClose, exam }: ExamFormProps) {
           >
             Cancel
           </Button>
-          <Button type="submit" variant="primary" className="flex-1">
+          <Button type="submit" variant="default" className="flex-1">
             {exam ? 'Update Exam' : 'Add Exam'}
           </Button>
         </div>

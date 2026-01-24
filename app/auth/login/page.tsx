@@ -33,8 +33,8 @@ export default function LoginPage() {
       } else {
         setError('Invalid email or password');
       }
-    } catch (err) {
-      setError('An error occurred. Please try again.');
+    } catch (err: any) {
+      setError(err?.message || 'An error occurred. Please try again.');
     } finally {
       setIsLoading(false);
     }

@@ -20,20 +20,20 @@ interface AuthGuardProps {
 export function AuthGuard({ children }: AuthGuardProps) {
   const router = useRouter();
   const pathname = usePathname();
-  const { isAuthenticated } = useAppStore();
-  const [isLoading, setIsLoading] = useState(true);
+  const { isAuthenticated, isLoading: authLoading, initializeAuth } = useAppStore();
+  const [initialized, setInitialized] = useState(false);
 
   useEffect(() => {
-    // Small delay to allow store hydration
-    const timer = setTimeout(() => {
-      setIsLoading(false);
-    }, 100);
-
-    return () => clearTimeout(timer);
-  }, []);
+    // Initialize auth on mount
+    const init = async () => {
+      await initializeAuth();
+      setInitialized(true);
+    };
+    init();
+  }, [initializeAuth]);
 
   useEffect(() => {
-    if (isLoading) return;
+    if (!initialized || authLoading) return;
 
     const isPublicRoute = PUBLIC_ROUTES.some(route => pathname.startsWith(route));
 
@@ -44,10 +44,10 @@ export function AuthGuard({ children }: AuthGuardProps) {
       // Redirect to dashboard if authenticated and trying to access auth pages
       router.push('/');
     }
-  }, [isAuthenticated, pathname, router, isLoading]);
+  }, [isAuthenticated, pathname, router, initialized, authLoading]);
 
   // Show loading spinner while checking auth
-  if (isLoading) {
+  if (!initialized || authLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="flex flex-col items-center gap-4">

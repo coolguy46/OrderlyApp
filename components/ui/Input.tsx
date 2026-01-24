@@ -1,10 +1,18 @@
 import * as React from "react"
 
 import { cn } from "@/lib/utils"
+import { Label } from "./label"
 
-function Input({ className, type, ...props }: React.ComponentProps<"input">) {
-  return (
+interface InputProps extends React.ComponentProps<"input"> {
+  label?: string;
+}
+
+function Input({ className, type, label, id, ...props }: InputProps) {
+  const inputId = id || label?.toLowerCase().replace(/\s+/g, '-');
+  
+  const inputElement = (
     <input
+      id={inputId}
       type={type}
       data-slot="input"
       className={cn(
@@ -15,7 +23,18 @@ function Input({ className, type, ...props }: React.ComponentProps<"input">) {
       )}
       {...props}
     />
-  )
+  );
+
+  if (label) {
+    return (
+      <div className="space-y-1.5">
+        <Label htmlFor={inputId}>{label}</Label>
+        {inputElement}
+      </div>
+    );
+  }
+
+  return inputElement;
 }
 
 export { Input }

@@ -29,8 +29,8 @@ export function Header() {
   const router = useRouter();
   const { user, logout } = useAppStore();
 
-  const handleLogout = () => {
-    logout();
+  const handleLogout = async () => {
+    await logout();
     router.push('/auth/login');
   };
 
@@ -74,7 +74,7 @@ export function Header() {
                 <div className="flex flex-col">
                   <span>{user?.full_name || 'Demo User'}</span>
                   <span className="text-xs font-normal text-muted-foreground">
-                    Level {user?.level || 1} • {user?.xp || 0} XP
+                    {user?.tasks_completed || 0} tasks completed • {user?.current_streak || 0} day streak
                   </span>
                 </div>
               </DropdownMenuLabel>

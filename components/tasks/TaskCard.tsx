@@ -45,16 +45,16 @@ export function TaskCard({ task, onEdit, compact = false }: TaskCardProps) {
   // Check if task is from external source (Canvas/Google Classroom)
   const isExternalTask = task.source && task.source !== 'manual';
 
-  const handleComplete = () => {
+  const handleComplete = async () => {
     if (task.status === 'completed') {
-      updateTask(task.id, { status: 'pending', completed_at: null });
+      await updateTask(task.id, { status: 'pending', completed_at: null });
     } else {
-      completeTask(task.id);
+      await completeTask(task.id);
     }
   };
 
-  const handleStartProgress = () => {
-    updateTask(task.id, { status: 'in_progress' });
+  const handleStartProgress = async () => {
+    await updateTask(task.id, { status: 'in_progress' });
   };
 
   if (compact) {

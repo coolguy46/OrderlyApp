@@ -150,7 +150,7 @@ export function Sidebar() {
                     {user?.full_name || 'Demo User'}
                   </p>
                   <p className="text-[10px] text-muted-foreground truncate">
-                    Level {user?.level || 1}
+                    {user?.current_streak || 0} day streak
                   </p>
                 </motion.div>
               )}

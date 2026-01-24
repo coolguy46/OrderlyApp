@@ -51,9 +51,9 @@ function GoalCard({ goal, onEdit }: GoalCardProps) {
   const daysLeft = goal.deadline ? getDaysUntil(goal.deadline) : null;
   const isCompleted = goal.status === 'completed' || progress >= 100;
 
-  const handleIncrement = () => {
+  const handleIncrement = async () => {
     const newValue = Math.min(goal.current_value + 1, goal.target_value);
-    updateGoal(goal.id, {
+    await updateGoal(goal.id, {
       current_value: newValue,
       status: newValue >= goal.target_value ? 'completed' : 'active',
     });
@@ -194,11 +194,11 @@ function GoalForm({ isOpen, onClose, goal }: GoalFormProps) {
     }
   }, [goal, isOpen]);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
     const goalData = {
-      user_id: user?.id || 'demo-user-id',
+      user_id: user?.id || '',
       title,
       description: description || null,
       target_value: parseInt(targetValue) || 10,
@@ -210,9 +210,9 @@ function GoalForm({ isOpen, onClose, goal }: GoalFormProps) {
     };
 
     if (goal) {
-      updateGoal(goal.id, goalData);
+      await updateGoal(goal.id, goalData);
     } else {
-      addGoal(goalData);
+      await addGoal(goalData);
     }
 
     onClose();

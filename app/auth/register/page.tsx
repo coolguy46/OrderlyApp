@@ -22,7 +22,7 @@ const features = [
 
 export default function RegisterPage() {
   const router = useRouter();
-  const { login } = useAppStore();
+  const { register, login } = useAppStore();
   const [isLoading, setIsLoading] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
@@ -53,13 +53,12 @@ export default function RegisterPage() {
     setIsLoading(true);
     
     try {
-      // For demo, just log them in after "registration"
-      const success = await login(formData.email, formData.password);
+      const success = await register(formData.email, formData.password, formData.name);
       if (success) {
         router.push('/');
       }
-    } catch (err) {
-      setError('Registration failed. Please try again.');
+    } catch (err: any) {
+      setError(err?.message || 'Registration failed. Please try again.');
     } finally {
       setIsLoading(false);
     }
