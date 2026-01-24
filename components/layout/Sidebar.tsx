@@ -48,8 +48,8 @@ export function Sidebar() {
       {/* Logo */}
       <div className="h-16 flex items-center px-4 border-b border-border/40">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center flex-shrink-0 shadow-lg">
-            <Sparkles className="w-5 h-5 text-white" />
+          <div className="w-10 h-10 rounded-xl flex-shrink-0 shadow-lg">
+            <img src="/logo.svg" alt="Orderly Logo" className="w-10 h-10" />
           </div>
           <AnimatePresence>
             {sidebarOpen && (
@@ -59,7 +59,7 @@ export function Sidebar() {
                 exit={{ opacity: 0, x: -10 }}
                 className="font-semibold text-base whitespace-nowrap"
               >
-                StudyFlow
+                Orderly
               </motion.span>
             )}
           </AnimatePresence>

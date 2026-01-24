@@ -70,8 +70,8 @@ export default function LoginPage() {
         <Card className="border-border/50 bg-card/80 backdrop-blur-xl">
           <CardHeader className="text-center space-y-4">
             {/* Logo */}
-            <div className="mx-auto w-12 h-12 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center">
-              <Sparkles className="w-6 h-6 text-white" />
+            <div className="mx-auto w-12 h-12 rounded-xl flex items-center justify-center">
+              <img src="/logo.svg" alt="Orderly Logo" className="w-12 h-12" />
             </div>
             <div>
               <CardTitle className="text-2xl font-bold">Welcome back</CardTitle>
