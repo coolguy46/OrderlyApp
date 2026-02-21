@@ -32,18 +32,19 @@ export function PriorityBadge({ priority, className }: PriorityBadgeProps) {
 
 // Status Badge
 interface StatusBadgeProps {
-  status: 'todo' | 'in_progress' | 'completed' | 'active' | 'paused' | 'pending';
+  status: 'todo' | 'in_progress' | 'completed' | 'active' | 'paused' | 'pending' | 'overdue';
   className?: string;
 }
 
 export function StatusBadge({ status, className }: StatusBadgeProps) {
   const variants = {
-    todo: 'bg-slate-500/20 text-slate-300 border-slate-500/30',
-    pending: 'bg-slate-500/20 text-slate-300 border-slate-500/30',
-    in_progress: 'bg-blue-500/20 text-blue-300 border-blue-500/30',
-    completed: 'bg-green-500/20 text-green-300 border-green-500/30',
-    active: 'bg-green-500/20 text-green-300 border-green-500/30',
-    paused: 'bg-yellow-500/20 text-yellow-300 border-yellow-500/30',
+    todo: 'bg-slate-500/20 text-slate-500 dark:text-slate-300 border-slate-500/30',
+    pending: 'bg-slate-500/20 text-slate-500 dark:text-slate-300 border-slate-500/30',
+    in_progress: 'bg-blue-500/20 text-blue-600 dark:text-blue-300 border-blue-500/30',
+    completed: 'bg-green-500/20 text-green-600 dark:text-green-300 border-green-500/30',
+    active: 'bg-green-500/20 text-green-600 dark:text-green-300 border-green-500/30',
+    paused: 'bg-yellow-500/20 text-yellow-600 dark:text-yellow-300 border-yellow-500/30',
+    overdue: 'bg-red-500/20 text-red-600 dark:text-red-300 border-red-500/30',
   };
 
   const labels = {
@@ -53,6 +54,7 @@ export function StatusBadge({ status, className }: StatusBadgeProps) {
     completed: 'Completed',
     active: 'Active',
     paused: 'Paused',
+    overdue: 'Overdue',
   };
 
   return (

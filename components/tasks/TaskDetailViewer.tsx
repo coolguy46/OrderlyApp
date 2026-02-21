@@ -12,7 +12,7 @@ import {
   Badge,
 } from '@/components/ui';
 import { PriorityBadge, StatusBadge, SubjectBadge } from '@/components/ui';
-import { formatDate, getDaysUntil, cn } from '@/lib/utils';
+import { formatDate, getDaysUntil, cn, isTaskOverdue } from '@/lib/utils';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Calendar,
@@ -38,6 +38,11 @@ export function TaskDetailViewer({ task, open, onOpenChange, onEdit }: TaskDetai
   
   const subject = subjects.find((s) => s.id === task.subject_id);
   const daysUntil = task.due_date ? getDaysUntil(task.due_date) : null;
+  
+  // Check if task is overdue
+  const isOverdue = isTaskOverdue(task.due_date, task.status);
+  const displayStatus = isOverdue ? 'overdue' : task.status;
+  const displayPriority = isOverdue ? 'high' : task.priority;
 
   const handleComplete = async () => {
     if (task.status === 'completed') {
@@ -66,42 +71,77 @@ export function TaskDetailViewer({ task, open, onOpenChange, onEdit }: TaskDetai
 
   const sourceBadge = getSourceBadge();
 
-  // Format description with line breaks preserved
+  // Sanitize and format description
   const formatDescription = (description: string) => {
-    // Check if description contains HTML
-    if (description.includes('<') && description.includes('>')) {
-      // Sanitize and render HTML description
+    if (!description) return null;
+    
+    // Decode HTML entities
+    const decodeHTMLEntities = (text: string) => {
+      const textarea = document.createElement('textarea');
+      textarea.innerHTML = text;
+      return textarea.value;
+    };
+    
+    // Check if description contains HTML tags
+    const hasHTMLTags = /<[a-z][\s\S]*>/i.test(description);
+    
+    if (hasHTMLTags) {
+      // Clean up problematic HTML:
+      // 1. Remove scripts
+      // 2. Remove style blocks
+      // 3. Clean up excessive whitespace in tags
+      let cleanedHtml = description
+        .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+        .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '')
+        .replace(/<!--[\s\S]*?-->/g, '') // Remove comments
+        .replace(/&nbsp;/g, ' ') // Replace non-breaking spaces
+        .replace(/<br\s*\/?>/gi, '\n') // Convert br to newlines for consistency
+        .replace(/<\/p>\s*<p>/gi, '\n\n') // Convert paragraph breaks
+        .replace(/<\/div>\s*<div>/gi, '\n') // Convert div breaks
+        .trim();
+      
+      // If after cleaning it's mostly empty or just whitespace, show as text
+      const textContent = cleanedHtml.replace(/<[^>]*>/g, '').trim();
+      if (!textContent) {
+        return <div className="text-sm text-muted-foreground italic">No description</div>;
+      }
+      
       return (
         <div 
-          className="prose prose-sm dark:prose-invert max-w-none"
-          dangerouslySetInnerHTML={{ __html: description }}
+          className="prose prose-sm dark:prose-invert max-w-none 
+            prose-p:my-1 prose-ul:my-1 prose-ol:my-1 prose-li:my-0.5
+            prose-headings:my-2 prose-a:text-primary prose-a:no-underline hover:prose-a:underline
+            [&_*]:text-foreground [&_a]:text-primary"
+          dangerouslySetInnerHTML={{ __html: cleanedHtml }}
         />
       );
     }
     
-    // Plain text - preserve line breaks
+    // Plain text - decode any HTML entities and preserve line breaks
+    const decodedText = decodeHTMLEntities(description);
+    
     return (
       <div className="whitespace-pre-wrap text-sm text-muted-foreground leading-relaxed">
-        {description}
+        {decodedText}
       </div>
     );
   };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl max-h-[85vh] flex flex-col">
-        <DialogHeader>
+      <DialogContent className="sm:max-w-2xl max-h-[85vh] flex flex-col overflow-hidden">
+        <DialogHeader className="flex-shrink-0">
           <div className="flex items-start gap-3">
-            <div className="flex-1">
-              <DialogTitle className="text-xl leading-tight pr-8">
+            <div className="flex-1 min-w-0">
+              <DialogTitle className="text-xl leading-tight pr-8 break-words">
                 {task.title}
               </DialogTitle>
               <div className="flex items-center gap-2 flex-wrap mt-3">
                 {subject && (
                   <SubjectBadge name={subject.name} color={subject.color} />
                 )}
-                <StatusBadge status={task.status} />
-                <PriorityBadge priority={task.priority} />
+                <StatusBadge status={displayStatus} />
+                <PriorityBadge priority={displayPriority} />
                 {sourceBadge && (
                   <Badge variant="outline" className={sourceBadge.className}>
                     {sourceBadge.label}
@@ -112,7 +152,7 @@ export function TaskDetailViewer({ task, open, onOpenChange, onEdit }: TaskDetai
           </div>
         </DialogHeader>
 
-        <ScrollArea className="flex-1 -mx-6 px-6">
+        <ScrollArea className="flex-1 -mx-6 px-6 min-h-0">
           <div className="space-y-6 py-4">
             {/* Due Date & Course Info */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -211,8 +251,8 @@ export function TaskDetailViewer({ task, open, onOpenChange, onEdit }: TaskDetai
           </div>
         </ScrollArea>
 
-        <DialogFooter className="flex-row gap-2 sm:gap-2">
-          {task.status === 'pending' && (
+        <DialogFooter className="flex-shrink-0 flex-row gap-2 sm:gap-2 pt-4 border-t border-border/50">
+          {task.status === 'pending' && !isOverdue && (
             <Button variant="secondary" onClick={handleStartProgress}>
               <Play className="w-4 h-4 mr-2" />
               Start Progress

@@ -21,7 +21,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Save, X, Plus } from 'lucide-react';
+import { Save, X, Plus, AlertCircle } from 'lucide-react';
+import { calculateSuggestedPriority } from '@/lib/utils';
 
 interface TaskFormProps {
   isOpen: boolean;
@@ -41,6 +42,7 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [priority, setPriority] = useState<TaskPriority>('medium');
+  const [manualPriority, setManualPriority] = useState(false); // Track if user manually set priority
   const [status, setStatus] = useState<TaskStatus>('pending');
   const [subjectId, setSubjectId] = useState('none');
   const [dueDate, setDueDate] = useState('');
@@ -49,6 +51,20 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
   const [showNewSubject, setShowNewSubject] = useState(false);
   const [newSubjectName, setNewSubjectName] = useState('');
   const [newSubjectColor, setNewSubjectColor] = useState(SUBJECT_COLORS[0]);
+
+  // Auto-suggest priority based on due date (only if user hasn't manually set it)
+  useEffect(() => {
+    if (!manualPriority && dueDate && !task) {
+      const suggestedPriority = calculateSuggestedPriority(dueDate);
+      setPriority(suggestedPriority);
+    }
+  }, [dueDate, manualPriority, task]);
+
+  // Handle manual priority change
+  const handlePriorityChange = (value: string) => {
+    setPriority(value as TaskPriority);
+    setManualPriority(true);
+  };
 
   useEffect(() => {
     if (task) {
@@ -109,6 +125,7 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
     setTitle('');
     setDescription('');
     setPriority('medium');
+    setManualPriority(false);
     setStatus('pending');
     setSubjectId('none');
     setDueDate('');
@@ -153,8 +170,13 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <Label className="text-sm">Priority</Label>
-              <Select value={priority} onValueChange={(v) => setPriority(v as TaskPriority)}>
+              <Label className="text-sm">
+                Priority
+                {!manualPriority && dueDate && (
+                  <span className="text-xs text-muted-foreground ml-1">(auto)</span>
+                )}
+              </Label>
+              <Select value={priority} onValueChange={handlePriorityChange}>
                 <SelectTrigger className="h-9">
                   <SelectValue />
                 </SelectTrigger>

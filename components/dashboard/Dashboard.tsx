@@ -28,6 +28,7 @@ import {
   ChevronRight,
   ChevronLeft,
   Plus,
+  X,
 } from 'lucide-react';
 
 export function Dashboard() {
@@ -65,13 +66,23 @@ export function Dashboard() {
     };
   }, [studySessions, tasks, mounted]);
 
-  // Upcoming tasks
+  // Upcoming tasks - filter by selected date if any
   const upcomingTasks = useMemo(() => {
-    return tasks
-      .filter((t) => t.status !== 'completed' && t.due_date)
+    let filtered = tasks.filter((t) => t.status !== 'completed' && t.due_date);
+    
+    // If a date is selected, filter to that date
+    if (selectedDate) {
+      const selectedDateStr = format(selectedDate, 'yyyy-MM-dd');
+      filtered = filtered.filter((t) => {
+        if (!t.due_date) return false;
+        return format(new Date(t.due_date), 'yyyy-MM-dd') === selectedDateStr;
+      });
+    }
+    
+    return filtered
       .sort((a, b) => new Date(a.due_date!).getTime() - new Date(b.due_date!).getTime())
-      .slice(0, 4);
-  }, [tasks]);
+      .slice(0, 6);
+  }, [tasks, selectedDate]);
 
   // Active goals
   const activeGoals = useMemo(() => {
@@ -209,16 +220,33 @@ export function Dashboard() {
                     <CheckCircle2 className="w-4 h-4 text-indigo-500" />
                   </div>
                   <div>
-                    <CardTitle className="text-base">Upcoming Tasks</CardTitle>
-                    <CardDescription className="text-xs">{upcomingTasks.length} tasks pending</CardDescription>
+                    <CardTitle className="text-base">
+                      {selectedDate ? `Tasks for ${format(selectedDate, 'MMM d')}` : 'Upcoming Tasks'}
+                    </CardTitle>
+                    <CardDescription className="text-xs">
+                      {upcomingTasks.length} tasks {selectedDate ? 'on this date' : 'pending'}
+                    </CardDescription>
                   </div>
                 </div>
-                <Link href="/tasks">
-                  <Button variant="ghost" size="sm" className="gap-1 text-xs h-7">
-                    View All
-                    <ChevronRight className="w-3 h-3" />
-                  </Button>
-                </Link>
+                <div className="flex items-center gap-2">
+                  {selectedDate && (
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      className="gap-1 text-xs h-7"
+                      onClick={() => setSelectedDate(null)}
+                    >
+                      <X className="w-3 h-3" />
+                      Clear Filter
+                    </Button>
+                  )}
+                  <Link href="/tasks">
+                    <Button variant="ghost" size="sm" className="gap-1 text-xs h-7">
+                      View All
+                      <ChevronRight className="w-3 h-3" />
+                    </Button>
+                  </Link>
+                </div>
               </div>
             </CardHeader>
             <CardContent className="pt-2">

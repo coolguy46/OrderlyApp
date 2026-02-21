@@ -15,7 +15,7 @@ import {
 } from '@/components/ui';
 import { PriorityBadge, StatusBadge, SubjectBadge } from '@/components/ui';
 import { TaskDetailViewer } from './TaskDetailViewer';
-import { formatDate, getDaysUntil, cn } from '@/lib/utils';
+import { formatDate, getDaysUntil, cn, isTaskOverdue, calculateSuggestedPriority } from '@/lib/utils';
 import { motion } from 'framer-motion';
 import {
   CheckCircle2,
@@ -42,6 +42,15 @@ export function TaskCard({ task, onEdit, compact = false }: TaskCardProps) {
   const subject = subjects.find((s) => s.id === task.subject_id);
   const daysUntil = task.due_date ? getDaysUntil(task.due_date) : null;
 
+  // Check if task is overdue
+  const isOverdue = isTaskOverdue(task.due_date, task.status);
+  
+  // Calculate display priority (use task.priority but show as high if overdue)
+  const displayPriority = isOverdue ? 'high' : task.priority;
+  
+  // Get display status (show overdue instead of pending/in_progress if overdue)
+  const displayStatus = isOverdue ? 'overdue' : task.status;
+
   // Check if task is from external source (Canvas/Google Classroom)
   const isExternalTask = task.source && task.source !== 'manual';
 
@@ -67,7 +76,8 @@ export function TaskCard({ task, onEdit, compact = false }: TaskCardProps) {
           exit={{ opacity: 0, y: -10 }}
           className={cn(
             'flex items-center gap-4 p-4 rounded-xl border bg-card hover:bg-accent/50 transition-colors group cursor-pointer',
-            task.status === 'completed' && 'opacity-60'
+            task.status === 'completed' && 'opacity-60',
+            isOverdue && 'border-red-500/30 bg-red-500/5'
           )}
           onClick={() => setShowViewer(true)}
         >
@@ -89,13 +99,16 @@ export function TaskCard({ task, onEdit, compact = false }: TaskCardProps) {
               {task.title}
             </p>
             {task.due_date && (
-              <p className="text-[10px] text-muted-foreground flex items-center gap-1 mt-0.5">
+              <p className={cn(
+                "text-[10px] flex items-center gap-1 mt-0.5",
+                isOverdue ? "text-red-500" : "text-muted-foreground"
+              )}>
                 <Clock className="w-3 h-3" />
-                {formatDate(task.due_date)}
+                {isOverdue ? 'Overdue' : formatDate(task.due_date)}
               </p>
             )}
           </div>
-          <PriorityBadge priority={task.priority} />
+          <PriorityBadge priority={displayPriority} />
           {isExternalTask && (
             <Badge variant="outline" className="text-[10px] px-1.5 py-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
               {task.source === 'canvas' ? 'Canvas' : 'GC'}
@@ -121,9 +134,24 @@ export function TaskCard({ task, onEdit, compact = false }: TaskCardProps) {
 
   // Strip HTML for preview display
   const getDescriptionPreview = (description: string) => {
-    if (description.includes('<') && description.includes('>')) {
-      // Remove HTML tags for preview
-      return description.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!description) return '';
+    
+    // Check if contains HTML
+    if (/<[a-z][\s\S]*>/i.test(description)) {
+      // Remove HTML tags, decode entities, clean up
+      let text = description
+        .replace(/<br\s*\/?>/gi, ' ') // br to space
+        .replace(/<\/p>\s*<p>/gi, ' ') // paragraph breaks
+        .replace(/<[^>]*>/g, '') // remove all tags
+        .replace(/&nbsp;/g, ' ')
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/\s+/g, ' ')
+        .trim();
+      return text;
     }
     return description;
   };
@@ -138,12 +166,13 @@ export function TaskCard({ task, onEdit, compact = false }: TaskCardProps) {
       >
         <Card className={cn(
           'group relative overflow-hidden hover:shadow-md transition-shadow',
-          task.status === 'completed' && 'opacity-70'
+          task.status === 'completed' && 'opacity-70',
+          isOverdue && 'border-red-500/30'
         )}>
           {/* Priority indicator */}
           <div className={cn(
             'absolute left-0 top-0 bottom-0 w-1',
-            priorityColors[task.priority]
+            priorityColors[displayPriority]
           )} />
 
           <CardContent className="p-5 pl-6">
@@ -235,7 +264,7 @@ export function TaskCard({ task, onEdit, compact = false }: TaskCardProps) {
                   {subject && (
                     <SubjectBadge name={subject.name} color={subject.color} />
                   )}
-                  <StatusBadge status={task.status} />
+                  <StatusBadge status={displayStatus} />
                   
                   {task.due_date && (
                     <span className={cn(
