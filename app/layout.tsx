@@ -3,6 +3,7 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import { AuthGuard } from "@/components/auth/AuthGuard";
 import { ThemeProvider } from "@/components/providers/ThemeProvider";
+import { Toaster } from "sonner";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -10,7 +11,7 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "StudyFlow - Student Time Management Platform",
+  title: "Orderly - Student Time Management Platform",
   description: "Master your academic journey with intelligent study planning, gamified progress tracking, and collaborative learning features.",
 };
 
@@ -26,6 +27,7 @@ export default function RootLayout({
           <AuthGuard>
             {children}
           </AuthGuard>
+          <Toaster richColors position="bottom-right" />
         </ThemeProvider>
       </body>
     </html>

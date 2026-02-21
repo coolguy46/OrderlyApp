@@ -163,7 +163,7 @@ export function Analytics() {
   return (
     <div className="space-y-6">
       {/* Summary Stats */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <motion.div
           whileHover={{ scale: 1.02 }}
           className="bg-gradient-to-br from-indigo-500/10 to-purple-500/10 dark:from-indigo-500/20 dark:to-purple-500/20 backdrop-blur-xl border border-indigo-500/30 rounded-xl p-5"
@@ -243,7 +243,7 @@ export function Analytics() {
             </div>
             <CardDescription>Daily study hours for the past 7 days</CardDescription>
           </CardHeader>
-          <div className="h-72 mt-4">
+          <div className="h-72 px-2 pb-4">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={dailyData}>
                 <defs>
@@ -252,19 +252,19 @@ export function Analytics() {
                     <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" className="stroke-border" stroke="currentColor" opacity={0.2} />
+                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                 <XAxis
                   dataKey="name"
-                  className="text-muted-foreground"
-                  stroke="currentColor"
-                  tick={{ fill: 'currentColor', fontSize: 12 }}
-                  tickLine={{ stroke: 'currentColor' }}
+                  stroke="hsl(var(--muted-foreground))"
+                  tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 12 }}
+                  tickLine={false}
+                  axisLine={false}
                 />
                 <YAxis
-                  className="text-muted-foreground"
-                  stroke="currentColor"
-                  tick={{ fill: 'currentColor', fontSize: 12 }}
-                  tickLine={{ stroke: 'currentColor' }}
+                  stroke="hsl(var(--muted-foreground))"
+                  tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 12 }}
+                  tickLine={false}
+                  axisLine={false}
                   tickFormatter={(value) => `${value}m`}
                 />
                 <Tooltip content={<CustomTooltip />} />
@@ -289,9 +289,9 @@ export function Analytics() {
             </div>
             <CardDescription>Distribution of study time across subjects</CardDescription>
           </CardHeader>
-          <div className="h-72 mt-4 flex items-center">
-            <div className="w-1/2">
-              <ResponsiveContainer width="100%" height={200}>
+          <div className="min-h-[288px] px-2 pb-4 flex flex-col sm:flex-row items-center gap-4">
+            <div className="w-full sm:w-1/2 h-[200px]">
+              <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
                     data={subjectData}
@@ -318,7 +318,7 @@ export function Analytics() {
                 </PieChart>
               </ResponsiveContainer>
             </div>
-            <div className="w-1/2 space-y-2">
+            <div className="w-full sm:w-1/2 space-y-2">
               {subjectData.map((subject) => (
                 <div key={subject.name} className="flex items-center gap-2">
                   <div
@@ -346,7 +346,7 @@ export function Analytics() {
             </div>
             <CardDescription>Progress by priority level</CardDescription>
           </CardHeader>
-          <div className="space-y-6 mt-4">
+          <div className="space-y-6 px-6 pb-6">
             <div>
               <div className="flex items-center justify-between mb-2">
                 <span className="flex items-center gap-2 text-sm text-foreground">
@@ -425,23 +425,23 @@ export function Analytics() {
                 : 'Start studying to see your patterns'}
             </CardDescription>
           </CardHeader>
-          <div className="h-48 mt-4">
+          <div className="h-48 px-2 pb-4">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={hourlyData.filter((h) => h.hour >= 6 && h.hour <= 23)}>
-                <CartesianGrid strokeDasharray="3 3" className="stroke-border" stroke="currentColor" opacity={0.2} />
+                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                 <XAxis
                   dataKey="label"
-                  className="text-muted-foreground"
-                  stroke="currentColor"
-                  tick={{ fill: 'currentColor', fontSize: 10 }}
-                  tickLine={{ stroke: 'currentColor' }}
+                  stroke="hsl(var(--muted-foreground))"
+                  tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 10 }}
+                  tickLine={false}
+                  axisLine={false}
                   interval={2}
                 />
                 <YAxis
-                  className="text-muted-foreground"
-                  stroke="currentColor"
-                  tick={{ fill: 'currentColor', fontSize: 10 }}
-                  tickLine={{ stroke: 'currentColor' }}
+                  stroke="hsl(var(--muted-foreground))"
+                  tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 10 }}
+                  tickLine={false}
+                  axisLine={false}
                   tickFormatter={(value) => `${value}m`}
                 />
                 <Tooltip content={<CustomTooltip />} />
@@ -454,8 +454,10 @@ export function Analytics() {
 
       {/* Insights */}
       <Card>
-        <CardHeader title="Quick Insights" />
-        <div className="grid grid-cols-3 gap-4 mt-4">
+        <CardHeader>
+          <CardTitle>Quick Insights</CardTitle>
+        </CardHeader>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 px-6 pb-6">
           <div className="p-4 bg-muted/50 rounded-xl text-center">
             <p className="text-3xl font-bold text-foreground mb-1">
               {totalStats.avgSessionLength}m

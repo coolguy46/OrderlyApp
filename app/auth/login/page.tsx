@@ -76,7 +76,7 @@ export default function LoginPage() {
             <div>
               <CardTitle className="text-2xl font-bold">Welcome back</CardTitle>
               <CardDescription className="text-muted-foreground">
-                Sign in to continue to StudyFlow
+                Sign in to continue to Orderly
               </CardDescription>
             </div>
           </CardHeader>

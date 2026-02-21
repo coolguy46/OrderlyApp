@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, memo } from 'react';
 import { Task } from '@/lib/supabase/types';
 import { useAppStore } from '@/lib/store';
 import { 
@@ -11,7 +11,8 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuTrigger
+  DropdownMenuTrigger,
+  ConfirmDialog
 } from '@/components/ui';
 import { PriorityBadge, StatusBadge, SubjectBadge } from '@/components/ui';
 import { TaskDetailViewer } from './TaskDetailViewer';
@@ -38,9 +39,10 @@ interface TaskCardProps {
   compact?: boolean;
 }
 
-export function TaskCard({ task, onEdit, compact = false }: TaskCardProps) {
+export const TaskCard = memo(function TaskCard({ task, onEdit, compact = false }: TaskCardProps) {
   const { completeTask, deleteTask, updateTask, subjects } = useAppStore();
   const [showViewer, setShowViewer] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const subject = subjects.find((s) => s.id === task.subject_id);
   const daysUntil = task.due_date ? getDaysUntil(task.due_date) : null;
 
@@ -246,7 +248,7 @@ export function TaskCard({ task, onEdit, compact = false }: TaskCardProps) {
                         </DropdownMenuItem>
                       )}
                       <DropdownMenuItem 
-                        onClick={() => deleteTask(task.id)}
+                        onClick={() => setConfirmDelete(true)}
                         className="text-red-500 focus:text-red-500"
                       >
                         <Trash2 className="w-4 h-4 mr-2" />
@@ -332,6 +334,15 @@ export function TaskCard({ task, onEdit, compact = false }: TaskCardProps) {
         onOpenChange={setShowViewer}
         onEdit={onEdit}
       />
+      <ConfirmDialog
+        open={confirmDelete}
+        onOpenChange={setConfirmDelete}
+        title="Delete Task"
+        description={`Are you sure you want to delete "${task.title}"? This action cannot be undone.`}
+        confirmLabel="Delete"
+        variant="danger"
+        onConfirm={() => deleteTask(task.id)}
+      />
     </>
   );
-}
+});

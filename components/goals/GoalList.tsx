@@ -26,7 +26,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui';
-import { CircularProgress } from '@/components/ui';
+import { CircularProgress, ConfirmDialog } from '@/components/ui';
 import { motion, AnimatePresence } from 'framer-motion';
 import { getDaysUntil, getProgressPercentage, cn } from '@/lib/utils';
 import {
@@ -47,6 +47,7 @@ interface GoalCardProps {
 
 function GoalCard({ goal, onEdit }: GoalCardProps) {
   const { updateGoal, deleteGoal } = useAppStore();
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const progress = getProgressPercentage(goal.current_value, goal.target_value);
   const daysLeft = goal.deadline ? getDaysUntil(goal.deadline) : null;
   const isCompleted = goal.status === 'completed' || progress >= 100;
@@ -123,7 +124,7 @@ function GoalCard({ goal, onEdit }: GoalCardProps) {
                   <Button
                     variant="ghost"
                     size="icon-sm"
-                    onClick={() => deleteGoal(goal.id)}
+                    onClick={() => setConfirmDelete(true)}
                     className="text-red-400 hover:text-red-500"
                   >
                     <Trash2 className="w-4 h-4" />
@@ -159,6 +160,15 @@ function GoalCard({ goal, onEdit }: GoalCardProps) {
           </div>
         </CardContent>
       </Card>
+      <ConfirmDialog
+        open={confirmDelete}
+        onOpenChange={setConfirmDelete}
+        title="Delete Goal"
+        description={`Are you sure you want to delete "${goal.title}"? This action cannot be undone.`}
+        confirmLabel="Delete"
+        variant="danger"
+        onConfirm={() => deleteGoal(goal.id)}
+      />
     </motion.div>
   );
 }
@@ -205,7 +215,7 @@ function GoalForm({ isOpen, onClose, goal }: GoalFormProps) {
       current_value: parseInt(currentValue) || 0,
       unit,
       goal_type: goalType,
-      deadline: deadline ? new Date(deadline).toISOString() : null,
+      deadline: deadline ? new Date(deadline + 'T00:00:00').toISOString() : null,
       status: 'active' as const,
     };
 

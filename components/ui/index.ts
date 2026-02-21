@@ -64,3 +64,5 @@ export { Checkbox } from './checkbox';
 export { Modal } from './Modal';
 export { CircularProgress, ProgressBar } from './custom-progress';
 export { PriorityBadge, StatusBadge, SubjectBadge, StatCard, SelectField } from './custom-components';
+export { ConfirmDialog } from './confirm-dialog';
+export { ErrorBoundary } from './error-boundary';

@@ -3,7 +3,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import { Exam, Task } from '@/lib/supabase/types';
 import { useAppStore } from '@/lib/store';
-import { Card, CardHeader, ProgressBar, Button, Modal, Input, Textarea, SelectField, SubjectBadge, Badge } from '@/components/ui';
+import { Card, CardHeader, ProgressBar, Button, Modal, Input, Textarea, SelectField, SubjectBadge, Badge, ConfirmDialog } from '@/components/ui';
 import { motion, AnimatePresence } from 'framer-motion';
 import { formatDate, getDaysUntil, cn, isExamType } from '@/lib/utils';
 import Link from 'next/link';
@@ -29,6 +29,7 @@ interface ExamCardProps {
 
 function ExamCard({ exam, onEdit }: ExamCardProps) {
   const { updateExam, deleteExam, subjects } = useAppStore();
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const subject = subjects.find((s) => s.id === exam.subject_id);
   const daysUntil = getDaysUntil(exam.exam_date);
   const isUrgent = daysUntil <= 7 && daysUntil >= 0;
@@ -98,7 +99,7 @@ function ExamCard({ exam, onEdit }: ExamCardProps) {
                 <Edit3 className="w-4 h-4" />
               </button>
               <button
-                onClick={() => deleteExam(exam.id)}
+                onClick={() => setConfirmDelete(true)}
                 className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-red-500 dark:hover:text-red-400 transition-colors"
               >
                 <Trash2 className="w-4 h-4" />
@@ -186,6 +187,15 @@ function ExamCard({ exam, onEdit }: ExamCardProps) {
           </div>
         </div>
       </Card>
+      <ConfirmDialog
+        open={confirmDelete}
+        onOpenChange={setConfirmDelete}
+        title="Delete Exam"
+        description={`Are you sure you want to delete "${exam.title}"? This action cannot be undone.`}
+        confirmLabel="Delete"
+        variant="danger"
+        onConfirm={() => deleteExam(exam.id)}
+      />
     </motion.div>
   );
 }

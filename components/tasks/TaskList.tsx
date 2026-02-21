@@ -208,9 +208,13 @@ export function TaskList() {
                 <CheckCircle2 className="w-6 h-6 text-muted-foreground" />
               </div>
               <p className="text-foreground font-medium text-sm">No tasks found</p>
-              <p className="text-xs text-muted-foreground mt-1">
+              <p className="text-xs text-muted-foreground mt-1 mb-3">
                 Create a new task to get started
               </p>
+              <Button size="sm" variant="outline" className="gap-1" onClick={() => setShowForm(true)}>
+                <Plus className="w-3 h-3" />
+                New Task
+              </Button>
             </motion.div>
           ) : (
             filteredAndSortedTasks.map((task) => (

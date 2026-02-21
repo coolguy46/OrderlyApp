@@ -15,7 +15,7 @@ import {
 import { SubjectBadge } from '@/components/ui';
 import { TaskCard } from '@/components/tasks';
 import { formatDuration, getDaysUntil, cn, isExamType } from '@/lib/utils';
-import { format, isSameDay, isToday, startOfMonth, endOfMonth, startOfWeek, endOfWeek, addDays } from 'date-fns';
+import { format, isSameDay, isToday, startOfDay, startOfMonth, endOfMonth, startOfWeek, endOfWeek, addDays } from 'date-fns';
 import Link from 'next/link';
 import {
   Clock,
@@ -92,9 +92,10 @@ export function Dashboard() {
   // Upcoming exams
   const upcomingExams = useMemo(() => {
     if (!mounted) return [];
-    const now = new Date();
+    // Compare at start-of-day so exams today still show as upcoming
+    const todayStart = startOfDay(new Date());
     return exams
-      .filter((e) => new Date(e.exam_date) >= now)
+      .filter((e) => startOfDay(new Date(e.exam_date)) >= todayStart)
       .sort((a, b) => new Date(a.exam_date).getTime() - new Date(b.exam_date).getTime())
       .slice(0, 3);
   }, [exams, mounted]);
@@ -258,7 +259,13 @@ export function Dashboard() {
                 <div className="text-center py-8 text-muted-foreground">
                   <CheckCircle2 className="w-10 h-10 mx-auto mb-2 opacity-50" />
                   <p className="font-medium text-sm">All caught up!</p>
-                  <p className="text-xs">No upcoming tasks. Great job! 🎉</p>
+                  <p className="text-xs mb-3">No upcoming tasks. Great job! 🎉</p>
+                  <Link href="/tasks">
+                    <Button size="sm" variant="outline" className="gap-1">
+                      <Plus className="w-3 h-3" />
+                      Create Task
+                    </Button>
+                  </Link>
                 </div>
               ) : (
                 <div className="space-y-2">
@@ -377,7 +384,13 @@ export function Dashboard() {
             {activeGoals.length === 0 ? (
               <div className="text-center py-6 text-muted-foreground">
                 <Target className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                <p className="text-sm">No active goals</p>
+                <p className="text-sm mb-2">No active goals</p>
+                <Link href="/goals">
+                  <Button size="sm" variant="outline" className="gap-1">
+                    <Plus className="w-3 h-3" />
+                    Set a Goal
+                  </Button>
+                </Link>
               </div>
             ) : (
               activeGoals.map((goal) => {

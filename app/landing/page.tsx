@@ -77,7 +77,7 @@ const testimonials = [
   {
     name: 'Sarah M.',
     role: 'Medical Student',
-    content: 'StudyFlow completely transformed how I manage my study time. I went from feeling overwhelmed to being in complete control.',
+    content: 'Orderly completely transformed how I manage my study time. I went from feeling overwhelmed to being in complete control.',
     avatar: 'S',
   },
   {
@@ -104,7 +104,7 @@ export default function LandingPage() {
             <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center">
               <Sparkles className="w-5 h-5 text-white" />
             </div>
-            <span className="text-xl font-bold">StudyFlow</span>
+            <span className="text-xl font-bold">Orderly</span>
           </div>
           <div className="flex items-center gap-4">
             <Link href="/auth/login">
@@ -407,7 +407,7 @@ export default function LandingPage() {
               <span className="bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent"> Students Worldwide</span>
             </h2>
             <p className="text-xl text-muted-foreground">
-              See what our community has to say about StudyFlow
+              See what our community has to say about Orderly
             </p>
           </motion.div>
 
@@ -455,7 +455,7 @@ export default function LandingPage() {
               Ready to Transform Your Studies?
             </h2>
             <p className="text-xl text-muted-foreground mb-8 max-w-2xl mx-auto">
-              Join thousands of students who are already achieving their academic goals with StudyFlow.
+              Join thousands of students who are already achieving their academic goals with Orderly.
             </p>
             <Link href="/auth/register">
               <Button size="lg" className="text-lg px-10 py-6 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 shadow-lg shadow-indigo-500/25">
@@ -478,7 +478,7 @@ export default function LandingPage() {
               <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center">
                 <Sparkles className="w-5 h-5 text-white" />
               </div>
-              <span className="text-xl font-bold">StudyFlow</span>
+              <span className="text-xl font-bold">Orderly</span>
             </div>
             <div className="flex items-center gap-8 text-sm text-muted-foreground">
               <Link href="#" className="hover:text-foreground transition-colors">About</Link>
@@ -487,7 +487,7 @@ export default function LandingPage() {
               <Link href="#" className="hover:text-foreground transition-colors">Terms</Link>
             </div>
             <p className="text-sm text-muted-foreground">
-              © 2026 StudyFlow. All rights reserved.
+              © 2026 Orderly. All rights reserved.
             </p>
           </div>
         </div>

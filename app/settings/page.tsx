@@ -16,8 +16,7 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card';
-import { Sidebar } from '@/components/layout/Sidebar';
-import { Header } from '@/components/layout/Header';
+import { MainLayout } from '@/components/layout';
 import { useAppStore } from '@/lib/store';
 import Link from 'next/link';
 
@@ -95,19 +94,13 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background flex">
-      <Sidebar />
-      
-      <div className="flex-1 flex flex-col">
-        <Header />
-        
-        <main className="flex-1 p-6 overflow-auto">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5 }}
-            className="max-w-4xl mx-auto space-y-6"
-          >
+    <MainLayout>
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5 }}
+        className="max-w-4xl mx-auto space-y-6"
+      >
             <div>
               <h1 className="text-2xl font-bold">Settings</h1>
               <p className="text-muted-foreground">Manage your app preferences</p>
@@ -122,7 +115,7 @@ export default function SettingsPage() {
                   </div>
                   <div>
                     <CardTitle className="text-lg">Appearance</CardTitle>
-                    <CardDescription>Customize how StudyFlow looks</CardDescription>
+                    <CardDescription>Customize how Orderly looks</CardDescription>
                   </div>
                 </div>
               </CardHeader>
@@ -205,8 +198,6 @@ export default function SettingsPage() {
               </CardContent>
             </Card>
           </motion.div>
-        </main>
-      </div>
-    </div>
+    </MainLayout>
   );
 }

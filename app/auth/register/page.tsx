@@ -97,11 +97,11 @@ export default function RegisterPage() {
               <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center">
                 <Sparkles className="w-5 h-5 text-white" />
               </div>
-              <span className="text-xl font-bold">StudyFlow</span>
+              <span className="text-xl font-bold">Orderly</span>
             </div>
             <h1 className="text-3xl font-bold mb-2">Start your learning journey</h1>
             <p className="text-muted-foreground">
-              Join thousands of students who are mastering their academic goals with StudyFlow.
+              Join thousands of students who are mastering their academic goals with Orderly.
             </p>
           </div>
 

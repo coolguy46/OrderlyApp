@@ -34,16 +34,27 @@ const navItems = [
   { href: '/settings', icon: Settings, label: 'Settings' },
 ];
 
-export function Sidebar() {
+interface SidebarProps {
+  mobile?: boolean;
+  onNavigate?: () => void;
+}
+
+export function Sidebar({ mobile, onNavigate }: SidebarProps = {}) {
   const { sidebarOpen, setSidebarOpen, user } = useAppStore();
   const pathname = usePathname();
+
+  // In mobile mode, always show expanded and don't use fixed positioning
+  const effectiveOpen = mobile ? true : sidebarOpen;
 
   return (
     <motion.aside
       initial={false}
-      animate={{ width: sidebarOpen ? 240 : 72 }}
+      animate={{ width: mobile ? '100%' : (sidebarOpen ? 240 : 72) }}
       transition={{ duration: 0.2, ease: 'easeInOut' }}
-      className="fixed left-0 top-0 h-full bg-card/50 backdrop-blur-md border-r border-border/40 z-40 flex flex-col"
+      className={cn(
+        "h-full bg-card/50 backdrop-blur-md border-r border-border/40 flex flex-col",
+        mobile ? "w-full" : "fixed left-0 top-0 z-40"
+      )}
     >
       {/* Logo */}
       <div className="h-16 flex items-center px-4 border-b border-border/40">
@@ -52,7 +63,7 @@ export function Sidebar() {
             <img src="/logo.svg" alt="Orderly Logo" className="w-10 h-10" />
           </div>
           <AnimatePresence>
-            {sidebarOpen && (
+            {effectiveOpen && (
               <motion.span
                 initial={{ opacity: 0, x: -10 }}
                 animate={{ opacity: 1, x: 0 }}
@@ -72,7 +83,7 @@ export function Sidebar() {
           {navItems.map((item) => {
             const isActive = pathname === item.href;
             return (
-              <Link key={item.href} href={item.href}>
+              <Link key={item.href} href={item.href} onClick={onNavigate}>
                 <motion.div
                   whileHover={{ x: 2 }}
                   whileTap={{ scale: 0.98 }}
@@ -88,7 +99,7 @@ export function Sidebar() {
                     isActive && 'text-primary'
                   )} />
                   <AnimatePresence>
-                    {sidebarOpen && (
+                    {effectiveOpen && (
                       <motion.span
                         initial={{ opacity: 0, x: -10 }}
                         animate={{ opacity: 1, x: 0 }}
@@ -108,30 +119,32 @@ export function Sidebar() {
 
       {/* Footer */}
       <div className="p-3 border-t space-y-2">
-        {/* Collapse button */}
-        <Button
-          variant="ghost"
-          size={sidebarOpen ? "sm" : "icon-sm"}
-          onClick={() => setSidebarOpen(!sidebarOpen)}
-          className={cn("w-full", !sidebarOpen && "justify-center")}
-        >
-          {sidebarOpen ? (
-            <>
-              <ChevronLeft className="w-4 h-4" />
-              <span>Collapse</span>
-            </>
-          ) : (
-            <ChevronRight className="w-4 h-4" />
-          )}
-        </Button>
+        {/* Collapse button - hidden on mobile */}
+        {!mobile && (
+          <Button
+            variant="ghost"
+            size={effectiveOpen ? "sm" : "icon-sm"}
+            onClick={() => setSidebarOpen(!sidebarOpen)}
+            className={cn("w-full", !effectiveOpen && "justify-center")}
+          >
+            {effectiveOpen ? (
+              <>
+                <ChevronLeft className="w-4 h-4" />
+                <span>Collapse</span>
+              </>
+            ) : (
+              <ChevronRight className="w-4 h-4" />
+            )}
+          </Button>
+        )}
 
         <Separator />
 
         {/* User Profile */}
-        <Link href="/profile">
+        <Link href="/profile" onClick={onNavigate}>
           <div className={cn(
             'flex items-center gap-3 p-2 rounded-lg hover:bg-accent transition-colors',
-            !sidebarOpen && 'justify-center'
+            !effectiveOpen && 'justify-center'
           )}>
             <Avatar className="h-8 w-8">
               <AvatarFallback className="bg-gradient-to-br from-indigo-500 to-purple-600 text-white text-xs">
@@ -139,7 +152,7 @@ export function Sidebar() {
               </AvatarFallback>
             </Avatar>
             <AnimatePresence>
-              {sidebarOpen && (
+              {effectiveOpen && (
                 <motion.div
                   initial={{ opacity: 0, x: -10 }}
                   animate={{ opacity: 1, x: 0 }}

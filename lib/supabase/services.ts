@@ -7,6 +7,8 @@ import type {
   Goal, 
   StudySession, 
   Exam,
+  Friendship,
+  Achievement,
 } from './types';
 
 // Use the supabase client with any to bypass strict typing issues
@@ -511,6 +513,174 @@ export async function deleteCanvasSettings(userId: string): Promise<boolean> {
     return false;
   }
   return true;
+}
+
+// ============== FRIENDSHIP SERVICES ==============
+
+export interface FriendWithProfile {
+  id: string;
+  status: 'pending' | 'accepted' | 'rejected';
+  created_at: string;
+  profile: Profile;
+  direction: 'sent' | 'received';
+}
+
+export async function getFriends(userId: string): Promise<FriendWithProfile[]> {
+  // Get friendships where user is either the sender or receiver
+  const { data: sent, error: sentError } = await db
+    .from('friendships')
+    .select('id, status, created_at, friend_id')
+    .eq('user_id', userId);
+
+  const { data: received, error: recvError } = await db
+    .from('friendships')
+    .select('id, status, created_at, user_id')
+    .eq('friend_id', userId);
+
+  if (sentError || recvError) {
+    console.error('Error fetching friendships:', sentError || recvError);
+    return [];
+  }
+
+  const results: FriendWithProfile[] = [];
+
+  // Fetch profiles for sent friend requests
+  for (const f of (sent || [])) {
+    const profile = await getProfile(f.friend_id);
+    if (profile) {
+      results.push({ id: f.id, status: f.status, created_at: f.created_at, profile, direction: 'sent' });
+    }
+  }
+
+  // Fetch profiles for received friend requests
+  for (const f of (received || [])) {
+    const profile = await getProfile(f.user_id);
+    if (profile) {
+      results.push({ id: f.id, status: f.status, created_at: f.created_at, profile, direction: 'received' });
+    }
+  }
+
+  return results;
+}
+
+export async function sendFriendRequest(userId: string, friendId: string): Promise<boolean> {
+  const { error } = await db
+    .from('friendships')
+    .insert({ user_id: userId, friend_id: friendId, status: 'pending' });
+
+  if (error) {
+    console.error('Error sending friend request:', error);
+    return false;
+  }
+  return true;
+}
+
+export async function respondToFriendRequest(friendshipId: string, accept: boolean): Promise<boolean> {
+  const { error } = await db
+    .from('friendships')
+    .update({ status: accept ? 'accepted' : 'rejected', updated_at: new Date().toISOString() })
+    .eq('id', friendshipId);
+
+  if (error) {
+    console.error('Error responding to friend request:', error);
+    return false;
+  }
+  return true;
+}
+
+export async function removeFriend(friendshipId: string): Promise<boolean> {
+  const { error } = await db
+    .from('friendships')
+    .delete()
+    .eq('id', friendshipId);
+
+  if (error) {
+    console.error('Error removing friend:', error);
+    return false;
+  }
+  return true;
+}
+
+export async function searchUsersByEmail(email: string, currentUserId: string): Promise<Profile[]> {
+  const { data, error } = await db
+    .from('profiles')
+    .select('*')
+    .ilike('email', `%${email}%`)
+    .neq('id', currentUserId)
+    .limit(10);
+
+  if (error) {
+    console.error('Error searching users:', error);
+    return [];
+  }
+  return (data || []) as Profile[];
+}
+
+// ============== ACHIEVEMENT SERVICES ==============
+
+interface AchievementDef {
+  type: string;
+  title: string;
+  description: string;
+  check: (profile: Profile, stats: { totalStudyMinutes: number; completedTasks: number; totalSessions: number }) => boolean;
+}
+
+export const ACHIEVEMENT_DEFINITIONS: AchievementDef[] = [
+  { type: 'first_session', title: 'First Steps', description: 'Complete your first study session', check: (_, s) => s.totalSessions >= 1 },
+  { type: 'tasks_5', title: 'Getting Things Done', description: 'Complete 5 tasks', check: (p) => p.tasks_completed >= 5 },
+  { type: 'tasks_25', title: 'Task Master', description: 'Complete 25 tasks', check: (p) => p.tasks_completed >= 25 },
+  { type: 'tasks_100', title: 'Centurion', description: 'Complete 100 tasks', check: (p) => p.tasks_completed >= 100 },
+  { type: 'streak_7', title: 'Week Warrior', description: 'Maintain a 7-day streak', check: (p) => p.longest_streak >= 7 },
+  { type: 'streak_30', title: 'Monthly Champion', description: 'Maintain a 30-day streak', check: (p) => p.longest_streak >= 30 },
+  { type: 'hours_10', title: 'Dedicated Learner', description: 'Study for 10 hours total', check: (_, s) => s.totalStudyMinutes >= 600 },
+  { type: 'hours_50', title: 'Scholar', description: 'Study for 50 hours total', check: (_, s) => s.totalStudyMinutes >= 3000 },
+  { type: 'hours_100', title: 'Century Scholar', description: 'Study for 100 hours total', check: (_, s) => s.totalStudyMinutes >= 6000 },
+  { type: 'sessions_50', title: 'Focused Mind', description: 'Complete 50 study sessions', check: (_, s) => s.totalSessions >= 50 },
+];
+
+export async function getAchievements(userId: string): Promise<Achievement[]> {
+  const { data, error } = await db
+    .from('achievements')
+    .select('*')
+    .eq('user_id', userId)
+    .order('unlocked_at', { ascending: false });
+
+  if (error) {
+    console.error('Error fetching achievements:', error);
+    return [];
+  }
+  return (data || []) as Achievement[];
+}
+
+export async function checkAndUnlockAchievements(
+  userId: string,
+  profile: Profile,
+  stats: { totalStudyMinutes: number; completedTasks: number; totalSessions: number }
+): Promise<Achievement[]> {
+  const existing = await getAchievements(userId);
+  const existingTypes = new Set(existing.map((a) => a.achievement_type));
+  const newlyUnlocked: Achievement[] = [];
+
+  for (const def of ACHIEVEMENT_DEFINITIONS) {
+    if (!existingTypes.has(def.type) && def.check(profile, stats)) {
+      const { data, error } = await db
+        .from('achievements')
+        .insert({
+          user_id: userId,
+          achievement_type: def.type,
+          title: def.title,
+          description: def.description,
+        })
+        .select()
+        .single();
+
+      if (!error && data) {
+        newlyUnlocked.push(data as Achievement);
+      }
+    }
+  }
+
+  return newlyUnlocked;
 }
 
 // ============== AUTH HELPERS ==============
