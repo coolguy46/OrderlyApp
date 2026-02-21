@@ -14,7 +14,7 @@ import {
 } from '@/components/ui';
 import { SubjectBadge } from '@/components/ui';
 import { TaskCard } from '@/components/tasks';
-import { formatDuration, getDaysUntil, cn } from '@/lib/utils';
+import { formatDuration, getDaysUntil, cn, isExamType } from '@/lib/utils';
 import { format, isSameDay, isToday, startOfMonth, endOfMonth, startOfWeek, endOfWeek, addDays } from 'date-fns';
 import Link from 'next/link';
 import {
@@ -117,10 +117,14 @@ export function Dashboard() {
 
   const getEventsForDate = (date: Date) => {
     const dateStr = format(date, 'yyyy-MM-dd');
-    return tasks.filter((task) => {
+    const dayTasks = tasks.filter((task) => {
       if (!task.due_date) return false;
       return format(new Date(task.due_date), 'yyyy-MM-dd') === dateStr;
     });
+    const dayExams = exams.filter((exam) => {
+      return format(new Date(exam.exam_date), 'yyyy-MM-dd') === dateStr;
+    });
+    return { tasks: dayTasks, exams: dayExams };
   };
 
   return (
@@ -310,7 +314,8 @@ export function Dashboard() {
               {/* Calendar grid */}
               <div className="grid grid-cols-7 gap-1">
                 {calendarDays.map((day, index) => {
-                  const events = getEventsForDate(day);
+                  const dayEvents = getEventsForDate(day);
+                  const hasEvents = dayEvents.tasks.length > 0 || dayEvents.exams.length > 0;
                   const isCurrentMonth = day.getMonth() === currentDate.getMonth();
                   return (
                     <button
@@ -325,10 +330,13 @@ export function Dashboard() {
                       )}
                     >
                       {format(day, 'd')}
-                      {events.length > 0 && (
+                      {hasEvents && (
                         <div className="absolute bottom-0.5 flex gap-0.5">
-                          {events.slice(0, 2).map((_, i) => (
-                            <div key={i} className="w-1 h-1 rounded-full bg-primary" />
+                          {dayEvents.tasks.slice(0, 2).map((t, i) => (
+                            <div key={i} className={cn('w-1 h-1 rounded-full', isExamType(t.title, t.assignment_type) ? 'bg-purple-500' : 'bg-primary')} />
+                          ))}
+                          {dayEvents.exams.slice(0, 1).map((_, i) => (
+                            <div key={`e-${i}`} className="w-1 h-1 rounded-full bg-purple-500" />
                           ))}
                         </div>
                       )}

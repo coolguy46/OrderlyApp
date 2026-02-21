@@ -1,11 +1,12 @@
 'use client';
 
 import { useState, useMemo, useEffect } from 'react';
-import { Exam } from '@/lib/supabase/types';
+import { Exam, Task } from '@/lib/supabase/types';
 import { useAppStore } from '@/lib/store';
-import { Card, CardHeader, ProgressBar, Button, Modal, Input, Textarea, SelectField, SubjectBadge } from '@/components/ui';
+import { Card, CardHeader, ProgressBar, Button, Modal, Input, Textarea, SelectField, SubjectBadge, Badge } from '@/components/ui';
 import { motion, AnimatePresence } from 'framer-motion';
-import { formatDate, getDaysUntil, cn } from '@/lib/utils';
+import { formatDate, getDaysUntil, cn, isExamType } from '@/lib/utils';
+import Link from 'next/link';
 import {
   GraduationCap,
   Plus,
@@ -17,6 +18,8 @@ import {
   AlertTriangle,
   CheckCircle2,
   BookOpen,
+  ClipboardList,
+  X,
 } from 'lucide-react';
 
 interface ExamCardProps {
@@ -54,12 +57,12 @@ function ExamCard({ exam, onEdit }: ExamCardProps) {
           <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-yellow-500 to-orange-500" />
         )}
 
-        <div className="flex items-start justify-between">
-          <div className="flex-1">
-            <div className="flex items-center gap-3 mb-2">
+        <div className="p-5 space-y-4">
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex items-center gap-3">
               <div
                 className={cn(
-                  'p-2 rounded-xl',
+                  'p-2.5 rounded-xl shrink-0',
                   isPast
                     ? 'bg-gray-500/20'
                     : isUrgent
@@ -78,108 +81,108 @@ function ExamCard({ exam, onEdit }: ExamCardProps) {
                   )}
                 />
               </div>
-              <div>
-                <h3 className="font-semibold text-foreground">{exam.title}</h3>
+              <div className="space-y-1">
+                <h3 className="font-semibold text-foreground leading-snug">{exam.title}</h3>
                 {subject && (
                   <SubjectBadge name={subject.name} color={subject.color} />
                 )}
               </div>
             </div>
 
-            {exam.description && (
-              <p className="text-sm text-muted-foreground mb-3 line-clamp-2">
-                {exam.description}
-              </p>
-            )}
-
-            {/* Meta info */}
-            <div className="flex items-center gap-4 text-sm text-muted-foreground">
-              <span className="flex items-center gap-1">
-                <Calendar className="w-4 h-4" />
-                {formatDate(exam.exam_date)}
-              </span>
-              {exam.location && (
-                <span className="flex items-center gap-1">
-                  <MapPin className="w-4 h-4" />
-                  {exam.location}
-                </span>
-              )}
-              <span
-                className={cn(
-                  'flex items-center gap-1',
-                  isPast
-                    ? 'text-gray-400'
-                    : isUrgent
-                    ? 'text-yellow-400'
-                    : daysUntil <= 14
-                    ? 'text-orange-400'
-                    : 'text-green-400'
-                )}
+            {/* Actions */}
+            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+              <button
+                onClick={() => onEdit(exam)}
+                className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
               >
-                <Clock className="w-4 h-4" />
-                {isPast
-                  ? 'Past'
-                  : daysUntil === 0
-                  ? 'Today!'
-                  : daysUntil === 1
-                  ? 'Tomorrow'
-                  : `${daysUntil} days left`}
-              </span>
-            </div>
-
-            {/* Preparation Progress */}
-            <div className="mt-4">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm text-muted-foreground">Preparation Progress</span>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => handleProgressChange(exam.preparation_progress - 10)}
-                    className="w-6 h-6 rounded-lg bg-muted/50 hover:bg-muted text-muted-foreground hover:text-foreground transition-colors text-sm"
-                    disabled={exam.preparation_progress <= 0}
-                  >
-                    -
-                  </button>
-                  <span className="text-sm font-medium text-foreground w-12 text-center">
-                    {exam.preparation_progress}%
-                  </span>
-                  <button
-                    onClick={() => handleProgressChange(exam.preparation_progress + 10)}
-                    className="w-6 h-6 rounded-lg bg-muted/50 hover:bg-muted text-muted-foreground hover:text-foreground transition-colors text-sm"
-                    disabled={exam.preparation_progress >= 100}
-                  >
-                    +
-                  </button>
-                </div>
-              </div>
-              <ProgressBar
-                value={exam.preparation_progress}
-                max={100}
-                showLabel={false}
-                color={
-                  exam.preparation_progress >= 80
-                    ? 'green'
-                    : exam.preparation_progress >= 50
-                    ? 'yellow'
-                    : 'red'
-                }
-              />
+                <Edit3 className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => deleteExam(exam.id)}
+                className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-red-500 dark:hover:text-red-400 transition-colors"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
             </div>
           </div>
 
-          {/* Actions */}
-          <div className="flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-            <button
-              onClick={() => onEdit(exam)}
-              className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+          {exam.description && (
+            <p className="text-sm text-muted-foreground line-clamp-2">
+              {exam.description}
+            </p>
+          )}
+
+          {/* Meta info */}
+          <div className="flex items-center gap-4 text-sm text-muted-foreground">
+            <span className="flex items-center gap-1.5">
+              <Calendar className="w-4 h-4" />
+              {formatDate(exam.exam_date)}
+            </span>
+            {exam.location && (
+              <span className="flex items-center gap-1.5">
+                <MapPin className="w-4 h-4" />
+                {exam.location}
+              </span>
+            )}
+            <span
+              className={cn(
+                'flex items-center gap-1.5',
+                isPast
+                  ? 'text-gray-400'
+                  : isUrgent
+                  ? 'text-yellow-400'
+                  : daysUntil <= 14
+                  ? 'text-orange-400'
+                  : 'text-green-400'
+              )}
             >
-              <Edit3 className="w-4 h-4" />
-            </button>
-            <button
-              onClick={() => deleteExam(exam.id)}
-              className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-red-500 dark:hover:text-red-400 transition-colors"
-            >
-              <Trash2 className="w-4 h-4" />
-            </button>
+              <Clock className="w-4 h-4" />
+              {isPast
+                ? 'Past'
+                : daysUntil === 0
+                ? 'Today!'
+                : daysUntil === 1
+                ? 'Tomorrow'
+                : `${daysUntil} days left`}
+            </span>
+          </div>
+
+          {/* Preparation Progress */}
+          <div className="pt-1">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm text-muted-foreground">Preparation Progress</span>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => handleProgressChange(exam.preparation_progress - 10)}
+                  className="w-6 h-6 rounded-lg bg-muted/50 hover:bg-muted text-muted-foreground hover:text-foreground transition-colors text-sm"
+                  disabled={exam.preparation_progress <= 0}
+                >
+                  -
+                </button>
+                <span className="text-sm font-medium text-foreground w-12 text-center">
+                  {exam.preparation_progress}%
+                </span>
+                <button
+                  onClick={() => handleProgressChange(exam.preparation_progress + 10)}
+                  className="w-6 h-6 rounded-lg bg-muted/50 hover:bg-muted text-muted-foreground hover:text-foreground transition-colors text-sm"
+                  disabled={exam.preparation_progress >= 100}
+                >
+                  +
+                </button>
+              </div>
+            </div>
+            <ProgressBar
+              value={exam.preparation_progress}
+              max={100}
+              showLabel={false}
+              color={
+                exam.preparation_progress >= 80
+                  ? 'green'
+                  : exam.preparation_progress >= 50
+                  ? 'yellow'
+                  : 'red'
+              }
+            />
           </div>
         </div>
       </Card>
@@ -212,7 +215,7 @@ function ExamForm({ isOpen, onClose, exam }: ExamFormProps) {
       user_id: user?.id || '',
       title,
       description: description || null,
-      exam_date: new Date(examDate).toISOString(),
+      exam_date: new Date(examDate + 'T00:00:00').toISOString(),
       location: location || null,
       subject_id: subjectId || null,
       preparation_progress: parseInt(progress) || 0,
@@ -321,16 +324,128 @@ function ExamForm({ isOpen, onClose, exam }: ExamFormProps) {
   );
 }
 
+// Card for exam-type tasks (from tasks list)
+function ExamTaskCard({ task, onDismiss }: { task: Task; onDismiss: (id: string) => void }) {
+  const { subjects } = useAppStore();
+  const subject = subjects.find((s) => s.id === task.subject_id);
+  const daysUntil = task.due_date ? getDaysUntil(task.due_date) : null;
+  const isUrgent = daysUntil !== null && daysUntil <= 7 && daysUntil >= 0;
+  const isPast = daysUntil !== null && daysUntil < 0;
+
+  return (
+    <motion.div layout initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }}>
+      <Card className={cn(
+        'group relative overflow-hidden',
+        isUrgent && !isPast && 'border-yellow-500/30',
+        isPast && 'opacity-60'
+      )}>
+        {isUrgent && !isPast && (
+          <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-yellow-500 to-orange-500" />
+        )}
+        <div className="p-5 space-y-3">
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className={cn('p-2.5 rounded-xl shrink-0', isPast ? 'bg-gray-500/20' : isUrgent ? 'bg-yellow-500/20' : 'bg-indigo-500/20')}>
+                <ClipboardList className={cn('w-5 h-5', isPast ? 'text-gray-400' : isUrgent ? 'text-yellow-400' : 'text-indigo-400')} />
+              </div>
+              <div className="space-y-1">
+                <h3 className="font-semibold text-foreground leading-snug">{task.title}</h3>
+                <div className="flex items-center gap-2 flex-wrap">
+                  {subject && <SubjectBadge name={subject.name} color={subject.color} />}
+                  <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-indigo-500/30 text-indigo-400">From Tasks</Badge>
+                  {task.course_name && (
+                    <span className="text-xs text-muted-foreground">{task.course_name}</span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+              <Link href="/tasks">
+                <Button variant="ghost" size="sm" className="text-xs h-8">
+                  View in Tasks
+                </Button>
+              </Link>
+              <button
+                onClick={() => onDismiss(task.id)}
+                title="Remove from Exams page"
+                className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-red-500 dark:hover:text-red-400 transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-4 text-sm text-muted-foreground">
+            {task.due_date && (
+              <span className="flex items-center gap-1.5">
+                <Calendar className="w-4 h-4" />
+                {formatDate(task.due_date)}
+              </span>
+            )}
+            <span className={cn(
+              'flex items-center gap-1.5',
+              isPast ? 'text-gray-400' : isUrgent ? 'text-yellow-400' : daysUntil !== null && daysUntil <= 14 ? 'text-orange-400' : 'text-green-400'
+            )}>
+              <Clock className="w-4 h-4" />
+              {isPast ? 'Past' : daysUntil === 0 ? 'Today!' : daysUntil === 1 ? 'Tomorrow' : `${daysUntil} days left`}
+            </span>
+            <Badge variant={task.status === 'completed' ? 'default' : 'secondary'} className="text-[10px]">
+              {task.status === 'completed' ? 'Completed' : task.status === 'in_progress' ? 'In Progress' : 'Pending'}
+            </Badge>
+          </div>
+        </div>
+      </Card>
+    </motion.div>
+  );
+}
+
 export function ExamList() {
-  const { exams } = useAppStore();
+  const { exams, tasks } = useAppStore();
   const [showForm, setShowForm] = useState(false);
   const [editingExam, setEditingExam] = useState<Exam | null>(null);
   const [filter, setFilter] = useState<'all' | 'upcoming' | 'past'>('upcoming');
   const [mounted, setMounted] = useState(false);
+  const [dismissedTaskIds, setDismissedTaskIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     setMounted(true);
+    // Load dismissed task IDs from localStorage
+    const saved = localStorage.getItem('dismissedExamTaskIds');
+    if (saved) {
+      try { setDismissedTaskIds(new Set(JSON.parse(saved))); } catch {}
+    }
   }, []);
+
+  const handleDismissTask = (taskId: string) => {
+    setDismissedTaskIds((prev) => {
+      const next = new Set(prev);
+      next.add(taskId);
+      localStorage.setItem('dismissedExamTaskIds', JSON.stringify([...next]));
+      return next;
+    });
+  };
+
+  // Get exam-type tasks that don't already have a matching exam entry
+  const examTypeTasks = useMemo(() => {
+    if (!mounted) return [];
+    return tasks.filter((t) => {
+      if (!t.due_date) return false;
+      if (!isExamType(t.title, t.assignment_type)) return false;
+      // Don't duplicate if there's already an exam with the same title
+      const hasMatchingExam = exams.some((e) => e.title === t.title);
+      if (hasMatchingExam) return false;
+      // Exclude dismissed tasks
+      if (dismissedTaskIds.has(t.id)) return false;
+      return true;
+    });
+  }, [tasks, exams, mounted, dismissedTaskIds]);
+
+  const allExamItems = useMemo(() => {
+    // Combine real exams + exam-type tasks for stats
+    return [...exams.map(e => ({ type: 'exam' as const, date: e.exam_date })), ...examTypeTasks.map(t => ({ type: 'task' as const, date: t.due_date! }))];
+  }, [exams, examTypeTasks]);
 
   const filteredExams = useMemo(() => {
     if (!mounted) return [];
@@ -349,22 +464,38 @@ export function ExamList() {
     return filtered;
   }, [exams, filter, mounted]);
 
+  const filteredExamTasks = useMemo(() => {
+    if (!mounted) return [];
+    const now = new Date();
+    let filtered = [...examTypeTasks];
+
+    if (filter === 'upcoming') {
+      filtered = filtered.filter((t) => new Date(t.due_date!) >= now);
+    } else if (filter === 'past') {
+      filtered = filtered.filter((t) => new Date(t.due_date!) < now);
+    }
+
+    filtered.sort((a, b) => new Date(a.due_date!).getTime() - new Date(b.due_date!).getTime());
+    return filtered;
+  }, [examTypeTasks, filter, mounted]);
+
   const stats = useMemo(() => {
     if (!mounted) return { total: 0, upcoming: 0, thisWeek: 0, avgPrep: 0 };
     const now = new Date();
-    const upcoming = exams.filter((e) => new Date(e.exam_date) >= now);
-    const thisWeek = upcoming.filter((e) => getDaysUntil(e.exam_date) <= 7);
+    const allDates = allExamItems;
+    const upcoming = allDates.filter((item) => new Date(item.date) >= now);
+    const thisWeek = upcoming.filter((item) => getDaysUntil(item.date) <= 7);
     const avgPrep = exams.length > 0
       ? Math.round(exams.reduce((acc, e) => acc + e.preparation_progress, 0) / exams.length)
       : 0;
 
     return {
-      total: exams.length,
+      total: allDates.length,
       upcoming: upcoming.length,
       thisWeek: thisWeek.length,
       avgPrep,
     };
-  }, [exams, mounted]);
+  }, [exams, allExamItems, mounted]);
 
   return (
     <div className="space-y-6">
@@ -459,7 +590,7 @@ export function ExamList() {
       {/* Exam List */}
       <div className="space-y-4">
         <AnimatePresence mode="popLayout">
-          {filteredExams.length === 0 ? (
+          {filteredExams.length === 0 && filteredExamTasks.length === 0 ? (
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -474,16 +605,30 @@ export function ExamList() {
               </p>
             </motion.div>
           ) : (
-            filteredExams.map((exam) => (
-              <ExamCard
-                key={exam.id}
-                exam={exam}
-                onEdit={(e) => {
-                  setEditingExam(e);
-                  setShowForm(true);
-                }}
-              />
-            ))
+            <>
+              {filteredExams.map((exam) => (
+                <ExamCard
+                  key={exam.id}
+                  exam={exam}
+                  onEdit={(e) => {
+                    setEditingExam(e);
+                    setShowForm(true);
+                  }}
+                />
+              ))}
+              {filteredExamTasks.length > 0 && (
+                <>
+                  <div className="flex items-center gap-2 pt-2">
+                    <ClipboardList className="w-4 h-4 text-muted-foreground" />
+                    <h3 className="text-sm font-medium text-muted-foreground">Exam-type Tasks</h3>
+                    <Badge variant="secondary" className="text-[10px]">{filteredExamTasks.length}</Badge>
+                  </div>
+                  {filteredExamTasks.map((task) => (
+                    <ExamTaskCard key={task.id} task={task} onDismiss={handleDismissTask} />
+                  ))}
+                </>
+              )}
+            </>
           )}
         </AnimatePresence>
       </div>

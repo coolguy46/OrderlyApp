@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription, Button, Badg
 import { CanvasAssignment } from '@/lib/integrations/canvas';
 import { useCanvasSyncSupabase, formatTimeUntilSync, formatLastSync } from '@/lib/integrations/useCanvasSyncSupabase';
 import { useAppStore } from '@/lib/store';
+import { isExamType } from '@/lib/utils';
 import * as db from '@/lib/supabase/services';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -39,7 +40,7 @@ function CanvasIcon({ className }: { className?: string }) {
 }
 
 export default function IntegrationsPage() {
-  const { addTask, tasks, user, refreshData } = useAppStore();
+  const { addTask, addExam, tasks, exams, user, refreshData } = useAppStore();
   const [removedCount, setRemovedCount] = useState(0);
 
   // Canvas live sync hook with Supabase
@@ -81,10 +82,12 @@ export default function IntegrationsPage() {
         // Skip if already exists in the store (by external_id)
         if (existingCanvasExternalIds.has(assignment.id)) continue;
 
+        const taskTitle = `[Canvas] ${assignment.title}`;
+
         // Create task in Supabase
         await addTask({
           user_id: user.id,
-          title: `[Canvas] ${assignment.title}`,
+          title: taskTitle,
           description: assignment.description || `Course: ${assignment.courseName}`,
           priority: assignment.type === 'exam' ? 'high' : 'medium',
           status: 'pending',
@@ -97,6 +100,25 @@ export default function IntegrationsPage() {
           course_name: assignment.courseName || null,
           assignment_type: assignment.type || 'assignment',
         });
+
+        // Also create an exam entry if this is an exam/test/quiz
+        if (isExamType(assignment.title, assignment.type)) {
+          const examExists = exams.some(
+            (e) => e.title === taskTitle || e.title === assignment.title
+          );
+          if (!examExists) {
+            await addExam({
+              user_id: user.id,
+              title: taskTitle,
+              description: assignment.description || `Course: ${assignment.courseName}`,
+              exam_date: dueDate.toISOString(),
+              location: null,
+              subject_id: null,
+              preparation_progress: 0,
+            });
+          }
+        }
+
         importedCount++;
       }
       

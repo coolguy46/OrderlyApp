@@ -12,7 +12,8 @@ import {
   Badge,
 } from '@/components/ui';
 import { PriorityBadge, StatusBadge, SubjectBadge } from '@/components/ui';
-import { formatDate, getDaysUntil, cn, isTaskOverdue } from '@/lib/utils';
+import { formatDate, getDaysUntil, cn, isTaskOverdue, isExamType } from '@/lib/utils';
+import Link from 'next/link';
 import {
   Calendar,
   Clock,
@@ -21,6 +22,7 @@ import {
   Tag,
   CheckCircle2,
   Play,
+  GraduationCap,
 } from 'lucide-react';
 
 interface TaskDetailViewerProps {
@@ -42,6 +44,9 @@ export function TaskDetailViewer({ task, open, onOpenChange, onEdit }: TaskDetai
   const isOverdue = isTaskOverdue(task.due_date, task.status);
   const displayStatus = isOverdue ? 'overdue' : task.status;
   const displayPriority = isOverdue ? 'high' : task.priority;
+
+  // Check if task is exam-type
+  const isExamTask = isExamType(task.title, task.assignment_type);
 
   const handleComplete = async () => {
     if (task.status === 'completed') {
@@ -256,6 +261,14 @@ export function TaskDetailViewer({ task, open, onOpenChange, onEdit }: TaskDetai
               <Play className="w-4 h-4 mr-2" />
               Start Progress
             </Button>
+          )}
+          {isExamTask && (
+            <Link href="/exams">
+              <Button variant="secondary" className="text-indigo-500 border-indigo-500/30" onClick={() => onOpenChange(false)}>
+                <GraduationCap className="w-4 h-4 mr-2" />
+                View in Exams
+              </Button>
+            </Link>
           )}
           {onEdit && (
             <Button variant="outline" onClick={() => { onEdit(task); onOpenChange(false); }}>

@@ -52,8 +52,10 @@ import {
   Plus,
   X,
   Repeat,
+  GraduationCap,
 } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import Link from 'next/link';
+import { cn, isExamType } from '@/lib/utils';
 
 type ViewMode = 'month' | 'week' | 'day';
 
@@ -513,10 +515,11 @@ export function Calendar() {
                       <div className="space-y-1">
                         {selectedDateEvents.tasks.map((task) => {
                           const subject = subjects.find((s) => s.id === task.subject_id);
+                          const taskIsExam = isExamType(task.title, task.assignment_type);
                           return (
                             <div key={task.id} className="p-2 bg-muted/50 rounded-lg border border-border text-xs">
                               <p className="font-medium">{task.title}</p>
-                              <div className="flex items-center gap-1 mt-1">
+                              <div className="flex items-center gap-1 mt-1 flex-wrap">
                                 {subject && (
                                   <Badge variant="secondary" className="text-[10px] h-4" style={{ backgroundColor: subject.color + '20', color: subject.color }}>
                                     {subject.name}
@@ -525,6 +528,14 @@ export function Calendar() {
                                 <Badge variant={task.priority === 'high' ? 'destructive' : 'secondary'} className="text-[10px] h-4">
                                   {task.priority}
                                 </Badge>
+                                {taskIsExam && (
+                                  <Link href="/exams" className="ml-auto">
+                                    <Badge variant="outline" className="text-[10px] h-4 cursor-pointer border-indigo-500/30 text-indigo-400 hover:bg-indigo-500/10">
+                                      <GraduationCap className="w-2.5 h-2.5 mr-0.5" />
+                                      Exams
+                                    </Badge>
+                                  </Link>
+                                )}
                               </div>
                             </div>
                           );

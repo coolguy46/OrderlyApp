@@ -15,8 +15,9 @@ import {
 } from '@/components/ui';
 import { PriorityBadge, StatusBadge, SubjectBadge } from '@/components/ui';
 import { TaskDetailViewer } from './TaskDetailViewer';
-import { formatDate, getDaysUntil, cn, isTaskOverdue, calculateSuggestedPriority } from '@/lib/utils';
+import { formatDate, getDaysUntil, cn, isTaskOverdue, calculateSuggestedPriority, isExamType } from '@/lib/utils';
 import { motion } from 'framer-motion';
+import Link from 'next/link';
 import {
   CheckCircle2,
   Circle,
@@ -28,6 +29,7 @@ import {
   Play,
   Eye,
   ExternalLink,
+  GraduationCap,
 } from 'lucide-react';
 
 interface TaskCardProps {
@@ -53,6 +55,9 @@ export function TaskCard({ task, onEdit, compact = false }: TaskCardProps) {
 
   // Check if task is from external source (Canvas/Google Classroom)
   const isExternalTask = task.source && task.source !== 'manual';
+
+  // Check if task is exam-type
+  const isExamTask = isExamType(task.title, task.assignment_type);
 
   const handleComplete = async () => {
     if (task.status === 'completed') {
@@ -232,6 +237,14 @@ export function TaskCard({ task, onEdit, compact = false }: TaskCardProps) {
                           Open in {task.source === 'canvas' ? 'Canvas' : 'Browser'}
                         </DropdownMenuItem>
                       )}
+                      {isExamTask && (
+                        <DropdownMenuItem asChild>
+                          <Link href="/exams">
+                            <GraduationCap className="w-4 h-4 mr-2" />
+                            View in Exams
+                          </Link>
+                        </DropdownMenuItem>
+                      )}
                       <DropdownMenuItem 
                         onClick={() => deleteTask(task.id)}
                         className="text-red-500 focus:text-red-500"
@@ -299,6 +312,14 @@ export function TaskCard({ task, onEdit, compact = false }: TaskCardProps) {
                     <Eye className="w-3 h-3" />
                     View
                   </Button>
+                  {isExamTask && (
+                    <Link href="/exams">
+                      <Button size="sm" variant="ghost" className="text-indigo-500 hover:text-indigo-400">
+                        <GraduationCap className="w-3 h-3" />
+                        Exams
+                      </Button>
+                    </Link>
+                  )}
                 </div>
               </div>
             </div>

@@ -68,3 +68,13 @@ export function isTaskOverdue(dueDate: string | Date | null, status: string): bo
   const daysUntil = getDaysUntil(dueDate);
   return daysUntil < 0;
 }
+
+// Exam-type keywords for detecting exam/test/quiz tasks
+const EXAM_KEYWORDS = ['exam', 'test', 'quiz', 'midterm', 'final', 'assessment'];
+
+// Check if a task is exam-related based on title or assignment_type
+export function isExamType(title: string, assignmentType?: string | null): boolean {
+  if (assignmentType === 'exam' || assignmentType === 'quiz') return true;
+  const lower = title.toLowerCase();
+  return EXAM_KEYWORDS.some((kw) => lower.includes(kw));
+}
