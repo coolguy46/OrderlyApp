@@ -1,6 +1,6 @@
 import { clsx, type ClassValue } from "clsx"
 import { twMerge } from "tailwind-merge"
-import { format, formatDistanceToNow, differenceInDays, differenceInHours } from 'date-fns';
+import { format, formatDistanceToNow, differenceInDays, differenceInHours, startOfDay } from 'date-fns';
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
@@ -26,7 +26,8 @@ export function formatDuration(minutes: number): string {
 
 export function getDaysUntil(date: string | Date): number {
   const d = typeof date === 'string' ? new Date(date) : date;
-  return differenceInDays(d, new Date());
+  // Compare at the start-of-day level so "due today" = 0, not negative
+  return differenceInDays(startOfDay(d), startOfDay(new Date()));
 }
 
 export function getHoursUntil(date: string | Date): number {
@@ -49,21 +50,21 @@ export function generateId(): string {
 }
 
 // Calculate suggested priority based on due date
-// 0-24 hours = high, 25-72 hours = medium, 72+ hours = low, overdue = high
+// Due today or tomorrow = high, 2-3 days = medium, 3+ days = low, overdue = high
 export function calculateSuggestedPriority(dueDate: string | Date | null): 'high' | 'medium' | 'low' {
   if (!dueDate) return 'medium';
   
-  const hoursUntil = getHoursUntil(dueDate);
+  const daysUntil = getDaysUntil(dueDate);
   
-  if (hoursUntil < 0) return 'high'; // Overdue
-  if (hoursUntil <= 24) return 'high'; // 0-24 hours
-  if (hoursUntil <= 72) return 'medium'; // 25-72 hours
-  return 'low'; // More than 72 hours
+  if (daysUntil < 0) return 'high'; // Overdue (past days)
+  if (daysUntil <= 1) return 'high'; // Due today or tomorrow
+  if (daysUntil <= 3) return 'medium'; // 2-3 days away
+  return 'low'; // More than 3 days
 }
 
-// Check if a task is overdue
+// Check if a task is overdue (only if the due date is strictly before today)
 export function isTaskOverdue(dueDate: string | Date | null, status: string): boolean {
   if (!dueDate || status === 'completed') return false;
-  const hoursUntil = getHoursUntil(dueDate);
-  return hoursUntil < 0;
+  const daysUntil = getDaysUntil(dueDate);
+  return daysUntil < 0;
 }
