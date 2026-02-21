@@ -107,7 +107,7 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
       priority,
       status,
       subject_id: subjectId === 'none' ? null : subjectId,
-      due_date: dueDate ? new Date(dueDate).toISOString() : null,
+      due_date: dueDate ? new Date(dueDate + 'T00:00:00').toISOString() : null,
       completed_at: status === 'completed' ? new Date().toISOString() : null,
     };
 
