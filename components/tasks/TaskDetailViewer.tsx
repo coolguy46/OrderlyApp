@@ -13,7 +13,6 @@ import {
 } from '@/components/ui';
 import { PriorityBadge, StatusBadge, SubjectBadge } from '@/components/ui';
 import { formatDate, getDaysUntil, cn, isTaskOverdue } from '@/lib/utils';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Calendar,
   Clock,
@@ -152,7 +151,7 @@ export function TaskDetailViewer({ task, open, onOpenChange, onEdit }: TaskDetai
           </div>
         </DialogHeader>
 
-        <ScrollArea className="flex-1 -mx-6 px-6 min-h-0">
+        <div className="flex-1 -mx-6 px-6 min-h-0 overflow-y-auto">
           <div className="space-y-6 py-4">
             {/* Due Date & Course Info */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -249,7 +248,7 @@ export function TaskDetailViewer({ task, open, onOpenChange, onEdit }: TaskDetai
               </div>
             )}
           </div>
-        </ScrollArea>
+        </div>
 
         <DialogFooter className="flex-shrink-0 flex-row gap-2 sm:gap-2 pt-4 border-t border-border/50">
           {task.status === 'pending' && !isOverdue && (
