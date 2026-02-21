@@ -44,18 +44,24 @@ function ExamCard({ exam, onEdit }: ExamCardProps) {
       layout
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -20 }}
+      exit={{ opacity: 0, x: -30 }}
+      whileHover={{ y: -3 }}
+      transition={{ type: 'spring', stiffness: 300, damping: 24 }}
     >
       <Card
         className={cn(
-          'group relative overflow-hidden',
+          'group relative overflow-hidden glow-border',
           isUrgent && !isPast && 'border-yellow-500/30',
           isPast && 'opacity-60'
         )}
       >
         {/* Urgency indicator */}
         {isUrgent && !isPast && (
-          <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-yellow-500 to-orange-500" />
+          <motion.div
+            animate={{ opacity: [0.7, 1, 0.7] }}
+            transition={{ duration: 2, repeat: Infinity }}
+            className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-yellow-500 to-orange-500"
+          />
         )}
 
         <div className="p-5 space-y-4">
@@ -176,6 +182,7 @@ function ExamCard({ exam, onEdit }: ExamCardProps) {
               value={exam.preparation_progress}
               max={100}
               showLabel={false}
+              shimmer
               color={
                 exam.preparation_progress >= 80
                   ? 'green'
@@ -411,6 +418,19 @@ function ExamTaskCard({ task, onDismiss }: { task: Task; onDismiss: (id: string)
   );
 }
 
+const containerVariants = {
+  hidden: { opacity: 0 },
+  show: {
+    opacity: 1,
+    transition: { staggerChildren: 0.08 },
+  },
+};
+
+const itemVariants = {
+  hidden: { opacity: 0, y: 20 },
+  show: { opacity: 1, y: 0, transition: { type: 'spring' as const, stiffness: 300, damping: 24 } },
+};
+
 export function ExamList() {
   const { exams, tasks } = useAppStore();
   const [showForm, setShowForm] = useState(false);
@@ -507,108 +527,94 @@ export function ExamList() {
     };
   }, [exams, allExamItems, mounted]);
 
+  const statCards = [
+    { icon: GraduationCap, label: 'Total Exams', value: stats.total, color: 'indigo', gradient: 'from-indigo-500/10 to-indigo-500/5' },
+    { icon: Calendar, label: 'Upcoming', value: stats.upcoming, color: 'blue', gradient: 'from-blue-500/10 to-blue-500/5' },
+    { icon: AlertTriangle, label: 'This Week', value: stats.thisWeek, color: 'yellow', gradient: 'from-yellow-500/10 to-yellow-500/5' },
+    { icon: BookOpen, label: 'Avg. Preparation', value: `${stats.avgPrep}%`, color: 'green', gradient: 'from-green-500/10 to-green-500/5' },
+  ];
+
   return (
-    <div className="space-y-6">
+    <motion.div
+      variants={containerVariants}
+      initial="hidden"
+      animate="show"
+      className="space-y-6"
+    >
       {/* Stats */}
       <div className="grid grid-cols-4 gap-4">
-        <motion.div
-          whileHover={{ scale: 1.02 }}
-          className="bg-muted/50 backdrop-blur-xl border border-border rounded-xl p-4"
-        >
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-indigo-500/20 rounded-lg">
-              <GraduationCap className="w-5 h-5 text-indigo-500 dark:text-indigo-400" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold text-foreground">{stats.total}</p>
-              <p className="text-xs text-muted-foreground">Total Exams</p>
-            </div>
-          </div>
-        </motion.div>
-
-        <motion.div
-          whileHover={{ scale: 1.02 }}
-          className="bg-muted/50 backdrop-blur-xl border border-border rounded-xl p-4"
-        >
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-blue-500/20 rounded-lg">
-              <Calendar className="w-5 h-5 text-blue-500 dark:text-blue-400" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold text-foreground">{stats.upcoming}</p>
-              <p className="text-xs text-muted-foreground">Upcoming</p>
-            </div>
-          </div>
-        </motion.div>
-
-        <motion.div
-          whileHover={{ scale: 1.02 }}
-          className="bg-muted/50 backdrop-blur-xl border border-border rounded-xl p-4"
-        >
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-yellow-500/20 rounded-lg">
-              <AlertTriangle className="w-5 h-5 text-yellow-500 dark:text-yellow-400" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold text-foreground">{stats.thisWeek}</p>
-              <p className="text-xs text-muted-foreground">This Week</p>
-            </div>
-          </div>
-        </motion.div>
-
-        <motion.div
-          whileHover={{ scale: 1.02 }}
-          className="bg-muted/50 backdrop-blur-xl border border-border rounded-xl p-4"
-        >
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-green-500/20 rounded-lg">
-              <BookOpen className="w-5 h-5 text-green-500 dark:text-green-400" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold text-foreground">{stats.avgPrep}%</p>
-              <p className="text-xs text-muted-foreground">Avg. Preparation</p>
-            </div>
-          </div>
-        </motion.div>
+        {statCards.map((stat) => {
+          const Icon = stat.icon;
+          return (
+            <motion.div
+              key={stat.label}
+              variants={itemVariants}
+              whileHover={{ scale: 1.03, y: -2 }}
+              transition={{ type: 'spring', stiffness: 400, damping: 17 }}
+              className={`bg-gradient-to-br ${stat.gradient} backdrop-blur-xl border border-border rounded-xl p-4 glow-border`}
+            >
+              <div className="flex items-center gap-3">
+                <div className={`p-2 bg-${stat.color}-500/20 rounded-lg`}>
+                  <Icon className={`w-5 h-5 text-${stat.color}-500 dark:text-${stat.color}-400`} />
+                </div>
+                <div>
+                  <p className="text-2xl font-bold text-foreground">{stat.value}</p>
+                  <p className="text-xs text-muted-foreground">{stat.label}</p>
+                </div>
+              </div>
+            </motion.div>
+          );
+        })}
       </div>
 
-      {/* Filters and Actions */}
-      <div className="flex items-center justify-between">
+      <motion.div variants={itemVariants} className="flex items-center justify-between">
         <div className="flex items-center gap-2 bg-muted/50 rounded-xl p-1.5">
           {(['upcoming', 'all', 'past'] as const).map((f) => (
             <button
               key={f}
               onClick={() => setFilter(f)}
               className={cn(
-                'px-4 py-2 text-[clamp(0.65rem,1.5vw,0.75rem)] font-medium rounded-lg transition-all capitalize',
+                'relative px-4 py-2 text-[clamp(0.65rem,1.5vw,0.75rem)] font-medium rounded-lg transition-all capitalize',
                 filter === f
-                  ? 'bg-indigo-500 text-white'
+                  ? 'text-white'
                   : 'text-muted-foreground hover:text-foreground'
               )}
             >
-              {f}
+              {filter === f && (
+                <motion.div
+                  layoutId="examFilterIndicator"
+                  className="absolute inset-0 bg-indigo-500 rounded-lg"
+                  transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+                />
+              )}
+              <span className="relative z-10">{f}</span>
             </button>
           ))}
         </div>
 
-        <Button onClick={() => setShowForm(true)}>
-          <Plus className="w-4 h-4" />
-          Add Exam
-        </Button>
-      </div>
+        <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+          <Button onClick={() => setShowForm(true)}>
+            <Plus className="w-4 h-4" />
+            Add Exam
+          </Button>
+        </motion.div>
+      </motion.div>
 
-      {/* Exam List */}
-      <div className="space-y-4">
+      <motion.div variants={itemVariants} className="space-y-4">
         <AnimatePresence mode="popLayout">
           {filteredExams.length === 0 && filteredExamTasks.length === 0 ? (
             <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
               className="text-center py-12"
             >
-              <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-muted/50 flex items-center justify-center">
+              <motion.div
+                animate={{ y: [0, -8, 0] }}
+                transition={{ duration: 3, repeat: Infinity }}
+                className="w-16 h-16 mx-auto mb-4 rounded-full bg-muted/50 flex items-center justify-center"
+              >
                 <GraduationCap className="w-8 h-8 text-muted-foreground" />
-              </div>
+              </motion.div>
               <p className="text-muted-foreground">No exams found</p>
               <p className="text-sm text-muted-foreground/70 mt-1">
                 Add an exam to start tracking your preparation
@@ -641,7 +647,7 @@ export function ExamList() {
             </>
           )}
         </AnimatePresence>
-      </div>
+      </motion.div>
 
       {/* Exam Form Modal */}
       <ExamForm
@@ -652,6 +658,6 @@ export function ExamList() {
         }}
         exam={editingExam}
       />
-    </div>
+    </motion.div>
   );
 }

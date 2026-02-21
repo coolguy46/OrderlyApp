@@ -25,6 +25,19 @@ import {
 
 type VisualizationType = 'egg' | 'ice';
 
+const containerVariants = {
+  hidden: { opacity: 0 },
+  show: {
+    opacity: 1,
+    transition: { staggerChildren: 0.08 },
+  },
+};
+
+const itemVariants = {
+  hidden: { opacity: 0, y: 20 },
+  show: { opacity: 1, y: 0, transition: { type: 'spring' as const, stiffness: 300, damping: 24 } },
+};
+
 export function StudySession() {
   const { studySessions, tasks, user, pomodoroSettings } = useAppStore();
   const [visualType, setVisualType] = useState<VisualizationType>('egg');
@@ -114,83 +127,54 @@ export function StudySession() {
     setShowGoalSettings(true);
   };
 
+  const statCards = [
+    { icon: Timer, label: 'Today', value: formatDuration(todayStats.totalMinutes), color: 'indigo', gradient: 'from-indigo-500/10 to-indigo-500/5' },
+    { icon: Clock, label: 'Sessions', value: todayStats.sessionCount, color: 'green', gradient: 'from-green-500/10 to-green-500/5' },
+    { icon: TrendingUp, label: 'This Week', value: formatDuration(weeklyStats.totalMinutes), color: 'purple', gradient: 'from-purple-500/10 to-purple-500/5' },
+    { icon: Flame, label: 'Day Streak', value: user?.current_streak || 0, color: 'orange', gradient: 'from-orange-500/10 to-orange-500/5' },
+  ];
+
   return (
-    <div className="space-y-4">
+    <motion.div
+      variants={containerVariants}
+      initial="hidden"
+      animate="show"
+      className="space-y-4"
+    >
       {/* Stats Grid */}
       <div className="grid grid-cols-4 gap-3">
-        <motion.div
-          whileHover={{ scale: 1.01 }}
-          className="bg-card/50 backdrop-blur-xl border border-border rounded-xl p-3"
-        >
-          <div className="flex items-center gap-2">
-            <div className="p-1.5 bg-indigo-500/20 rounded-lg">
-              <Timer className="w-4 h-4 text-indigo-400" />
-            </div>
-            <div>
-              <p className="text-lg font-bold text-foreground">
-                {formatDuration(todayStats.totalMinutes)}
-              </p>
-              <p className="text-xs text-muted-foreground">Today</p>
-            </div>
-          </div>
-        </motion.div>
-
-        <motion.div
-          whileHover={{ scale: 1.01 }}
-          className="bg-card/50 backdrop-blur-xl border border-border rounded-xl p-3"
-        >
-          <div className="flex items-center gap-2">
-            <div className="p-1.5 bg-green-500/20 rounded-lg">
-              <Clock className="w-4 h-4 text-green-400" />
-            </div>
-            <div>
-              <p className="text-lg font-bold text-foreground">{todayStats.sessionCount}</p>
-              <p className="text-xs text-muted-foreground">Sessions</p>
-            </div>
-          </div>
-        </motion.div>
-
-        <motion.div
-          whileHover={{ scale: 1.01 }}
-          className="bg-card/50 backdrop-blur-xl border border-border rounded-xl p-3"
-        >
-          <div className="flex items-center gap-2">
-            <div className="p-1.5 bg-purple-500/20 rounded-lg">
-              <TrendingUp className="w-4 h-4 text-purple-400" />
-            </div>
-            <div>
-              <p className="text-lg font-bold text-foreground">
-                {formatDuration(weeklyStats.totalMinutes)}
-              </p>
-              <p className="text-xs text-muted-foreground">This Week</p>
-            </div>
-          </div>
-        </motion.div>
-
-        <motion.div
-          whileHover={{ scale: 1.01 }}
-          className="bg-card/50 backdrop-blur-xl border border-border rounded-xl p-3"
-        >
-          <div className="flex items-center gap-2">
-            <div className="p-1.5 bg-orange-500/20 rounded-lg">
-              <Flame className="w-4 h-4 text-orange-400" />
-            </div>
-            <div>
-              <p className="text-lg font-bold text-foreground">{user?.current_streak || 0}</p>
-              <p className="text-xs text-muted-foreground">Day Streak</p>
-            </div>
-          </div>
-        </motion.div>
+        {statCards.map((stat) => {
+          const Icon = stat.icon;
+          return (
+            <motion.div
+              key={stat.label}
+              variants={itemVariants}
+              whileHover={{ scale: 1.03, y: -2 }}
+              transition={{ type: 'spring', stiffness: 400, damping: 17 }}
+              className={`bg-gradient-to-br ${stat.gradient} backdrop-blur-xl border border-border rounded-xl p-3 glow-border`}
+            >
+              <div className="flex items-center gap-2">
+                <div className={`p-1.5 bg-${stat.color}-500/20 rounded-lg`}>
+                  <Icon className={`w-4 h-4 text-${stat.color}-400`} />
+                </div>
+                <div>
+                  <p className="text-lg font-bold text-foreground">{stat.value}</p>
+                  <p className="text-xs text-muted-foreground">{stat.label}</p>
+                </div>
+              </div>
+            </motion.div>
+          );
+        })}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <motion.div variants={itemVariants} className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Pomodoro Timer */}
         <div>
           <PomodoroTimer />
         </div>
 
         {/* Gamified Progress */}
-        <Card>
+        <Card className="glow-border">
           <CardHeader className="pb-2">
             <div className="flex items-center justify-between">
               <div>
@@ -265,10 +249,11 @@ export function StudySession() {
             </div>
           </CardContent>
         </Card>
-      </div>
+      </motion.div>
 
       {/* Pending Tasks instead of Recent Sessions */}
-      <Card>
+      <motion.div variants={itemVariants}>
+      <Card className="glow-border">
         <CardHeader className="pb-2">
           <div className="flex items-center gap-2">
             <CheckCircle2 className="w-4 h-4 text-primary" />
@@ -289,6 +274,7 @@ export function StudySession() {
           </div>
         </CardContent>
       </Card>
+      </motion.div>
 
       {/* Goal Settings Modal */}
       <Dialog open={showGoalSettings} onOpenChange={(open) => !open && setShowGoalSettings(false)}>
@@ -337,6 +323,6 @@ export function StudySession() {
           </div>
         </DialogContent>
       </Dialog>
-    </div>
+    </motion.div>
   );
 }

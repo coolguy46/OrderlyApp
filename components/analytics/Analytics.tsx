@@ -39,6 +39,22 @@ import {
   Zap,
 } from 'lucide-react';
 
+// Animation variants
+const containerVariants = {
+  hidden: { opacity: 0 },
+  show: { opacity: 1, transition: { staggerChildren: 0.08, delayChildren: 0.1 } }
+};
+
+const itemVariants = {
+  hidden: { opacity: 0, y: 16, scale: 0.98 },
+  show: { opacity: 1, y: 0, scale: 1, transition: { type: 'spring' as const, stiffness: 300, damping: 24 } }
+};
+
+const cardHover = {
+  rest: { scale: 1, y: 0 },
+  hover: { scale: 1.03, y: -4, transition: { type: 'spring' as const, stiffness: 400, damping: 20 } }
+};
+
 export function Analytics() {
   const { studySessions, tasks, subjects, user } = useAppStore();
   const [mounted, setMounted] = useState(false);
@@ -149,9 +165,9 @@ export function Analytics() {
   const CustomTooltip = ({ active, payload, label }: any) => {
     if (active && payload && payload.length) {
       return (
-        <div className="bg-card border border-border rounded-lg p-3 shadow-xl">
-          <p className="text-foreground font-medium">{label}</p>
-          <p className="text-indigo-500 dark:text-indigo-400">
+        <div className="bg-card/95 backdrop-blur-xl border border-border rounded-xl p-3 shadow-2xl">
+          <p className="text-foreground font-medium text-sm">{label}</p>
+          <p className="text-indigo-500 dark:text-indigo-400 text-sm">
             {payload[0].value} minutes ({(payload[0].value / 60).toFixed(1)} hrs)
           </p>
         </div>
@@ -161,82 +177,49 @@ export function Analytics() {
   };
 
   return (
-    <div className="space-y-6">
+    <motion.div 
+      className="space-y-6"
+      initial="hidden"
+      animate="show"
+      variants={containerVariants}
+    >
       {/* Summary Stats */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <motion.div
-          whileHover={{ scale: 1.02 }}
-          className="bg-gradient-to-br from-indigo-500/10 to-purple-500/10 dark:from-indigo-500/20 dark:to-purple-500/20 backdrop-blur-xl border border-indigo-500/30 rounded-xl p-5"
-        >
-          <div className="flex items-center gap-4">
-            <div className="p-3 bg-indigo-500/20 dark:bg-indigo-500/30 rounded-xl">
-              <Clock className="w-6 h-6 text-indigo-500 dark:text-indigo-400" />
-            </div>
-            <div>
-              <p className="text-3xl font-bold text-foreground">
-                {formatDuration(totalStats.totalMinutes)}
-              </p>
-              <p className="text-sm text-muted-foreground">Total Study Time</p>
-            </div>
-          </div>
-        </motion.div>
+      <motion.div variants={containerVariants} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {[
+          { label: 'Total Study Time', value: formatDuration(totalStats.totalMinutes), icon: Clock, gradient: 'from-indigo-500/10 to-purple-500/10 dark:from-indigo-500/20 dark:to-purple-500/20', borderColor: 'border-indigo-500/30', iconBg: 'bg-indigo-500/20 dark:bg-indigo-500/30', iconColor: 'text-indigo-500 dark:text-indigo-400' },
+          { label: 'Task Completion', value: `${Math.round(totalStats.completionRate)}%`, icon: Target, gradient: 'from-green-500/10 to-emerald-500/10 dark:from-green-500/20 dark:to-emerald-500/20', borderColor: 'border-green-500/30', iconBg: 'bg-green-500/20 dark:bg-green-500/30', iconColor: 'text-green-500 dark:text-green-400' },
+          { label: 'Study Sessions', value: String(totalStats.totalSessions), icon: Zap, gradient: 'from-yellow-500/10 to-orange-500/10 dark:from-yellow-500/20 dark:to-orange-500/20', borderColor: 'border-yellow-500/30', iconBg: 'bg-yellow-500/20 dark:bg-yellow-500/30', iconColor: 'text-yellow-500 dark:text-yellow-400' },
+          { label: 'Current Streak', value: `${user?.current_streak || 0} days`, icon: Award, gradient: 'from-purple-500/10 to-pink-500/10 dark:from-purple-500/20 dark:to-pink-500/20', borderColor: 'border-purple-500/30', iconBg: 'bg-purple-500/20 dark:bg-purple-500/30', iconColor: 'text-purple-500 dark:text-purple-400' },
+        ].map((stat) => (
+          <motion.div key={stat.label} variants={itemVariants}>
+            <motion.div initial="rest" whileHover="hover" variants={cardHover}>
+              <div className={cn(
+                'bg-gradient-to-br backdrop-blur-xl border rounded-xl p-5',
+                stat.gradient, stat.borderColor
+              )}>
+                <div className="flex items-center gap-4">
+                  <motion.div 
+                    className={cn('p-3 rounded-xl', stat.iconBg)}
+                    whileHover={{ rotate: [0, -8, 8, 0], transition: { duration: 0.4 } }}
+                  >
+                    <stat.icon className={cn('w-6 h-6', stat.iconColor)} />
+                  </motion.div>
+                  <div>
+                    <p className="text-3xl font-bold text-foreground">{stat.value}</p>
+                    <p className="text-sm text-muted-foreground">{stat.label}</p>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        ))}
+      </motion.div>
 
-        <motion.div
-          whileHover={{ scale: 1.02 }}
-          className="bg-gradient-to-br from-green-500/10 to-emerald-500/10 dark:from-green-500/20 dark:to-emerald-500/20 backdrop-blur-xl border border-green-500/30 rounded-xl p-5"
-        >
-          <div className="flex items-center gap-4">
-            <div className="p-3 bg-green-500/20 dark:bg-green-500/30 rounded-xl">
-              <Target className="w-6 h-6 text-green-500 dark:text-green-400" />
-            </div>
-            <div>
-              <p className="text-3xl font-bold text-foreground">
-                {Math.round(totalStats.completionRate)}%
-              </p>
-              <p className="text-sm text-muted-foreground">Task Completion</p>
-            </div>
-          </div>
-        </motion.div>
-
-        <motion.div
-          whileHover={{ scale: 1.02 }}
-          className="bg-gradient-to-br from-yellow-500/10 to-orange-500/10 dark:from-yellow-500/20 dark:to-orange-500/20 backdrop-blur-xl border border-yellow-500/30 rounded-xl p-5"
-        >
-          <div className="flex items-center gap-4">
-            <div className="p-3 bg-yellow-500/20 dark:bg-yellow-500/30 rounded-xl">
-              <Zap className="w-6 h-6 text-yellow-500 dark:text-yellow-400" />
-            </div>
-            <div>
-              <p className="text-3xl font-bold text-foreground">
-                {totalStats.totalSessions}
-              </p>
-              <p className="text-sm text-muted-foreground">Study Sessions</p>
-            </div>
-          </div>
-        </motion.div>
-
-        <motion.div
-          whileHover={{ scale: 1.02 }}
-          className="bg-gradient-to-br from-purple-500/10 to-pink-500/10 dark:from-purple-500/20 dark:to-pink-500/20 backdrop-blur-xl border border-purple-500/30 rounded-xl p-5"
-        >
-          <div className="flex items-center gap-4">
-            <div className="p-3 bg-purple-500/20 dark:bg-purple-500/30 rounded-xl">
-              <Award className="w-6 h-6 text-purple-500 dark:text-purple-400" />
-            </div>
-            <div>
-              <p className="text-3xl font-bold text-foreground">
-                {user?.current_streak || 0} days
-              </p>
-              <p className="text-sm text-muted-foreground">Current Streak</p>
-            </div>
-          </div>
-        </motion.div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <motion.div variants={containerVariants} className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Daily Study Time Chart */}
-        <Card>
-          <CardHeader>
+        <motion.div variants={itemVariants}>
+          <Card className="glow-border">
+            <CardHeader>
             <div className="flex items-center gap-2">
               <Calendar className="w-5 h-5 text-indigo-400" />
               <CardTitle>Study Time This Week</CardTitle>
@@ -279,9 +262,11 @@ export function Analytics() {
             </ResponsiveContainer>
           </div>
         </Card>
+        </motion.div>
 
         {/* Study Time by Subject */}
-        <Card>
+        <motion.div variants={itemVariants}>
+        <Card className="glow-border">
           <CardHeader>
             <div className="flex items-center gap-2">
               <BookOpen className="w-5 h-5 text-indigo-400" />
@@ -336,9 +321,11 @@ export function Analytics() {
             </div>
           </div>
         </Card>
+        </motion.div>
 
         {/* Task Completion by Priority */}
-        <Card>
+        <motion.div variants={itemVariants}>
+        <Card className="glow-border">
           <CardHeader>
             <div className="flex items-center gap-2">
               <Target className="w-5 h-5 text-indigo-400" />
@@ -411,9 +398,11 @@ export function Analytics() {
             </div>
           </div>
         </Card>
+        </motion.div>
 
         {/* Productivity by Hour */}
-        <Card>
+        <motion.div variants={itemVariants}>
+        <Card className="glow-border">
           <CardHeader>
             <div className="flex items-center gap-2">
               <TrendingUp className="w-5 h-5 text-indigo-400" />
@@ -450,34 +439,33 @@ export function Analytics() {
             </ResponsiveContainer>
           </div>
         </Card>
-      </div>
+        </motion.div>
+      </motion.div>
 
       {/* Insights */}
-      <Card>
+      <motion.div variants={itemVariants}>
+      <Card className="glow-border">
         <CardHeader>
           <CardTitle>Quick Insights</CardTitle>
         </CardHeader>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 px-6 pb-6">
-          <div className="p-4 bg-muted/50 rounded-xl text-center">
-            <p className="text-3xl font-bold text-foreground mb-1">
-              {totalStats.avgSessionLength}m
-            </p>
-            <p className="text-sm text-muted-foreground">Avg. Session Length</p>
-          </div>
-          <div className="p-4 bg-muted/50 rounded-xl text-center">
-            <p className="text-3xl font-bold text-foreground mb-1">
-              {peakHour?.label || '--'}
-            </p>
-            <p className="text-sm text-muted-foreground">Peak Study Hour</p>
-          </div>
-          <div className="p-4 bg-muted/50 rounded-xl text-center">
-            <p className="text-3xl font-bold text-foreground mb-1">
-              {user?.longest_streak || 0} days
-            </p>
-            <p className="text-sm text-muted-foreground">Longest Streak</p>
-          </div>
+          {[
+            { value: `${totalStats.avgSessionLength}m`, label: 'Avg. Session Length' },
+            { value: peakHour?.label || '--', label: 'Peak Study Hour' },
+            { value: `${user?.longest_streak || 0} days`, label: 'Longest Streak' },
+          ].map((insight, i) => (
+            <motion.div 
+              key={insight.label}
+              whileHover={{ scale: 1.03, y: -2 }}
+              className="p-4 bg-muted/50 rounded-xl text-center"
+            >
+              <p className="text-3xl font-bold text-foreground mb-1">{insight.value}</p>
+              <p className="text-sm text-muted-foreground">{insight.label}</p>
+            </motion.div>
+          ))}
         </div>
       </Card>
-    </div>
+      </motion.div>
+    </motion.div>
   );
 }

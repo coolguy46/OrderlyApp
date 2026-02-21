@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label';
 import { CircularProgress } from '@/components/ui/custom-progress';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
 import {
   Play,
@@ -279,33 +279,47 @@ export function PomodoroTimer({ selectedSubjectId, selectedTaskId }: PomodoroTim
   const CurrentIcon = modeConfig[mode].icon;
 
   return (
-    <Card className="max-w-md mx-auto">
+    <Card className="max-w-md mx-auto glow-border">
       <CardContent className="p-4">
         {/* Timer Type Toggle */}
-        <div className="flex items-center justify-center gap-2 mb-4">
+        <div className="flex items-center justify-center gap-2 mb-4 relative">
           <button
             onClick={() => { setTimerType('pomodoro'); handleReset(); }}
             className={cn(
-              'flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all',
+              'relative flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all',
               timerType === 'pomodoro'
-                ? 'bg-indigo-500/20 text-indigo-400 border border-indigo-500/30'
+                ? 'text-indigo-400'
                 : 'text-muted-foreground hover:text-foreground hover:bg-muted'
             )}
           >
-            <Timer className="w-4 h-4" />
-            Pomodoro
+            {timerType === 'pomodoro' && (
+              <motion.div
+                layoutId="timerTypeIndicator"
+                className="absolute inset-0 bg-indigo-500/20 border border-indigo-500/30 rounded-xl"
+                transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+              />
+            )}
+            <Timer className="w-4 h-4 relative z-10" />
+            <span className="relative z-10">Pomodoro</span>
           </button>
           <button
             onClick={() => { setTimerType('stopwatch'); handleReset(); }}
             className={cn(
-              'flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all',
+              'relative flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all',
               timerType === 'stopwatch'
-                ? 'bg-green-500/20 text-green-400 border border-green-500/30'
+                ? 'text-green-400'
                 : 'text-muted-foreground hover:text-foreground hover:bg-muted'
             )}
           >
-            <Clock className="w-4 h-4" />
-            Stopwatch
+            {timerType === 'stopwatch' && (
+              <motion.div
+                layoutId="timerTypeIndicator"
+                className="absolute inset-0 bg-green-500/20 border border-green-500/30 rounded-xl"
+                transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+              />
+            )}
+            <Clock className="w-4 h-4 relative z-10" />
+            <span className="relative z-10">Stopwatch</span>
           </button>
         </div>
 
@@ -317,13 +331,20 @@ export function PomodoroTimer({ selectedSubjectId, selectedTaskId }: PomodoroTim
                 key={m}
                 onClick={() => handleModeChange(m)}
                 className={cn(
-                  'px-3 py-1.5 rounded-lg text-xs font-medium transition-all',
+                  'relative px-3 py-1.5 rounded-lg text-xs font-medium transition-all',
                   mode === m
-                    ? 'bg-gradient-to-r from-indigo-500 to-purple-600 text-white'
+                    ? 'text-white'
                     : 'text-muted-foreground hover:text-foreground hover:bg-muted'
                 )}
               >
-                {modeConfig[m].label}
+                {mode === m && (
+                  <motion.div
+                    layoutId="pomodoroModeIndicator"
+                    className="absolute inset-0 bg-gradient-to-r from-indigo-500 to-purple-600 rounded-lg"
+                    transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+                  />
+                )}
+                <span className="relative z-10">{modeConfig[m].label}</span>
               </button>
             ))}
           </div>
@@ -422,12 +443,15 @@ export function PomodoroTimer({ selectedSubjectId, selectedTaskId }: PomodoroTim
           <div className="flex items-center gap-2">
             <div className="flex gap-0.5">
               {Array.from({ length: pomodoroSettings.sessionsBeforeLongBreak }).map((_, i) => (
-                <div
+                <motion.div
                   key={i}
-                  className={cn(
-                    'w-2.5 h-2.5 rounded-full transition-all',
-                    i < (sessionsCompleted % pomodoroSettings.sessionsBeforeLongBreak) ? 'bg-indigo-500' : 'bg-muted-foreground/20'
-                  )}
+                  initial={false}
+                  animate={{
+                    scale: i < (sessionsCompleted % pomodoroSettings.sessionsBeforeLongBreak) ? [1, 1.3, 1] : 1,
+                    backgroundColor: i < (sessionsCompleted % pomodoroSettings.sessionsBeforeLongBreak) ? 'rgb(99 102 241)' : 'rgb(99 102 241 / 0.2)',
+                  }}
+                  transition={{ duration: 0.3 }}
+                  className="w-2.5 h-2.5 rounded-full"
                 />
               ))}
             </div>

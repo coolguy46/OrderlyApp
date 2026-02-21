@@ -4,6 +4,7 @@ import { useState, useMemo, useRef, useEffect } from 'react';
 import { useAppStore } from '@/lib/store';
 import { useRouter } from 'next/navigation';
 import { useHotkeys } from '@/lib/useHotkeys';
+import { motion } from 'framer-motion';
 import { 
   Button, 
   Input,
@@ -100,7 +101,7 @@ export function Header({ onMobileMenuToggle }: HeaderProps) {
   }, [searchOpen]);
 
   return (
-    <header className="h-16 border-b border-border/40 bg-background/80 backdrop-blur-md sticky top-0 z-30">
+    <header className="h-16 border-b border-border/40 bg-background/80 backdrop-blur-xl sticky top-0 z-30 transition-shadow">
       <div className="h-full flex items-center justify-between px-4 sm:px-8 gap-4 sm:gap-8">
         {/* Mobile menu button */}
         <Button
@@ -133,7 +134,13 @@ export function Header({ onMobileMenuToggle }: HeaderProps) {
 
             {/* Search dropdown */}
             {searchOpen && searchQuery.trim() && (
-              <div className="absolute top-full left-0 right-0 mt-2 bg-card border border-border rounded-xl shadow-xl overflow-hidden z-50 max-h-[400px] overflow-y-auto">
+              <motion.div
+                initial={{ opacity: 0, y: -8, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -8, scale: 0.98 }}
+                transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+                className="absolute top-full left-0 right-0 mt-2 bg-card/95 backdrop-blur-xl border border-border rounded-xl shadow-2xl overflow-hidden z-50 max-h-[400px] overflow-y-auto"
+              >
                 {!hasResults ? (
                   <div className="p-6 text-center text-sm text-muted-foreground">
                     No results for &quot;{searchQuery}&quot;
@@ -208,7 +215,7 @@ export function Header({ onMobileMenuToggle }: HeaderProps) {
                     )}
                   </div>
                 )}
-              </div>
+              </motion.div>
             )}
           </div>
         </div>
@@ -219,7 +226,7 @@ export function Header({ onMobileMenuToggle }: HeaderProps) {
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" className="gap-2 px-2">
-                <Avatar className="h-8 w-8">
+                <Avatar className="h-8 w-8 ring-2 ring-indigo-500/20 ring-offset-1 ring-offset-background transition-all hover:ring-indigo-500/40">
                   <AvatarFallback className="bg-gradient-to-br from-indigo-500 to-purple-600 text-white text-xs">
                     {user?.full_name?.[0] || 'U'}
                   </AvatarFallback>

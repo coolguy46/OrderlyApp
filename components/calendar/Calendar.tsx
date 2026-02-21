@@ -259,7 +259,7 @@ export function Calendar() {
   return (
     <div className="space-y-4">
       {/* Header */}
-      <Card>
+      <Card className="glow-border">
         <CardContent className="p-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -307,13 +307,20 @@ export function Calendar() {
                     key={mode}
                     onClick={() => setViewMode(mode)}
                     className={cn(
-                      'px-3 py-1 text-xs font-medium rounded-md transition-all capitalize',
+                      'relative px-3 py-1 text-xs font-medium rounded-md transition-all capitalize',
                       viewMode === mode
-                        ? 'bg-primary text-primary-foreground shadow-sm'
+                        ? 'text-primary-foreground'
                         : 'text-muted-foreground hover:text-foreground'
                     )}
                   >
-                    {mode}
+                    {viewMode === mode && (
+                      <motion.div
+                        layoutId="calendarViewIndicator"
+                        className="absolute inset-0 bg-primary rounded-md shadow-sm"
+                        transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+                      />
+                    )}
+                    <span className="relative z-10">{mode}</span>
                   </button>
                 ))}
               </div>
@@ -330,7 +337,7 @@ export function Calendar() {
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
         {/* Calendar Grid */}
         <div className="lg:col-span-3">
-          <Card>
+          <Card className="glow-border">
             <CardContent className="p-3">
               {viewMode === 'month' && (
                 <>
@@ -370,19 +377,44 @@ export function Calendar() {
                             {format(day, 'd')}
                           </span>
 
+                          {/* Today pulse ring */}
+                          {isToday(day) && (
+                            <motion.div
+                              animate={{ scale: [1, 1.4, 1], opacity: [0.5, 0, 0.5] }}
+                              transition={{ duration: 2, repeat: Infinity }}
+                              className="absolute top-0.5 right-0.5 w-2 h-2 rounded-full bg-primary"
+                            />
+                          )}
+
                           {hasEvents && (
                             <div className="flex gap-0.5 mt-1 flex-wrap justify-center">
                               {events.tasks.slice(0, 2).map((task, i) => (
-                                <div key={i} className={cn(
-                                  'w-1 h-1 rounded-full',
-                                  task.priority === 'high' ? 'bg-red-500' : task.priority === 'medium' ? 'bg-yellow-500' : 'bg-green-500'
-                                )} />
+                                <motion.div
+                                  key={i}
+                                  initial={{ scale: 0 }}
+                                  animate={{ scale: 1 }}
+                                  transition={{ delay: i * 0.05 }}
+                                  className={cn(
+                                    'w-1.5 h-1.5 rounded-full',
+                                    task.priority === 'high' ? 'bg-red-500' : task.priority === 'medium' ? 'bg-yellow-500' : 'bg-green-500'
+                                  )}
+                                />
                               ))}
                               {events.exams.slice(0, 1).map((_, i) => (
-                                <div key={`exam-${i}`} className="w-1 h-1 rounded-full bg-purple-500" />
+                                <motion.div
+                                  key={`exam-${i}`}
+                                  initial={{ scale: 0 }}
+                                  animate={{ scale: 1 }}
+                                  className="w-1.5 h-1.5 rounded-full bg-purple-500"
+                                />
                               ))}
                               {events.events.slice(0, 1).map((_, i) => (
-                                <div key={`event-${i}`} className="w-1 h-1 rounded-full bg-blue-500" />
+                                <motion.div
+                                  key={`event-${i}`}
+                                  initial={{ scale: 0 }}
+                                  animate={{ scale: 1 }}
+                                  className="w-1.5 h-1.5 rounded-full bg-blue-500"
+                                />
                               ))}
                             </div>
                           )}
@@ -496,7 +528,7 @@ export function Calendar() {
 
         {/* Selected Date Details */}
         <div>
-          <Card>
+          <Card className="glow-border">
             <CardHeader className="pb-2">
               <CardTitle className="text-sm flex items-center gap-2">
                 <CalendarIcon className="w-4 h-4 text-primary" />

@@ -65,9 +65,11 @@ function GoalCard({ goal, onEdit }: GoalCardProps) {
       layout
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -20 }}
+      exit={{ opacity: 0, x: -30 }}
+      whileHover={{ y: -3 }}
+      transition={{ type: 'spring', stiffness: 300, damping: 24 }}
     >
-      <Card className={cn('group hover:shadow-md transition-shadow', isCompleted && 'border-green-500/30')}>
+      <Card className={cn('group hover:shadow-md transition-shadow glow-border', isCompleted && 'border-green-500/30')}>
         <CardContent className="p-6">
           <div className="flex items-start gap-5">
             {/* Progress Circle */}
@@ -76,10 +78,17 @@ function GoalCard({ goal, onEdit }: GoalCardProps) {
               max={goal.target_value}
               size={80}
               strokeWidth={6}
+              animated
               color={isCompleted ? '#10b981' : '#6366f1'}
             >
               {isCompleted ? (
-                <CheckCircle2 className="w-6 h-6 text-green-400" />
+                <motion.div
+                  initial={{ scale: 0, rotate: -180 }}
+                  animate={{ scale: 1, rotate: 0 }}
+                  transition={{ type: 'spring', stiffness: 300 }}
+                >
+                  <CheckCircle2 className="w-6 h-6 text-green-400" />
+                </motion.div>
               ) : (
                 <span className="text-lg font-bold">{progress}%</span>
               )}
@@ -343,6 +352,19 @@ function GoalForm({ isOpen, onClose, goal }: GoalFormProps) {
   );
 }
 
+const containerVariants = {
+  hidden: { opacity: 0 },
+  show: {
+    opacity: 1,
+    transition: { staggerChildren: 0.08 },
+  },
+};
+
+const itemVariants = {
+  hidden: { opacity: 0, y: 20 },
+  show: { opacity: 1, y: 0, transition: { type: 'spring' as const, stiffness: 300, damping: 24 } },
+};
+
 export function GoalList() {
   const { goals } = useAppStore();
   const [showForm, setShowForm] = useState(false);
@@ -358,90 +380,96 @@ export function GoalList() {
   const activeGoals = goals.filter((g) => g.status === 'active' && g.current_value < g.target_value);
   const completedGoals = goals.filter((g) => g.status === 'completed' || g.current_value >= g.target_value);
 
+  const statCards = [
+    { icon: Target, label: 'Total Goals', value: goals.length, color: 'indigo', gradient: 'from-indigo-500/10 to-indigo-500/5' },
+    { icon: TrendingUp, label: 'In Progress', value: activeGoals.length, color: 'blue', gradient: 'from-blue-500/10 to-blue-500/5' },
+    { icon: Trophy, label: 'Completed', value: completedGoals.length, color: 'green', gradient: 'from-green-500/10 to-green-500/5' },
+  ];
+
   return (
-    <div className="space-y-8">
+    <motion.div
+      variants={containerVariants}
+      initial="hidden"
+      animate="show"
+      className="space-y-8"
+    >
       {/* Stats */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center gap-4">
-              <div className="p-3 rounded-xl bg-indigo-500/10">
-                <Target className="w-6 h-6 text-indigo-500" />
-              </div>
-              <div>
-                <p className="text-3xl font-bold">{goals.length}</p>
-                <p className="text-sm text-muted-foreground">Total Goals</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center gap-4">
-              <div className="p-3 rounded-xl bg-blue-500/10">
-                <TrendingUp className="w-6 h-6 text-blue-500" />
-              </div>
-              <div>
-                <p className="text-3xl font-bold">{activeGoals.length}</p>
-                <p className="text-sm text-muted-foreground">In Progress</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center gap-4">
-              <div className="p-3 rounded-xl bg-green-500/10">
-                <Trophy className="w-6 h-6 text-green-500" />
-              </div>
-              <div>
-                <p className="text-3xl font-bold">{completedGoals.length}</p>
-                <p className="text-sm text-muted-foreground">Completed</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+        {statCards.map((stat) => {
+          const Icon = stat.icon;
+          return (
+            <motion.div key={stat.label} variants={itemVariants}>
+              <Card className={`bg-gradient-to-br ${stat.gradient} glow-border`}>
+                <CardContent className="p-6">
+                  <motion.div
+                    whileHover={{ scale: 1.03, y: -2 }}
+                    transition={{ type: 'spring', stiffness: 400, damping: 17 }}
+                    className="flex items-center gap-4"
+                  >
+                    <div className={`p-3 rounded-xl bg-${stat.color}-500/10`}>
+                      <Icon className={`w-6 h-6 text-${stat.color}-500`} />
+                    </div>
+                    <div>
+                      <p className="text-3xl font-bold">{stat.value}</p>
+                      <p className="text-sm text-muted-foreground">{stat.label}</p>
+                    </div>
+                  </motion.div>
+                </CardContent>
+              </Card>
+            </motion.div>
+          );
+        })}
       </div>
 
-      {/* Filters and Actions */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+      <motion.div variants={itemVariants} className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div className="flex items-center gap-2 bg-muted/50 rounded-lg p-1.5">
           {(['all', 'active', 'completed'] as const).map((f) => (
             <button
               key={f}
               onClick={() => setFilter(f)}
               className={cn(
-                'px-4 py-2 text-[clamp(0.65rem,1.5vw,0.75rem)] font-medium rounded-md transition-all capitalize',
+                'relative px-4 py-2 text-[clamp(0.65rem,1.5vw,0.75rem)] font-medium rounded-md transition-all capitalize',
                 filter === f
-                  ? 'bg-primary text-primary-foreground shadow-sm'
+                  ? 'text-primary-foreground'
                   : 'text-muted-foreground hover:text-foreground hover:bg-muted'
               )}
             >
-              {f}
+              {filter === f && (
+                <motion.div
+                  layoutId="goalFilterIndicator"
+                  className="absolute inset-0 bg-primary rounded-md shadow-sm"
+                  transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+                />
+              )}
+              <span className="relative z-10">{f}</span>
             </button>
           ))}
         </div>
 
-        <Button onClick={() => setShowForm(true)} size="lg">
-          <Plus className="w-4 h-4" />
-          Add Goal
-        </Button>
-      </div>
+        <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+          <Button onClick={() => setShowForm(true)} size="lg">
+            <Plus className="w-4 h-4" />
+            Add Goal
+          </Button>
+        </motion.div>
+      </motion.div>
 
       {/* Goals Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <motion.div variants={itemVariants} className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <AnimatePresence mode="popLayout">
           {filteredGoals.length === 0 ? (
             <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
               className="col-span-2 text-center py-16"
             >
-              <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-muted flex items-center justify-center">
+              <motion.div
+                animate={{ y: [0, -8, 0] }}
+                transition={{ duration: 3, repeat: Infinity }}
+                className="w-16 h-16 mx-auto mb-4 rounded-full bg-muted flex items-center justify-center"
+              >
                 <Target className="w-8 h-8 text-muted-foreground" />
-              </div>
+              </motion.div>
               <p className="font-medium">No goals found</p>
               <p className="text-sm text-muted-foreground mt-1">
                 Create a new goal to start tracking your progress
@@ -460,7 +488,7 @@ export function GoalList() {
             ))
           )}
         </AnimatePresence>
-      </div>
+      </motion.div>
 
       {/* Goal Form Modal */}
       <GoalForm
@@ -471,6 +499,6 @@ export function GoalList() {
         }}
         goal={editingGoal}
       />
-    </div>
+    </motion.div>
   );
 }

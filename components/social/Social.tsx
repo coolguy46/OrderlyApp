@@ -150,14 +150,21 @@ export function Social() {
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
             className={cn(
-              'flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-medium transition-all',
+              'relative flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-medium transition-all',
               activeTab === tab.id
-                ? 'bg-primary text-primary-foreground'
+                ? 'text-primary-foreground'
                 : 'text-muted-foreground hover:text-foreground'
             )}
           >
-            <tab.icon className="w-4 h-4" />
-            {tab.label}
+            {activeTab === tab.id && (
+              <motion.div
+                layoutId="socialTabIndicator"
+                className="absolute inset-0 bg-primary rounded-lg"
+                transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+              />
+            )}
+            <tab.icon className="w-4 h-4 relative z-10" />
+            <span className="relative z-10">{tab.label}</span>
           </button>
         ))}
       </div>
@@ -362,8 +369,9 @@ export function Social() {
                 {filteredFriends.map((friend) => (
                   <motion.div
                     key={friend.id}
-                    whileHover={{ scale: 1.01 }}
-                    className="bg-card border border-border rounded-xl p-4 group hover:border-primary/30 transition-all"
+                    whileHover={{ scale: 1.02, y: -2 }}
+                    transition={{ type: 'spring', stiffness: 400, damping: 17 }}
+                    className="bg-card border border-border rounded-xl p-4 group hover:border-primary/30 transition-all glow-border"
                   >
                     <div className="flex items-center gap-4">
                       <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center">
@@ -488,9 +496,9 @@ export function Social() {
                     <div className="flex items-end justify-center gap-4 my-6">
                       {/* 2nd Place */}
                       <motion.div
-                        initial={{ y: 50, opacity: 0 }}
-                        animate={{ y: 0, opacity: 1 }}
-                        transition={{ delay: 0.2 }}
+                        initial={{ y: 50, opacity: 0, scale: 0.8 }}
+                        animate={{ y: 0, opacity: 1, scale: 1 }}
+                        transition={{ delay: 0.2, type: 'spring', stiffness: 200 }}
                         className="text-center"
                       >
                         <div className="w-14 h-14 mx-auto rounded-xl bg-gradient-to-br from-gray-400 to-gray-500 flex items-center justify-center mb-2">
@@ -509,12 +517,17 @@ export function Social() {
 
                       {/* 1st Place */}
                       <motion.div
-                        initial={{ y: 50, opacity: 0 }}
-                        animate={{ y: 0, opacity: 1 }}
-                        transition={{ delay: 0.1 }}
+                        initial={{ y: 50, opacity: 0, scale: 0.8 }}
+                        animate={{ y: 0, opacity: 1, scale: 1 }}
+                        transition={{ delay: 0.1, type: 'spring', stiffness: 200 }}
                         className="text-center"
                       >
-                        <Crown className="w-7 h-7 mx-auto text-yellow-500 mb-1" />
+                        <motion.div
+                          animate={{ rotate: [0, -5, 5, 0] }}
+                          transition={{ duration: 2, repeat: Infinity, repeatDelay: 3 }}
+                        >
+                          <Crown className="w-7 h-7 mx-auto text-yellow-500 mb-1" />
+                        </motion.div>
                         <div className="w-16 h-16 mx-auto rounded-xl bg-gradient-to-br from-yellow-400 to-yellow-600 flex items-center justify-center mb-2 shadow-lg shadow-yellow-500/30">
                           <span className="text-2xl font-bold text-yellow-900">{leaderboard[0]?.initial}</span>
                         </div>
@@ -531,9 +544,9 @@ export function Social() {
 
                       {/* 3rd Place */}
                       <motion.div
-                        initial={{ y: 50, opacity: 0 }}
-                        animate={{ y: 0, opacity: 1 }}
-                        transition={{ delay: 0.3 }}
+                        initial={{ y: 50, opacity: 0, scale: 0.8 }}
+                        animate={{ y: 0, opacity: 1, scale: 1 }}
+                        transition={{ delay: 0.3, type: 'spring', stiffness: 200 }}
                         className="text-center"
                       >
                         <div className="w-14 h-14 mx-auto rounded-xl bg-gradient-to-br from-orange-600 to-orange-700 flex items-center justify-center mb-2">

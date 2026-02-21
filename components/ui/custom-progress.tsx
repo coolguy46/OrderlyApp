@@ -1,6 +1,7 @@
 'use client';
 
 import { cn } from '@/lib/utils';
+import { useEffect, useState } from 'react';
 
 interface ProgressBarProps {
   value: number;
@@ -9,6 +10,7 @@ interface ProgressBarProps {
   size?: 'sm' | 'md' | 'lg';
   color?: 'indigo' | 'green' | 'yellow' | 'red' | 'purple';
   className?: string;
+  shimmer?: boolean;
 }
 
 export function ProgressBar({
@@ -18,8 +20,15 @@ export function ProgressBar({
   size = 'md',
   color = 'indigo',
   className,
+  shimmer = false,
 }: ProgressBarProps) {
   const percentage = Math.min(100, Math.round((value / max) * 100));
+  const [animatedWidth, setAnimatedWidth] = useState(0);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setAnimatedWidth(percentage), 100);
+    return () => clearTimeout(timer);
+  }, [percentage]);
 
   const sizeClasses = {
     sm: 'h-1.5',
@@ -39,8 +48,12 @@ export function ProgressBar({
     <div className={cn('w-full', className)}>
       <div className={cn('w-full bg-muted rounded-full overflow-hidden', sizeClasses[size])}>
         <div
-          className={cn('h-full rounded-full transition-all duration-500', colorClasses[color])}
-          style={{ width: `${percentage}%` }}
+          className={cn(
+            'h-full rounded-full transition-all duration-700 ease-out relative',
+            colorClasses[color],
+            shimmer && 'shimmer'
+          )}
+          style={{ width: `${animatedWidth}%` }}
         />
       </div>
       {showLabel && (
@@ -59,6 +72,7 @@ interface CircularProgressProps {
   showLabel?: boolean;
   className?: string;
   children?: React.ReactNode;
+  animated?: boolean;
 }
 
 export function CircularProgress({
@@ -70,11 +84,23 @@ export function CircularProgress({
   showLabel = true,
   className,
   children,
+  animated = true,
 }: CircularProgressProps) {
   const percentage = Math.min(100, Math.round((value / max) * 100));
   const radius = (size - strokeWidth) / 2;
   const circumference = radius * 2 * Math.PI;
-  const offset = circumference - (percentage / 100) * circumference;
+  const targetOffset = circumference - (percentage / 100) * circumference;
+  
+  const [offset, setOffset] = useState(circumference);
+
+  useEffect(() => {
+    if (animated) {
+      const timer = setTimeout(() => setOffset(targetOffset), 150);
+      return () => clearTimeout(timer);
+    } else {
+      setOffset(targetOffset);
+    }
+  }, [targetOffset, circumference, animated]);
 
   const colorClasses: Record<string, string> = {
     indigo: 'stroke-indigo-500',
@@ -109,7 +135,7 @@ export function CircularProgress({
           strokeWidth={strokeWidth}
           fill="none"
           strokeLinecap="round"
-          className={cn('transition-all duration-500', strokeClass)}
+          className={cn('transition-all duration-1000 ease-out', strokeClass)}
           style={{
             strokeDasharray: circumference,
             strokeDashoffset: offset,

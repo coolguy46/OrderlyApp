@@ -77,6 +77,17 @@ function getLevel(xp: number): { level: number; currentXP: number; nextLevelXP: 
   return { level, currentXP: xp - accumulated, nextLevelXP: threshold };
 }
 
+// Animation variants
+const containerVariants = {
+  hidden: { opacity: 0 },
+  show: { opacity: 1, transition: { staggerChildren: 0.08, delayChildren: 0.1 } }
+};
+
+const itemVariants = {
+  hidden: { opacity: 0, y: 16, scale: 0.98 },
+  show: { opacity: 1, y: 0, scale: 1, transition: { type: 'spring' as const, stiffness: 300, damping: 24 } }
+};
+
 export function Profile() {
   const { user, tasks, studySessions, goals, exams, achievements, checkAchievements, updateUserProfile } = useAppStore();
   const [mounted, setMounted] = useState(false);
@@ -143,24 +154,37 @@ export function Profile() {
   };
 
   return (
-    <div className="space-y-6">
+    <motion.div 
+      className="space-y-6"
+      initial="hidden"
+      animate="show"
+      variants={containerVariants}
+    >
       {/* Profile Header */}
+      <motion.div variants={itemVariants}>
       <Card className="relative overflow-hidden">
         <div className="absolute inset-0 bg-gradient-to-br from-primary/20 via-purple-500/10 to-pink-500/20" />
+        {/* Animated shimmer overlay */}
+        <div className="absolute inset-0 shimmer pointer-events-none" />
 
         <CardContent className="relative p-6">
           <div className="flex flex-col sm:flex-row items-center gap-6">
             {/* Avatar */}
             <div className="relative">
               <motion.div
-                whileHover={{ scale: 1.05 }}
-                className="w-20 h-20 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-lg shadow-indigo-500/30"
+                whileHover={{ scale: 1.08, rotate: 3 }}
+                whileTap={{ scale: 0.95 }}
+                className="w-20 h-20 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-lg shadow-indigo-500/30 ring-2 ring-indigo-500/20 ring-offset-2 ring-offset-background"
               >
                 <span className="text-3xl font-bold text-white">{user?.full_name?.[0] || 'U'}</span>
               </motion.div>
-              <div className="absolute -bottom-2 -right-2 w-7 h-7 rounded-full bg-yellow-500 flex items-center justify-center text-xs font-bold text-yellow-900 border-2 border-background">
+              <motion.div 
+                className="absolute -bottom-2 -right-2 w-7 h-7 rounded-full bg-yellow-500 flex items-center justify-center text-xs font-bold text-yellow-900 border-2 border-background"
+                animate={{ scale: [1, 1.1, 1] }}
+                transition={{ duration: 2, repeat: Infinity }}
+              >
                 {levelInfo.level}
-              </div>
+              </motion.div>
             </div>
 
             {/* User Info */}
@@ -193,20 +217,21 @@ export function Profile() {
                 {levelInfo.currentXP.toLocaleString()} / {levelInfo.nextLevelXP.toLocaleString()} XP
               </p>
               <div className="w-40 mt-2">
-                <ProgressBar value={levelInfo.currentXP} max={levelInfo.nextLevelXP} showLabel={false} color="indigo" />
+                <ProgressBar value={levelInfo.currentXP} max={levelInfo.nextLevelXP} showLabel={false} color="indigo" shimmer />
               </div>
               <p className="text-xs text-muted-foreground mt-1">{xp.toLocaleString()} total XP</p>
             </div>
           </div>
         </CardContent>
       </Card>
+      </motion.div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Stats Grid */}
         <div className="lg:col-span-2 space-y-6">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <motion.div variants={containerVariants} className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <motion.div
-              whileHover={{ scale: 1.01 }}
+              whileHover={{ scale: 1.03, y: -2 }}
               className="bg-gradient-to-br from-indigo-500/10 to-purple-500/10 border border-indigo-500/20 rounded-xl p-4"
             >
               <div className="flex items-center gap-3">
@@ -221,7 +246,7 @@ export function Profile() {
             </motion.div>
 
             <motion.div
-              whileHover={{ scale: 1.01 }}
+              whileHover={{ scale: 1.03, y: -2 }}
               className="bg-gradient-to-br from-green-500/10 to-emerald-500/10 border border-green-500/20 rounded-xl p-4"
             >
               <div className="flex items-center gap-3">
@@ -236,7 +261,7 @@ export function Profile() {
             </motion.div>
 
             <motion.div
-              whileHover={{ scale: 1.01 }}
+              whileHover={{ scale: 1.03, y: -2 }}
               className="bg-gradient-to-br from-purple-500/10 to-pink-500/10 border border-purple-500/20 rounded-xl p-4"
             >
               <div className="flex items-center gap-3">
@@ -249,7 +274,7 @@ export function Profile() {
                 </div>
               </div>
             </motion.div>
-          </div>
+          </motion.div>
 
           {/* Achievements */}
           <Card>
@@ -269,14 +294,19 @@ export function Profile() {
                   return (
                     <motion.div
                       key={achievement.type}
-                      whileHover={{ scale: 1.01 }}
+                      whileHover={{ scale: 1.03, y: -2 }}
+                      initial={{ opacity: 0, scale: 0.9 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      transition={{ type: 'spring', stiffness: 300, damping: 24 }}
                       className={cn(
-                        'p-3 rounded-xl border transition-all relative',
+                        'p-3 rounded-xl border transition-all relative overflow-hidden',
                         achievement.unlocked
-                          ? 'bg-gradient-to-br from-yellow-500/10 to-orange-500/10 border-yellow-500/30'
+                          ? 'bg-gradient-to-br from-yellow-500/10 to-orange-500/10 border-yellow-500/30 shadow-sm'
                           : 'bg-muted/50 border-border opacity-60'
                       )}
                     >
+                      {/* Shimmer on unlocked achievements */}
+                      {achievement.unlocked && <div className="absolute inset-0 shimmer pointer-events-none" />}
                       <div className="flex items-center gap-3">
                         <div className={cn('p-1.5 rounded-lg', achievement.unlocked ? 'bg-yellow-500/20' : 'bg-muted')}>
                           {achievement.unlocked ? (
@@ -385,6 +415,6 @@ export function Profile() {
           </div>
         </DialogContent>
       </Dialog>
-    </div>
+    </motion.div>
   );
 }

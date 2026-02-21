@@ -121,11 +121,40 @@ export default function LandingPage() {
 
       {/* Hero Section */}
       <section className="pt-32 pb-20 px-6 relative overflow-hidden">
-        {/* Background decorations */}
+        {/* Background decorations - enhanced */}
         <div className="absolute inset-0 overflow-hidden pointer-events-none">
-          <div className="absolute -top-40 -right-40 w-[600px] h-[600px] bg-indigo-500/20 rounded-full blur-3xl" />
-          <div className="absolute -bottom-40 -left-40 w-[600px] h-[600px] bg-purple-500/20 rounded-full blur-3xl" />
+          <motion.div 
+            className="absolute -top-40 -right-40 w-[600px] h-[600px] bg-indigo-500/20 rounded-full blur-3xl"
+            animate={{ scale: [1, 1.1, 1], opacity: [0.2, 0.3, 0.2] }}
+            transition={{ duration: 8, repeat: Infinity, ease: 'easeInOut' }}
+          />
+          <motion.div 
+            className="absolute -bottom-40 -left-40 w-[600px] h-[600px] bg-purple-500/20 rounded-full blur-3xl"
+            animate={{ scale: [1.1, 1, 1.1], opacity: [0.2, 0.3, 0.2] }}
+            transition={{ duration: 10, repeat: Infinity, ease: 'easeInOut' }}
+          />
           <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-gradient-to-r from-indigo-500/5 to-purple-500/5 rounded-full blur-3xl" />
+          {/* Floating particles */}
+          {[...Array(6)].map((_, i) => (
+            <motion.div
+              key={i}
+              className="absolute w-1 h-1 bg-indigo-400/30 rounded-full"
+              style={{ 
+                left: `${15 + i * 15}%`,
+                top: `${20 + (i % 3) * 25}%`,
+              }}
+              animate={{ 
+                y: [0, -30, 0],
+                opacity: [0.3, 0.7, 0.3],
+              }}
+              transition={{ 
+                duration: 3 + i * 0.5,
+                repeat: Infinity,
+                ease: 'easeInOut',
+                delay: i * 0.4,
+              }}
+            />
+          ))}
         </div>
 
         <div className="max-w-7xl mx-auto relative">
@@ -142,7 +171,7 @@ export default function LandingPage() {
             
             <h1 className="text-5xl md:text-7xl font-bold leading-tight mb-6">
               Master Your
-              <span className="bg-gradient-to-r from-indigo-400 via-purple-400 to-pink-400 bg-clip-text text-transparent"> Academic Journey</span>
+              <span className="gradient-text-animated"> Academic Journey</span>
             </h1>
             
             <p className="text-xl text-muted-foreground mb-10 max-w-2xl mx-auto">
@@ -212,7 +241,7 @@ export default function LandingPage() {
               initial={{ opacity: 0, x: -20 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ duration: 0.6, delay: 0.4 }}
-              className="absolute -left-4 top-1/4 bg-card border border-border/50 rounded-xl p-4 shadow-xl hidden lg:block"
+              className="absolute -left-4 top-1/4 bg-card border border-border/50 rounded-xl p-4 shadow-xl hidden lg:block animate-float"
             >
               <div className="flex items-center gap-3">
                 <div className="p-2 rounded-lg bg-green-500/10">
@@ -229,7 +258,7 @@ export default function LandingPage() {
               initial={{ opacity: 0, x: 20 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ duration: 0.6, delay: 0.5 }}
-              className="absolute -right-4 top-1/3 bg-card border border-border/50 rounded-xl p-4 shadow-xl hidden lg:block"
+              className="absolute -right-4 top-1/3 bg-card border border-border/50 rounded-xl p-4 shadow-xl hidden lg:block animate-float-delayed"
             >
               <div className="flex items-center gap-3">
                 <div className="p-2 rounded-lg bg-orange-500/10">
@@ -294,11 +323,15 @@ export default function LandingPage() {
                 whileInView={{ opacity: 1, y: 0 }}
                 viewport={{ once: true }}
                 transition={{ duration: 0.5, delay: i * 0.1 }}
-                className="group p-6 rounded-2xl border border-border/50 bg-card/50 hover:bg-card hover:border-border transition-all hover:shadow-lg"
+                whileHover={{ y: -6, scale: 1.02 }}
+                className="group p-6 rounded-2xl border border-border/50 bg-card/50 hover:bg-card hover:border-border transition-all hover:shadow-xl hover:shadow-indigo-500/5"
               >
-                <div className={`w-12 h-12 rounded-xl ${feature.bg} flex items-center justify-center mb-4`}>
+                <motion.div 
+                  className={`w-12 h-12 rounded-xl ${feature.bg} flex items-center justify-center mb-4`}
+                  whileHover={{ rotate: [0, -10, 10, 0], transition: { duration: 0.4 } }}
+                >
                   <feature.icon className={`w-6 h-6 ${feature.color}`} />
-                </div>
+                </motion.div>
                 <h3 className="text-xl font-semibold mb-2">{feature.title}</h3>
                 <p className="text-muted-foreground">{feature.description}</p>
               </motion.div>
@@ -367,8 +400,8 @@ export default function LandingPage() {
                       <span>XP Progress</span>
                       <span className="text-purple-400">2,450 / 3,000</span>
                     </div>
-                    <div className="h-3 bg-muted rounded-full overflow-hidden">
-                      <div className="h-full w-[82%] bg-gradient-to-r from-purple-500 to-pink-500 rounded-full" />
+                    <div className="h-3 bg-muted rounded-full overflow-hidden relative">
+                      <div className="h-full w-[82%] bg-gradient-to-r from-purple-500 to-pink-500 rounded-full shimmer" />
                     </div>
                   </div>
                   
@@ -419,7 +452,8 @@ export default function LandingPage() {
                 whileInView={{ opacity: 1, y: 0 }}
                 viewport={{ once: true }}
                 transition={{ duration: 0.5, delay: i * 0.1 }}
-                className="p-6 rounded-2xl border border-border/50 bg-card/50"
+                whileHover={{ y: -4, scale: 1.02 }}
+                className="p-6 rounded-2xl border border-border/50 bg-card/50 glow-border transition-all"
               >
                 <div className="flex items-center gap-1 mb-4">
                   {[...Array(5)].map((_, i) => (
