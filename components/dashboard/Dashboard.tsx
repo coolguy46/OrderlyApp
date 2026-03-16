@@ -15,7 +15,7 @@ import {
 import { SubjectBadge } from '@/components/ui';
 import { TaskCard } from '@/components/tasks';
 import { formatDuration, getDaysUntil, cn, isExamType } from '@/lib/utils';
-import { format, isSameDay, isToday, startOfDay, startOfMonth, endOfMonth, startOfWeek, endOfWeek, addDays } from 'date-fns';
+import { format, isToday, startOfDay, startOfMonth, endOfMonth, startOfWeek, endOfWeek, addDays } from 'date-fns';
 import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -77,11 +77,28 @@ const cardHover = {
   }
 };
 
+// Normalize any date value to a 'yyyy-MM-dd' string in local time.
+// Handles ISO strings, date-only strings, and Date objects consistently.
+function toLocalDateStr(d: string | Date): string {
+  if (typeof d === 'string') {
+    // For date-only strings like '2026-03-16', return as-is
+    if (!d.includes('T')) return d.slice(0, 10);
+    // For ISO strings, convert to local Date first then format
+    const local = new Date(d);
+    return format(local, 'yyyy-MM-dd');
+  }
+  return format(d, 'yyyy-MM-dd');
+}
+
 export function Dashboard() {
   const { tasks, goals, exams, studySessions, subjects, user } = useAppStore();
   const [mounted, setMounted] = useState(false);
   const [currentDate, setCurrentDate] = useState(new Date());
-  const [selectedDate, setSelectedDate] = useState<Date | null>(null);
+  // Store selected date as a stable string to avoid Date reference / timezone issues
+  const [selectedDateStr, setSelectedDateStr] = useState<string | null>(null);
+
+  // Derive a Date from the selected string for display/comparison in the calendar UI
+  const selectedDate = selectedDateStr ? new Date(selectedDateStr + 'T00:00:00') : null;
 
   useEffect(() => {
     setMounted(true);
@@ -116,26 +133,22 @@ export function Dashboard() {
   const upcomingTasks = useMemo(() => {
     // When a date is selected, show ALL tasks for that date (including completed)
     // so results match the calendar dots. Otherwise, show only pending tasks.
-    let filtered = selectedDate
+    let filtered = selectedDateStr
       ? tasks.filter((t) => t.due_date)
       : tasks.filter((t) => t.status !== 'completed' && t.due_date);
     
-    // If a date is selected, filter to that date
-    if (selectedDate) {
-      const selDay = startOfDay(selectedDate);
+    // If a date is selected, filter to that date using string comparison
+    if (selectedDateStr) {
       filtered = filtered.filter((t) => {
         if (!t.due_date) return false;
-        // Parse date safely: append T00:00 for date-only strings to avoid UTC shift
-        const raw = t.due_date!;
-        const parsed = raw.includes('T') ? new Date(raw) : new Date(raw + 'T00:00:00');
-        return isSameDay(parsed, selDay);
+        return toLocalDateStr(t.due_date) === selectedDateStr;
       });
     }
     
     return filtered
       .sort((a, b) => new Date(a.due_date!).getTime() - new Date(b.due_date!).getTime())
       .slice(0, 6);
-  }, [tasks, selectedDate]);
+  }, [tasks, selectedDateStr]);
 
   // Active goals
   const activeGoals = useMemo(() => {
@@ -170,16 +183,13 @@ export function Dashboard() {
   }, [currentDate]);
 
   const getEventsForDate = useCallback((date: Date) => {
+    const dateStr = format(date, 'yyyy-MM-dd');
     const dayTasks = tasks.filter((task) => {
       if (!task.due_date) return false;
-      const raw = task.due_date;
-      const parsed = raw.includes('T') ? new Date(raw) : new Date(raw + 'T00:00:00');
-      return isSameDay(parsed, date);
+      return toLocalDateStr(task.due_date) === dateStr;
     });
     const dayExams = exams.filter((exam) => {
-      const raw = exam.exam_date;
-      const parsed = raw.includes('T') ? new Date(raw) : new Date(raw + 'T00:00:00');
-      return isSameDay(parsed, date);
+      return toLocalDateStr(exam.exam_date) === dateStr;
     });
     return { tasks: dayTasks, exams: dayExams };
   }, [tasks, exams]);
@@ -279,7 +289,7 @@ export function Dashboard() {
                       variant="ghost" 
                       size="sm" 
                       className="gap-1 text-xs h-7"
-                      onClick={() => setSelectedDate(null)}
+                      onClick={() => setSelectedDateStr(null)}
                     >
                       <X className="w-3 h-3" />
                       Clear Filter
@@ -394,12 +404,15 @@ export function Dashboard() {
                   return (
                     <button
                       key={index}
-                      onClick={() => setSelectedDate((prev) => prev && isSameDay(prev, day) ? null : day)}
+                      onClick={() => {
+                        const dayStr = format(day, 'yyyy-MM-dd');
+                        setSelectedDateStr((prev) => prev === dayStr ? null : dayStr);
+                      }}
                       className={cn(
                         'aspect-square text-xs rounded-lg flex flex-col items-center justify-center transition-all relative group/day',
                         !isCurrentMonth && 'opacity-30',
                         isToday(day) && 'bg-primary/20 border border-primary font-bold dot-pulse',
-                        selectedDate && isSameDay(day, selectedDate) && 'bg-primary/10 ring-1 ring-primary/50',
+                        selectedDateStr === format(day, 'yyyy-MM-dd') && 'bg-primary/10 ring-1 ring-primary/50',
                         !isToday(day) && 'hover:bg-muted hover:scale-110'
                       )}
                     >
