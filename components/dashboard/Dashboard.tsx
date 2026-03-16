@@ -325,7 +325,7 @@ export function Dashboard() {
                   </motion.div>
                 ) : (
                   <motion.div
-                    key="tasks"
+                    key={`tasks-${selectedDateStr || 'upcoming'}`}
                     initial="hidden"
                     animate="show"
                     variants={{ hidden: {}, show: { transition: { staggerChildren: 0.05 } } }}
