@@ -27,6 +27,26 @@ interface ExamCardProps {
   onEdit: (exam: Exam) => void;
 }
 
+// Strip HTML tags from descriptions (Canvas imports often contain HTML)
+function stripHtml(text: string): string {
+  if (!text) return '';
+  if (/<[a-z][\s\S]*>/i.test(text)) {
+    return text
+      .replace(/<br\s*\/?>/gi, ' ')
+      .replace(/<\/p>\s*<p>/gi, ' ')
+      .replace(/<[^>]*>/g, '')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+  return text;
+}
+
 function ExamCard({ exam, onEdit }: ExamCardProps) {
   const { updateExam, deleteExam, subjects } = useAppStore();
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -115,7 +135,7 @@ function ExamCard({ exam, onEdit }: ExamCardProps) {
 
           {exam.description && (
             <p className="text-sm text-muted-foreground line-clamp-2">
-              {exam.description}
+              {stripHtml(exam.description)}
             </p>
           )}
 
@@ -217,7 +237,7 @@ function ExamForm({ isOpen, onClose, exam }: ExamFormProps) {
   const { addExam, updateExam, subjects, user } = useAppStore();
 
   const [title, setTitle] = useState(exam?.title || '');
-  const [description, setDescription] = useState(exam?.description || '');
+  const [description, setDescription] = useState(exam?.description ? stripHtml(exam.description) : '');
   const [examDate, setExamDate] = useState(
     exam?.exam_date ? new Date(exam.exam_date).toISOString().split('T')[0] : ''
   );

@@ -114,14 +114,21 @@ export function Dashboard() {
 
   // Upcoming tasks - filter by selected date if any
   const upcomingTasks = useMemo(() => {
-    let filtered = tasks.filter((t) => t.status !== 'completed' && t.due_date);
+    // When a date is selected, show ALL tasks for that date (including completed)
+    // so results match the calendar dots. Otherwise, show only pending tasks.
+    let filtered = selectedDate
+      ? tasks.filter((t) => t.due_date)
+      : tasks.filter((t) => t.status !== 'completed' && t.due_date);
     
     // If a date is selected, filter to that date
     if (selectedDate) {
-      const selectedDateStr = format(selectedDate, 'yyyy-MM-dd');
+      const selDay = startOfDay(selectedDate);
       filtered = filtered.filter((t) => {
         if (!t.due_date) return false;
-        return format(new Date(t.due_date), 'yyyy-MM-dd') === selectedDateStr;
+        // Parse date safely: append T00:00 for date-only strings to avoid UTC shift
+        const raw = t.due_date!;
+        const parsed = raw.includes('T') ? new Date(raw) : new Date(raw + 'T00:00:00');
+        return isSameDay(parsed, selDay);
       });
     }
     
@@ -162,17 +169,20 @@ export function Dashboard() {
     return days;
   }, [currentDate]);
 
-  const getEventsForDate = (date: Date) => {
-    const dateStr = format(date, 'yyyy-MM-dd');
+  const getEventsForDate = useCallback((date: Date) => {
     const dayTasks = tasks.filter((task) => {
       if (!task.due_date) return false;
-      return format(new Date(task.due_date), 'yyyy-MM-dd') === dateStr;
+      const raw = task.due_date;
+      const parsed = raw.includes('T') ? new Date(raw) : new Date(raw + 'T00:00:00');
+      return isSameDay(parsed, date);
     });
     const dayExams = exams.filter((exam) => {
-      return format(new Date(exam.exam_date), 'yyyy-MM-dd') === dateStr;
+      const raw = exam.exam_date;
+      const parsed = raw.includes('T') ? new Date(raw) : new Date(raw + 'T00:00:00');
+      return isSameDay(parsed, date);
     });
     return { tasks: dayTasks, exams: dayExams };
-  };
+  }, [tasks, exams]);
 
   return (
     <motion.div 
@@ -384,7 +394,7 @@ export function Dashboard() {
                   return (
                     <button
                       key={index}
-                      onClick={() => setSelectedDate(day)}
+                      onClick={() => setSelectedDate((prev) => prev && isSameDay(prev, day) ? null : day)}
                       className={cn(
                         'aspect-square text-xs rounded-lg flex flex-col items-center justify-center transition-all relative group/day',
                         !isCurrentMonth && 'opacity-30',
