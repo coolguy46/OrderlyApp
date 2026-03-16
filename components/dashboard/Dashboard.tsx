@@ -131,21 +131,15 @@ export function Dashboard() {
 
   // Upcoming tasks - filter by selected date if any
   const upcomingTasks = useMemo(() => {
-    // When a date is selected, show ALL tasks for that date (including completed)
-    // so results match the calendar dots. Otherwise, show only pending tasks.
-    let filtered = selectedDateStr
-      ? tasks.filter((t) => t.due_date)
-      : tasks.filter((t) => t.status !== 'completed' && t.due_date);
-    
-    // If a date is selected, filter to that date using string comparison
     if (selectedDateStr) {
-      filtered = filtered.filter((t) => {
-        if (!t.due_date) return false;
-        return toLocalDateStr(t.due_date) === selectedDateStr;
-      });
+      // When a date is selected, show ALL tasks for that date (including completed)
+      return tasks
+        .filter((t) => t.due_date && toLocalDateStr(t.due_date) === selectedDateStr)
+        .sort((a, b) => new Date(a.due_date!).getTime() - new Date(b.due_date!).getTime());
     }
-    
-    return filtered
+    // Default: show upcoming non-completed tasks
+    return tasks
+      .filter((t) => t.status !== 'completed' && t.due_date)
       .sort((a, b) => new Date(a.due_date!).getTime() - new Date(b.due_date!).getTime())
       .slice(0, 6);
   }, [tasks, selectedDateStr]);
@@ -404,10 +398,7 @@ export function Dashboard() {
                   return (
                     <button
                       key={index}
-                      onClick={() => {
-                        const dayStr = format(day, 'yyyy-MM-dd');
-                        setSelectedDateStr((prev) => prev === dayStr ? null : dayStr);
-                      }}
+                      onClick={() => setSelectedDateStr(format(day, 'yyyy-MM-dd'))}
                       className={cn(
                         'aspect-square text-xs rounded-lg flex flex-col items-center justify-center transition-all relative group/day',
                         !isCurrentMonth && 'opacity-30',
