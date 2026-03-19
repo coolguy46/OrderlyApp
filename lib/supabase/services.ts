@@ -515,6 +515,70 @@ export async function deleteCanvasSettings(userId: string): Promise<boolean> {
   return true;
 }
 
+// ============== TIMER STATE SERVICES ==============
+
+export interface TimerState {
+  id: string;
+  user_id: string;
+  timer_type: 'pomodoro' | 'stopwatch';
+  mode: 'focus' | 'shortBreak' | 'longBreak';
+  is_running: boolean;
+  pomodoro_started_at: string | null;
+  stopwatch_started_at: string | null;
+  time_left: number;
+  stopwatch_time: number;
+  subject_id: string | null;
+  sessions_completed: number;
+  sound_enabled: boolean;
+  pomodoro_started: boolean;
+  stopwatch_started: boolean;
+  updated_at: string;
+}
+
+export async function getTimerState(userId: string): Promise<TimerState | null> {
+  const { data, error } = await db
+    .from('timer_states')
+    .select('*')
+    .eq('user_id', userId)
+    .single();
+
+  if (error && error.code !== 'PGRST116') {
+    console.error('Error fetching timer state:', error);
+  }
+  return (data as TimerState | null) || null;
+}
+
+export async function upsertTimerState(userId: string, state: Omit<TimerState, 'id' | 'user_id' | 'updated_at'>): Promise<TimerState | null> {
+  const { data, error } = await db
+    .from('timer_states')
+    .upsert({
+      user_id: userId,
+      ...state,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'user_id' })
+    .select()
+    .single();
+
+  if (error) {
+    console.error('Error upserting timer state:', error);
+    return null;
+  }
+  return data as TimerState | null;
+}
+
+export async function deleteTimerState(userId: string): Promise<boolean> {
+  const { error } = await db
+    .from('timer_states')
+    .delete()
+    .eq('user_id', userId);
+
+  if (error) {
+    console.error('Error deleting timer state:', error);
+    return false;
+  }
+  return true;
+}
+
 // ============== FRIENDSHIP SERVICES ==============
 
 export interface FriendWithProfile {
@@ -601,11 +665,11 @@ export async function removeFriend(friendshipId: string): Promise<boolean> {
   return true;
 }
 
-export async function searchUsersByEmail(email: string, currentUserId: string): Promise<Profile[]> {
+export async function searchUsersByEmail(query: string, currentUserId: string): Promise<Profile[]> {
   const { data, error } = await db
     .from('profiles')
     .select('*')
-    .ilike('email', `%${email}%`)
+    .or(`email.ilike.%${query}%,full_name.ilike.%${query}%`)
     .neq('id', currentUserId)
     .limit(10);
 
@@ -736,6 +800,24 @@ export async function signOut() {
   if (error) {
     throw error;
   }
+}
+
+export async function signInWithGoogle() {
+  const { data, error } = await db.auth.signInWithOAuth({
+    provider: 'google',
+    options: {
+      redirectTo: `${typeof window !== 'undefined' ? window.location.origin : ''}/auth/callback`,
+      queryParams: {
+        access_type: 'offline',
+        prompt: 'consent',
+      },
+    },
+  });
+
+  if (error) {
+    throw error;
+  }
+  return data;
 }
 
 export async function resetPassword(email: string) {

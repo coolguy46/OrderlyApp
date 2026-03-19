@@ -12,6 +12,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Separator } from '@/components/ui/separator';
 import { Sparkles, Mail, Lock, ArrowRight, Github, Chrome } from 'lucide-react';
 import { useAppStore } from '@/lib/store';
+import { signInWithGoogle } from '@/lib/supabase/services';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -40,15 +41,13 @@ export default function LoginPage() {
     }
   };
 
-  const handleSocialLogin = async (provider: string) => {
+  const handleGoogleLogin = async () => {
     setIsLoading(true);
-    // Simulate social login
+    setError('');
     try {
-      await login(`${provider}@student.edu`, 'password');
-      router.push('/');
+      await signInWithGoogle();
     } catch (err) {
-      setError('Social login failed. Please try again.');
-    } finally {
+      setError('Google sign-in failed. Please try again.');
       setIsLoading(false);
     }
   };
@@ -86,21 +85,12 @@ export default function LoginPage() {
             <div className="grid grid-cols-2 gap-3">
               <Button
                 variant="outline"
-                onClick={() => handleSocialLogin('google')}
+                onClick={handleGoogleLogin}
                 disabled={isLoading}
-                className="w-full"
+                className="w-full col-span-2"
               >
                 <Chrome className="w-4 h-4" />
-                Google
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => handleSocialLogin('github')}
-                disabled={isLoading}
-                className="w-full"
-              >
-                <Github className="w-4 h-4" />
-                GitHub
+                Continue with Google
               </Button>
             </div>
 

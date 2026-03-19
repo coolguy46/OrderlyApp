@@ -6,7 +6,7 @@ import * as db from '@/lib/supabase/services';
 import type { FriendWithProfile } from '@/lib/supabase/services';
 import { toast } from 'sonner';
 
-type Theme = 'light' | 'dark' | 'system';
+export type Theme = 'light' | 'dark' | 'system';
 
 interface AppState {
   // Auth
@@ -35,6 +35,10 @@ interface AppState {
     longBreakDuration: number;
     sessionsBeforeLongBreak: number;
   };
+  
+  // Active study tracking (real-time)
+  activeStudySeconds: number;
+  activeStudySubjectId: string | null;
   
   // UI state
   sidebarOpen: boolean;
@@ -88,6 +92,10 @@ interface AppState {
   // Pomodoro actions
   updatePomodoroSettings: (settings: Partial<AppState['pomodoroSettings']>) => void;
   
+  // Active study actions
+  setActiveStudy: (seconds: number, subjectId: string | null) => void;
+  clearActiveStudy: () => void;
+  
   // Canvas sync actions
   removeOrphanedCanvasTasks: (currentCanvasIds: string[]) => Promise<number>;
 
@@ -125,6 +133,9 @@ export const useAppStore = create<AppState>()(
         sessionsBeforeLongBreak: 4,
       },
       
+      activeStudySeconds: 0,
+      activeStudySubjectId: null,
+      
       sidebarOpen: true,
       currentView: 'dashboard',
       
@@ -154,7 +165,12 @@ export const useAppStore = create<AppState>()(
         // Listen for auth changes (clean up previous listener if any)
         const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
           if (event === 'SIGNED_IN' && session?.user) {
-            const profile = await db.getProfile(session.user.id);
+            // Small delay to allow the profile trigger to complete (especially for OAuth)
+            let profile = await db.getProfile(session.user.id);
+            if (!profile) {
+              await new Promise(resolve => setTimeout(resolve, 1500));
+              profile = await db.getProfile(session.user.id);
+            }
             set({ isAuthenticated: true, user: profile });
             await get().loadUserData(session.user.id);
           } else if (event === 'SIGNED_OUT') {
@@ -508,9 +524,33 @@ export const useAppStore = create<AppState>()(
             if (updatedProfile) {
               set({ user: updatedProfile });
             }
+          } else {
+            // DB insert returned null - save locally so analytics still work
+            console.error('Study session DB insert returned null - saving locally');
+            const fallbackSession = {
+              id: crypto.randomUUID(),
+              ...sessionData,
+              user_id: user.id,
+              created_at: new Date().toISOString(),
+            };
+            set((state) => ({
+              studySessions: [fallbackSession, ...state.studySessions],
+            }));
+            toast.warning('Session saved locally (database sync failed)');
           }
         } catch (error) {
-          toast.error('Failed to save study session');
+          console.error('Failed to save study session:', error);
+          // Still save locally as fallback
+          const fallbackSession = {
+            id: crypto.randomUUID(),
+            ...sessionData,
+            user_id: user.id,
+            created_at: new Date().toISOString(),
+          };
+          set((state) => ({
+            studySessions: [fallbackSession, ...state.studySessions],
+          }));
+          toast.error('Session saved locally (database error)');
         }
       },
       
@@ -519,6 +559,14 @@ export const useAppStore = create<AppState>()(
         set((state) => ({
           pomodoroSettings: { ...state.pomodoroSettings, ...settings },
         }));
+      },
+      
+      // Active study actions
+      setActiveStudy: (seconds, subjectId) => {
+        set({ activeStudySeconds: seconds, activeStudySubjectId: subjectId });
+      },
+      clearActiveStudy: () => {
+        set({ activeStudySeconds: 0, activeStudySubjectId: null });
       },
       
       // Canvas sync - remove tasks that no longer exist in Canvas

@@ -176,6 +176,9 @@ ALTER TABLE achievements ENABLE ROW LEVEL SECURITY;
 ALTER TABLE canvas_settings ENABLE ROW LEVEL SECURITY;
 
 -- RLS Policies for profiles
+CREATE POLICY "Allow profile creation via trigger" ON profiles
+  FOR INSERT WITH CHECK (true);
+
 CREATE POLICY "Users can view their own profile" ON profiles
   FOR SELECT USING (auth.uid() = id);
 
@@ -259,13 +262,23 @@ BEGIN
   INSERT INTO profiles (id, email, full_name, avatar_url)
   VALUES (
     NEW.id,
-    NEW.email,
-    NEW.raw_user_meta_data->>'full_name',
-    NEW.raw_user_meta_data->>'avatar_url'
-  );
+    COALESCE(NEW.email, NEW.raw_user_meta_data->>'email', ''),
+    COALESCE(
+      NEW.raw_user_meta_data->>'full_name',
+      NEW.raw_user_meta_data->>'name'
+    ),
+    COALESCE(
+      NEW.raw_user_meta_data->>'avatar_url',
+      NEW.raw_user_meta_data->>'picture'
+    )
+  )
+  ON CONFLICT (id) DO UPDATE SET
+    full_name = COALESCE(profiles.full_name, EXCLUDED.full_name),
+    avatar_url = COALESCE(profiles.avatar_url, EXCLUDED.avatar_url),
+    updated_at = NOW();
   RETURN NEW;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
 -- Trigger to automatically create profile on signup
 CREATE TRIGGER on_auth_user_created

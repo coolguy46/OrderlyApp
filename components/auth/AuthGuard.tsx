@@ -10,8 +10,12 @@ const PUBLIC_ROUTES = [
   '/auth/login',
   '/auth/register',
   '/auth/forgot-password',
+  '/auth/callback',
   '/landing',
 ];
+
+// Routes that are accessible when authenticated but exempt from setup redirect
+const SETUP_EXEMPT_ROUTES = ['/setup'];
 
 interface AuthGuardProps {
   children: React.ReactNode;
@@ -20,7 +24,7 @@ interface AuthGuardProps {
 export function AuthGuard({ children }: AuthGuardProps) {
   const router = useRouter();
   const pathname = usePathname();
-  const { isAuthenticated, isLoading: authLoading, initializeAuth } = useAppStore();
+  const { isAuthenticated, isLoading: authLoading, initializeAuth, dataLoaded, subjects } = useAppStore();
   const [initialized, setInitialized] = useState(false);
 
   useEffect(() => {
@@ -36,15 +40,20 @@ export function AuthGuard({ children }: AuthGuardProps) {
     if (!initialized || authLoading) return;
 
     const isPublicRoute = PUBLIC_ROUTES.some(route => pathname.startsWith(route));
+    const isSetupExempt = SETUP_EXEMPT_ROUTES.some(route => pathname.startsWith(route));
 
     if (!isAuthenticated && !isPublicRoute) {
-      // Redirect to login if not authenticated and trying to access protected route
       router.push('/auth/login');
     } else if (isAuthenticated && isPublicRoute) {
-      // Redirect to dashboard if authenticated and trying to access auth pages
       router.push('/');
+    } else if (isAuthenticated && !isSetupExempt && dataLoaded) {
+      // Redirect new users to setup if they haven't completed it
+      const setupComplete = localStorage.getItem('orderly-setup-complete');
+      if (!setupComplete && subjects.length === 0) {
+        router.push('/setup');
+      }
     }
-  }, [isAuthenticated, pathname, router, initialized, authLoading]);
+  }, [isAuthenticated, pathname, router, initialized, authLoading, dataLoaded, subjects]);
 
   // Show loading spinner while checking auth
   if (!initialized || authLoading) {

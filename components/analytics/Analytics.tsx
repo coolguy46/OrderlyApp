@@ -56,17 +56,21 @@ const cardHover = {
 };
 
 export function Analytics() {
-  const { studySessions, tasks, subjects, user } = useAppStore();
+  const { studySessions, tasks, subjects, user, activeStudySeconds, activeStudySubjectId } = useAppStore();
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
     setMounted(true);
   }, []);
 
+  // Active study minutes for real-time display
+  const activeMinutes = Math.floor(activeStudySeconds / 60);
+
   // Daily study time for the past 7 days
   const dailyData = useMemo(() => {
     if (!mounted) return [];
     const now = new Date();
+    const todayStr = format(now, 'yyyy-MM-dd');
     const days = Array.from({ length: 7 }, (_, i) => subDays(now, 6 - i));
 
     return days.map((day) => {
@@ -74,7 +78,11 @@ export function Analytics() {
       const daySessions = studySessions.filter(
         (s) => format(parseISO(s.started_at), 'yyyy-MM-dd') === dayStr
       );
-      const totalMinutes = daySessions.reduce((acc, s) => acc + s.duration_minutes, 0);
+      let totalMinutes = daySessions.reduce((acc, s) => acc + s.duration_minutes, 0);
+      // Add active study time to today's bar
+      if (dayStr === todayStr) {
+        totalMinutes += activeMinutes;
+      }
 
       return {
         name: format(day, 'EEE'),
@@ -83,7 +91,7 @@ export function Analytics() {
         hours: (totalMinutes / 60).toFixed(1),
       };
     });
-  }, [studySessions, mounted]);
+  }, [studySessions, mounted, activeMinutes]);
 
   // Study time by subject
   const subjectData = useMemo(() => {
@@ -94,6 +102,12 @@ export function Analytics() {
       subjectTimes[subjectId] = (subjectTimes[subjectId] || 0) + session.duration_minutes;
     });
 
+    // Add active study time
+    if (activeMinutes > 0) {
+      const activeKey = activeStudySubjectId || 'unassigned';
+      subjectTimes[activeKey] = (subjectTimes[activeKey] || 0) + activeMinutes;
+    }
+
     return Object.entries(subjectTimes).map(([id, minutes]) => {
       const subject = subjects.find((s) => s.id === id);
       return {
@@ -102,7 +116,7 @@ export function Analytics() {
         color: subject?.color || '#6b7280',
       };
     });
-  }, [studySessions, subjects]);
+  }, [studySessions, subjects, activeMinutes, activeStudySubjectId]);
 
   // Task completion by priority
   const taskStats = useMemo(() => {
@@ -135,12 +149,18 @@ export function Analytics() {
       hourlyMinutes[hour] = (hourlyMinutes[hour] || 0) + session.duration_minutes;
     });
 
+    // Add active study time to current hour
+    if (activeMinutes > 0) {
+      const currentHour = new Date().getHours();
+      hourlyMinutes[currentHour] = (hourlyMinutes[currentHour] || 0) + activeMinutes;
+    }
+
     return Array.from({ length: 24 }, (_, i) => ({
       hour: i,
       label: i === 0 ? '12am' : i < 12 ? `${i}am` : i === 12 ? '12pm' : `${i - 12}pm`,
       minutes: hourlyMinutes[i] || 0,
     }));
-  }, [studySessions]);
+  }, [studySessions, activeMinutes]);
 
   // Find peak productivity hour
   const peakHour = useMemo(() => {
@@ -150,7 +170,8 @@ export function Analytics() {
 
   // Total stats
   const totalStats = useMemo(() => {
-    const totalMinutes = studySessions.reduce((acc, s) => acc + s.duration_minutes, 0);
+    const savedMinutes = studySessions.reduce((acc, s) => acc + s.duration_minutes, 0);
+    const totalMinutes = savedMinutes + activeMinutes;
     const totalSessions = studySessions.length;
     const completionRate = tasks.length > 0 ? (taskStats.completed / tasks.length) * 100 : 0;
 
@@ -158,9 +179,9 @@ export function Analytics() {
       totalMinutes,
       totalSessions,
       completionRate,
-      avgSessionLength: totalSessions > 0 ? Math.round(totalMinutes / totalSessions) : 0,
+      avgSessionLength: totalSessions > 0 ? Math.round(savedMinutes / totalSessions) : 0,
     };
-  }, [studySessions, tasks, taskStats]);
+  }, [studySessions, tasks, taskStats, activeMinutes]);
 
   const CustomTooltip = ({ active, payload, label }: any) => {
     if (active && payload && payload.length) {

@@ -39,8 +39,13 @@ const itemVariants = {
 };
 
 export function StudySession() {
-  const { studySessions, tasks, user, pomodoroSettings } = useAppStore();
-  const [visualType, setVisualType] = useState<VisualizationType>('egg');
+  const { studySessions, tasks, user, pomodoroSettings, activeStudySeconds } = useAppStore();
+  const [visualType, setVisualType] = useState<VisualizationType>(() => {
+    if (typeof window !== 'undefined') {
+      return (localStorage.getItem('studyVisualType') as VisualizationType) || 'egg';
+    }
+    return 'egg';
+  });
   const [mounted, setMounted] = useState(false);
   
   // Editable goal duration (in hours, min 1, max 24)
@@ -58,6 +63,13 @@ export function StudySession() {
     }
   }, []);
 
+  // Persist visualization type
+  useEffect(() => {
+    if (mounted) {
+      localStorage.setItem('studyVisualType', visualType);
+    }
+  }, [visualType, mounted]);
+
   // Save goal to localStorage
   useEffect(() => {
     if (mounted) {
@@ -72,11 +84,12 @@ export function StudySession() {
     const todaySessions = studySessions.filter(
       (s) => new Date(s.started_at).toDateString() === today
     );
-    const totalMinutes = todaySessions.reduce((acc, s) => acc + s.duration_minutes, 0);
+    const savedMinutes = todaySessions.reduce((acc, s) => acc + s.duration_minutes, 0);
+    const totalMinutes = savedMinutes + Math.floor(activeStudySeconds / 60);
     const sessionCount = todaySessions.length;
 
     return { totalMinutes, sessionCount };
-  }, [studySessions, mounted]);
+  }, [studySessions, mounted, activeStudySeconds]);
 
   // Calculate weekly study time
   const weeklyStats = useMemo(() => {
@@ -87,10 +100,11 @@ export function StudySession() {
     const weeklySessions = studySessions.filter(
       (s) => new Date(s.started_at) >= weekAgo
     );
-    const totalMinutes = weeklySessions.reduce((acc, s) => acc + s.duration_minutes, 0);
+    const savedMinutes = weeklySessions.reduce((acc, s) => acc + s.duration_minutes, 0);
+    const totalMinutes = savedMinutes + Math.floor(activeStudySeconds / 60);
     
     return { totalMinutes, sessionCount: weeklySessions.length };
-  }, [studySessions, mounted]);
+  }, [studySessions, mounted, activeStudySeconds]);
 
   // Daily goal progress
   const dailyGoal = goalHours * 60; // Convert hours to minutes

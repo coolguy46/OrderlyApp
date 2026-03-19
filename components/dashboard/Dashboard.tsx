@@ -91,7 +91,7 @@ function toLocalDateStr(d: string | Date): string {
 }
 
 export function Dashboard() {
-  const { tasks, goals, exams, studySessions, subjects, user } = useAppStore();
+  const { tasks, goals, exams, studySessions, subjects, user, activeStudySeconds } = useAppStore();
   const [mounted, setMounted] = useState(false);
   const [currentDate, setCurrentDate] = useState(new Date());
   // Store selected date as a stable string to avoid Date reference / timezone issues
@@ -112,7 +112,7 @@ export function Dashboard() {
     const todaySessions = studySessions.filter(
       (s) => new Date(s.started_at).toDateString() === today
     );
-    const totalMinutes = todaySessions.reduce((acc, s) => acc + s.duration_minutes, 0);
+    const totalMinutes = todaySessions.reduce((acc, s) => acc + s.duration_minutes, 0) + Math.floor(activeStudySeconds / 60);
 
     const todayTasks = tasks.filter(
       (t) => t.due_date && new Date(t.due_date).toDateString() === today
@@ -127,7 +127,7 @@ export function Dashboard() {
       tasksCompleted: completedToday,
       tasksDue: todayTasks.length,
     };
-  }, [studySessions, tasks, mounted]);
+  }, [studySessions, tasks, mounted, activeStudySeconds]);
 
   // Upcoming tasks - filter by selected date if any
   const upcomingTasks = useMemo(() => {

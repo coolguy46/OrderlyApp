@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useCallback, useEffect } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useAppStore } from '@/lib/store';
 import { searchUsersByEmail } from '@/lib/supabase/services';
 import type { Profile } from '@/lib/supabase/types';
@@ -9,7 +9,6 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { formatDuration, cn } from '@/lib/utils';
 import {
   Users,
-  UserPlus,
   UserX,
   Trophy,
   Medal,
@@ -37,10 +36,8 @@ export function Social() {
 
   const [activeTab, setActiveTab] = useState<'friends' | 'competitions' | 'leaderboard'>('friends');
   const [searchQuery, setSearchQuery] = useState('');
-  const [addSearchQuery, setAddSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<Profile[]>([]);
   const [isSearching, setIsSearching] = useState(false);
-  const [showAddFriend, setShowAddFriend] = useState(false);
   const [pendingSendIds, setPendingSendIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
@@ -102,27 +99,27 @@ export function Social() {
     return entries;
   }, [user, acceptedFriends]);
 
-  // Search for users by email
-  const handleSearch = useCallback(
-    async (query: string) => {
-      setAddSearchQuery(query);
-      if (query.length < 3 || !user) {
-        setSearchResults([]);
-        return;
-      }
+  // Debounced search for new users when query is 3+ chars
+  useEffect(() => {
+    if (searchQuery.length < 3 || !user) {
+      setSearchResults([]);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
       setIsSearching(true);
       try {
-        const results = await searchUsersByEmail(query, user.id);
-        // Filter out existing relationships
+        const results = await searchUsersByEmail(searchQuery, user.id);
         setSearchResults(results.filter((r) => !existingRelationIds.has(r.id)));
       } catch {
         setSearchResults([]);
       } finally {
         setIsSearching(false);
       }
-    },
-    [user, existingRelationIds]
-  );
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [searchQuery, user, existingRelationIds]);
 
   const handleSendRequest = async (friendId: string) => {
     setPendingSendIds((prev) => new Set(prev).add(friendId));
@@ -179,109 +176,68 @@ export function Social() {
             exit={{ opacity: 0, y: -20 }}
             className="space-y-4"
           >
-            {/* Search & Add */}
-            <div className="flex items-center gap-3">
-              <div className="flex-1 relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
-                <Input
-                  type="text"
-                  placeholder="Search your friends..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-10"
-                />
-              </div>
-              <Button onClick={() => setShowAddFriend(!showAddFriend)} variant={showAddFriend ? 'secondary' : 'default'}>
-                {showAddFriend ? (
-                  <>
-                    <X className="w-4 h-4 mr-2" />
-                    Close
-                  </>
-                ) : (
-                  <>
-                    <UserPlus className="w-4 h-4 mr-2" />
-                    Add Friend
-                  </>
-                )}
-              </Button>
+            {/* Unified Search */}
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+              <Input
+                type="text"
+                placeholder="Search friends or find new people by name or email..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-10"
+              />
+              {isSearching && (
+                <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground animate-spin" />
+              )}
             </div>
 
-            {/* Add Friend Search Panel */}
-            <AnimatePresence>
-              {showAddFriend && (
-                <motion.div
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: 'auto' }}
-                  exit={{ opacity: 0, height: 0 }}
-                  className="overflow-hidden"
-                >
-                  <Card className="border-primary/30">
-                    <CardContent className="p-4 space-y-3">
-                      <p className="text-sm text-muted-foreground">
-                        Search by email address to add a friend
-                      </p>
-                      <div className="relative">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
-                        <Input
-                          type="text"
-                          placeholder="Search by email..."
-                          value={addSearchQuery}
-                          onChange={(e) => handleSearch(e.target.value)}
-                          className="pl-10"
-                        />
-                        {isSearching && (
-                          <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground animate-spin" />
-                        )}
+            {/* Add People Results (shown when searching 3+ chars) */}
+            {searchQuery.length >= 3 && (searchResults.length > 0 || isSearching) && (
+              <Card className="border-primary/30">
+                <CardContent className="p-4 space-y-2">
+                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                    Add People
+                  </p>
+                  {searchResults.map((result) => (
+                    <div
+                      key={result.id}
+                      className="flex items-center gap-3 p-3 bg-muted/50 rounded-xl"
+                    >
+                      <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center">
+                        <span className="text-lg font-bold text-white">
+                          {(result.full_name?.[0] || result.email?.[0] || '?').toUpperCase()}
+                        </span>
                       </div>
-
-                      {/* Search Results */}
-                      {searchResults.length > 0 && (
-                        <div className="space-y-2">
-                          {searchResults.map((result) => (
-                            <div
-                              key={result.id}
-                              className="flex items-center gap-3 p-3 bg-muted/50 rounded-xl"
-                            >
-                              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center">
-                                <span className="text-lg font-bold text-white">
-                                  {(result.full_name?.[0] || result.email?.[0] || '?').toUpperCase()}
-                                </span>
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <p className="text-sm font-medium text-foreground truncate">
-                                  {result.full_name || 'No name'}
-                                </p>
-                                <p className="text-xs text-muted-foreground truncate">{result.email}</p>
-                              </div>
-                              <Button
-                                size="sm"
-                                onClick={() => handleSendRequest(result.id)}
-                                disabled={pendingSendIds.has(result.id)}
-                              >
-                                {pendingSendIds.has(result.id) ? (
-                                  <Loader2 className="w-4 h-4 animate-spin" />
-                                ) : (
-                                  <>
-                                    <Send className="w-3.5 h-3.5 mr-1.5" />
-                                    Add
-                                  </>
-                                )}
-                              </Button>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-
-                      {addSearchQuery.length >= 3 && !isSearching && searchResults.length === 0 && (
-                        <p className="text-sm text-muted-foreground text-center py-2">
-                          No users found matching &ldquo;{addSearchQuery}&rdquo;
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-foreground truncate">
+                          {result.full_name || 'No name'}
                         </p>
-                      )}
-                    </CardContent>
-                  </Card>
-                </motion.div>
-              )}
-            </AnimatePresence>
+                        <p className="text-xs text-muted-foreground truncate">{result.email}</p>
+                      </div>
+                      <Button
+                        size="sm"
+                        onClick={() => handleSendRequest(result.id)}
+                        disabled={pendingSendIds.has(result.id)}
+                      >
+                        {pendingSendIds.has(result.id) ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <>
+                            <Send className="w-3.5 h-3.5 mr-1.5" />
+                            Add
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  ))}
+                  {!isSearching && searchResults.length === 0 && (
+                    <p className="text-sm text-muted-foreground text-center py-2">
+                      No new users found matching &ldquo;{searchQuery}&rdquo;
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
+            )}
 
             {/* Pending Requests */}
             {pendingReceived.length > 0 && (
@@ -414,7 +370,7 @@ export function Social() {
                 ))}
               </div>
             ) : (
-              !showAddFriend &&
+              !searchQuery &&
               pendingReceived.length === 0 &&
               pendingSent.length === 0 && (
                 <Card>
@@ -422,12 +378,8 @@ export function Social() {
                     <Users className="w-12 h-12 text-muted-foreground/30 mb-4" />
                     <h3 className="text-lg font-medium text-foreground mb-1">No friends yet</h3>
                     <p className="text-sm text-muted-foreground mb-4">
-                      Search by email to connect with other students
+                      Type a name or email above to find and add other students
                     </p>
-                    <Button onClick={() => setShowAddFriend(true)}>
-                      <UserPlus className="w-4 h-4 mr-2" />
-                      Add Your First Friend
-                    </Button>
                   </CardContent>
                 </Card>
               )
