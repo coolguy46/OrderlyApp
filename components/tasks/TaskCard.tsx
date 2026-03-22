@@ -411,7 +411,7 @@ export const TaskCard = memo(function TaskCard({ task, onEdit, compact = false, 
                   {isRecurring && (
                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium bg-indigo-500/15 text-indigo-400">
                       <Repeat className="w-3 h-3" />
-                      {task.recurrence === 'daily' ? 'Daily' : task.recurrence === 'weekly' ? 'Weekly' : 'Monthly'}
+                      {task.recurrence === 'daily' ? 'Daily' : task.recurrence === 'weekly' ? (task.recurrence_days?.length ? `Weekly (${task.recurrence_days.map(d => ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d]).join(', ')})` : 'Weekly') : 'Monthly'}
                     </span>
                   )}
 

@@ -360,10 +360,22 @@ export const useAppStore = create<AppState>()(
                   nextDue = new Date(currentDue);
                   nextDue.setDate(nextDue.getDate() + 1);
                   break;
-                case 'weekly':
-                  nextDue = new Date(currentDue);
-                  nextDue.setDate(nextDue.getDate() + 7);
+                case 'weekly': {
+                  const days = completedTask.recurrence_days;
+                  if (days && days.length > 0) {
+                    // Find the next matching weekday
+                    nextDue = new Date(currentDue);
+                    nextDue.setDate(nextDue.getDate() + 1); // start from tomorrow
+                    for (let i = 0; i < 7; i++) {
+                      if (days.includes(nextDue.getDay())) break;
+                      nextDue.setDate(nextDue.getDate() + 1);
+                    }
+                  } else {
+                    nextDue = new Date(currentDue);
+                    nextDue.setDate(nextDue.getDate() + 7);
+                  }
                   break;
+                }
                 case 'monthly':
                   nextDue = new Date(currentDue);
                   nextDue.setMonth(nextDue.getMonth() + 1);
@@ -382,6 +394,7 @@ export const useAppStore = create<AppState>()(
                 due_date: nextDue.toISOString(),
                 due_time: completedTask.due_time || null,
                 recurrence: completedTask.recurrence,
+                recurrence_days: completedTask.recurrence_days || null,
                 completed_at: null,
               });
               

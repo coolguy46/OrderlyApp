@@ -78,6 +78,7 @@ export interface Database {
           due_date: string | null;
           due_time: string | null;
           recurrence: 'none' | 'daily' | 'weekly' | 'monthly';
+          recurrence_days: number[] | null;
           completed_at: string | null;
           created_at: string;
           updated_at: string;
@@ -99,6 +100,7 @@ export interface Database {
           due_date?: string | null;
           due_time?: string | null;
           recurrence?: 'none' | 'daily' | 'weekly' | 'monthly';
+          recurrence_days?: number[] | null;
           completed_at?: string | null;
           created_at?: string;
           updated_at?: string;
@@ -118,6 +120,7 @@ export interface Database {
           due_date?: string | null;
           due_time?: string | null;
           recurrence?: 'none' | 'daily' | 'weekly' | 'monthly';
+          recurrence_days?: number[] | null;
           completed_at?: string | null;
           updated_at?: string;
         };

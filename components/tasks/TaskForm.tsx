@@ -49,6 +49,7 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
   const [dueDate, setDueDate] = useState('');
   const [dueTime, setDueTime] = useState('');
   const [recurrence, setRecurrence] = useState<'none' | 'daily' | 'weekly' | 'monthly'>('none');
+  const [recurrenceDays, setRecurrenceDays] = useState<number[]>([]);
   
   const [showNewSubject, setShowNewSubject] = useState(false);
   const [newSubjectName, setNewSubjectName] = useState('');
@@ -76,6 +77,7 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
       setDueDate(task.due_date ? new Date(task.due_date).toISOString().split('T')[0] : '');
       setDueTime(task.due_time || '');
       setRecurrence(task.recurrence || 'none');
+      setRecurrenceDays(task.recurrence_days || []);
     } else {
       resetForm();
     }
@@ -109,6 +111,7 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
       due_date: dueDate ? new Date(dueDate + 'T00:00:00').toISOString() : null,
       due_time: dueTime || null,
       recurrence,
+      recurrence_days: recurrence === 'weekly' && recurrenceDays.length > 0 ? recurrenceDays : null,
       completed_at: status === 'completed' ? new Date().toISOString() : null,
     };
 
@@ -132,6 +135,7 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
     setDueDate('');
     setDueTime('');
     setRecurrence('none');
+    setRecurrenceDays([]);
     setShowNewSubject(false);
     setNewSubjectName('');
   };
@@ -392,7 +396,7 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
                 <Repeat className="w-3 h-3" />
                 Repeat
               </Label>
-              <Select value={recurrence} onValueChange={(v) => setRecurrence(v as 'none' | 'daily' | 'weekly' | 'monthly')}>
+              <Select value={recurrence} onValueChange={(v) => { setRecurrence(v as 'none' | 'daily' | 'weekly' | 'monthly'); if (v !== 'weekly') setRecurrenceDays([]); }}>
                 <SelectTrigger className="h-9 bg-muted/30 border-border/50">
                   <SelectValue />
                 </SelectTrigger>
@@ -405,6 +409,34 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
               </Select>
             </div>
           </div>
+
+          {/* Weekday picker for weekly recurrence */}
+          {recurrence === 'weekly' && (
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+                <Calendar className="w-3 h-3" />
+                Repeat On
+                <span className="text-muted-foreground/50 normal-case tracking-normal font-normal">(select days)</span>
+              </Label>
+              <div className="flex gap-1.5">
+                {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day, i) => (
+                  <button
+                    key={day}
+                    type="button"
+                    onClick={() => setRecurrenceDays(prev => prev.includes(i) ? prev.filter(d => d !== i) : [...prev, i].sort())}
+                    className={cn(
+                      'flex-1 h-8 rounded-md text-xs font-medium transition-all',
+                      recurrenceDays.includes(i)
+                        ? 'bg-indigo-500 text-white shadow-sm'
+                        : 'bg-muted/30 text-muted-foreground hover:bg-muted/50 border border-border/50'
+                    )}
+                  >
+                    {day}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Actions */}
           <div className="flex gap-2 pt-3 border-t border-border/30">
