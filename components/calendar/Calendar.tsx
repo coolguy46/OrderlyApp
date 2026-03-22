@@ -142,8 +142,29 @@ export function Calendar() {
     const isWeekday = dayOfWeek >= 1 && dayOfWeek <= 5;
 
     const dayTasks = tasks.filter((task) => {
-      if (!task.due_date) return false;
-      return format(parseISO(task.due_date), 'yyyy-MM-dd') === dateStr;
+      // Exact due_date match
+      if (task.due_date && format(parseISO(task.due_date), 'yyyy-MM-dd') === dateStr) return true;
+
+      // Recurring task expansion
+      if (task.recurrence && task.recurrence !== 'none' && task.status !== 'completed') {
+        const taskStart = task.due_date ? parseISO(task.due_date) : parseISO(task.created_at);
+        if (date < startOfDay(taskStart)) return false;
+        // Skip the exact due_date match (already handled above)
+        if (task.due_date && format(parseISO(task.due_date), 'yyyy-MM-dd') === dateStr) return false;
+
+        if (task.recurrence === 'daily') return true;
+        if (task.recurrence === 'weekly') {
+          if (task.recurrence_days && task.recurrence_days.length > 0) {
+            return task.recurrence_days.includes(dayOfWeek);
+          }
+          return date.getDay() === taskStart.getDay();
+        }
+        if (task.recurrence === 'monthly') {
+          return date.getDate() === taskStart.getDate();
+        }
+      }
+
+      return false;
     });
 
     const dayExams = exams.filter((exam) => {

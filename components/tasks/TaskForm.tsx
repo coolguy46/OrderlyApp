@@ -101,24 +101,30 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    const taskData = {
-      user_id: user?.id || '',
-      title,
-      description: description || null,
-      priority,
-      status,
-      subject_id: subjectId === 'none' ? null : subjectId,
-      due_date: dueDate ? new Date(dueDate + 'T00:00:00').toISOString() : null,
-      due_time: dueTime || null,
-      recurrence,
-      recurrence_days: recurrence === 'weekly' && recurrenceDays.length > 0 ? recurrenceDays : null,
-      completed_at: status === 'completed' ? new Date().toISOString() : null,
-    };
+    if (!title.trim()) return;
 
-    if (task) {
-      await updateTask(task.id, taskData);
-    } else {
-      await addTask(taskData);
+    try {
+      const taskData = {
+        user_id: user?.id || '',
+        title,
+        description: description || null,
+        priority,
+        status,
+        subject_id: subjectId === 'none' ? null : subjectId,
+        due_date: dueDate ? new Date(dueDate + 'T00:00:00').toISOString() : null,
+        due_time: dueTime || null,
+        recurrence,
+        recurrence_days: recurrence === 'weekly' && recurrenceDays.length > 0 ? recurrenceDays : null,
+        completed_at: status === 'completed' ? new Date().toISOString() : null,
+      };
+
+      if (task) {
+        await updateTask(task.id, taskData);
+      } else {
+        await addTask(taskData);
+      }
+    } catch (error) {
+      console.error('Task submit error:', error);
     }
 
     onClose();
@@ -169,7 +175,7 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
           </DialogHeader>
         </div>
         
-        <form onSubmit={handleSubmit} className="px-6 pb-6 space-y-4">
+        <form onSubmit={handleSubmit} noValidate className="px-6 pb-6 space-y-4">
           {/* Title */}
           <div className="space-y-1.5">
             <Label htmlFor="title" className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
@@ -181,7 +187,6 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
               placeholder="What needs to be done?"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              required
               className="h-10 bg-muted/30 border-border/50 focus:bg-background"
             />
           </div>
@@ -363,6 +368,9 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
               <Label htmlFor="dueDate" className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
                 <Calendar className="w-3 h-3" />
                 Due Date
+                {(recurrence === 'daily' || recurrence === 'weekly') && (
+                  <span className="text-muted-foreground/50 normal-case tracking-normal font-normal">(optional)</span>
+                )}
               </Label>
               <Input
                 id="dueDate"

@@ -303,6 +303,8 @@ export const useAppStore = create<AppState>()(
           if (newTask) {
             set((state) => ({ tasks: [newTask, ...state.tasks] }));
             toast.success('Task created');
+          } else {
+            toast.error('Failed to create task');
           }
           
           return newTask;
@@ -352,8 +354,8 @@ export const useAppStore = create<AppState>()(
             
             // Auto-create next occurrence for recurring tasks
             const completedTask = get().tasks.find((t) => t.id === id) || result;
-            if (completedTask.recurrence && completedTask.recurrence !== 'none' && completedTask.due_date) {
-              const currentDue = new Date(completedTask.due_date);
+            if (completedTask.recurrence && completedTask.recurrence !== 'none') {
+              const currentDue = completedTask.due_date ? new Date(completedTask.due_date) : new Date();
               let nextDue: Date;
               switch (completedTask.recurrence) {
                 case 'daily':

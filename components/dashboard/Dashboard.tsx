@@ -114,9 +114,23 @@ export function Dashboard() {
     );
     const totalMinutes = todaySessions.reduce((acc, s) => acc + s.duration_minutes, 0) + Math.floor(activeStudySeconds / 60);
 
-    const todayTasks = tasks.filter(
-      (t) => t.due_date && new Date(t.due_date).toDateString() === today
-    );
+    const todayDate = new Date();
+    const todayDayOfWeek = todayDate.getDay();
+    const todayTasks = tasks.filter((t) => {
+      if (t.due_date && new Date(t.due_date).toDateString() === today) return true;
+      if (t.recurrence && t.recurrence !== 'none' && t.status !== 'completed') {
+        const taskStart = t.due_date ? new Date(t.due_date) : new Date(t.created_at);
+        if (todayDate < startOfDay(taskStart)) return false;
+        if (t.due_date && new Date(t.due_date).toDateString() === today) return false;
+        if (t.recurrence === 'daily') return true;
+        if (t.recurrence === 'weekly') {
+          if (t.recurrence_days && t.recurrence_days.length > 0) return t.recurrence_days.includes(todayDayOfWeek);
+          return todayDate.getDay() === taskStart.getDay();
+        }
+        if (t.recurrence === 'monthly') return todayDate.getDate() === taskStart.getDate();
+      }
+      return false;
+    });
     const completedToday = tasks.filter(
       (t) => t.completed_at && new Date(t.completed_at).toDateString() === today
     ).length;
@@ -132,10 +146,26 @@ export function Dashboard() {
   // Upcoming tasks - filter by selected date if any
   const upcomingTasks = useMemo(() => {
     if (selectedDateStr) {
-      // When a date is selected, show ALL tasks for that date (including completed)
+      const selDate = new Date(selectedDateStr + 'T00:00:00');
+      const selDayOfWeek = selDate.getDay();
+      // When a date is selected, show ALL tasks for that date (including completed and recurring)
       return tasks
-        .filter((t) => t.due_date && toLocalDateStr(t.due_date) === selectedDateStr)
-        .sort((a, b) => new Date(a.due_date!).getTime() - new Date(b.due_date!).getTime());
+        .filter((t) => {
+          if (t.due_date && toLocalDateStr(t.due_date) === selectedDateStr) return true;
+          if (t.recurrence && t.recurrence !== 'none') {
+            const taskStart = t.due_date ? new Date(t.due_date) : new Date(t.created_at);
+            if (selDate < startOfDay(taskStart)) return false;
+            if (t.due_date && toLocalDateStr(t.due_date) === selectedDateStr) return false;
+            if (t.recurrence === 'daily') return true;
+            if (t.recurrence === 'weekly') {
+              if (t.recurrence_days && t.recurrence_days.length > 0) return t.recurrence_days.includes(selDayOfWeek);
+              return selDate.getDay() === taskStart.getDay();
+            }
+            if (t.recurrence === 'monthly') return selDate.getDate() === taskStart.getDate();
+          }
+          return false;
+        })
+        .sort((a, b) => new Date(a.due_date || a.created_at).getTime() - new Date(b.due_date || b.created_at).getTime());
     }
     // Default: show upcoming non-completed tasks
     return tasks
@@ -178,9 +208,30 @@ export function Dashboard() {
 
   const getEventsForDate = useCallback((date: Date) => {
     const dateStr = format(date, 'yyyy-MM-dd');
+    const dayOfWeek = date.getDay();
     const dayTasks = tasks.filter((task) => {
-      if (!task.due_date) return false;
-      return toLocalDateStr(task.due_date) === dateStr;
+      // Exact due_date match
+      if (task.due_date && toLocalDateStr(task.due_date) === dateStr) return true;
+
+      // Recurring task expansion
+      if (task.recurrence && task.recurrence !== 'none' && task.status !== 'completed') {
+        const taskStart = task.due_date ? new Date(task.due_date) : new Date(task.created_at);
+        if (date < startOfDay(taskStart)) return false;
+        if (task.due_date && toLocalDateStr(task.due_date) === dateStr) return false;
+
+        if (task.recurrence === 'daily') return true;
+        if (task.recurrence === 'weekly') {
+          if (task.recurrence_days && task.recurrence_days.length > 0) {
+            return task.recurrence_days.includes(dayOfWeek);
+          }
+          return date.getDay() === taskStart.getDay();
+        }
+        if (task.recurrence === 'monthly') {
+          return date.getDate() === taskStart.getDate();
+        }
+      }
+
+      return false;
     });
     const dayExams = exams.filter((exam) => {
       return toLocalDateStr(exam.exam_date) === dateStr;

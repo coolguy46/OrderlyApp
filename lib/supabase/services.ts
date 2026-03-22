@@ -135,16 +135,22 @@ export async function getTasks(userId: string): Promise<Task[]> {
 }
 
 export async function createTask(task: Omit<Task, 'id' | 'created_at' | 'updated_at'>): Promise<Task | null> {
-  
+  // Strip undefined values and only send fields that have values
+  const cleanTask: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(task)) {
+    if (value !== undefined) {
+      cleanTask[key] = value;
+    }
+  }
   
   const { data, error } = await db
     .from('tasks')
-    .insert(task)
+    .insert(cleanTask)
     .select()
     .single();
   
   if (error) {
-    console.error('Error creating task:', error);
+    console.error('Error creating task:', error.message, error.details, error.hint);
     return null;
   }
   return data as Task | null;
