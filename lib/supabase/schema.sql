@@ -37,6 +37,8 @@ CREATE TABLE tasks (
   priority TEXT NOT NULL DEFAULT 'medium' CHECK (priority IN ('high', 'medium', 'low')),
   status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'in_progress', 'completed')),
   due_date TIMESTAMP WITH TIME ZONE,
+  due_time TEXT, -- Optional specific time e.g. '17:30'
+  recurrence TEXT DEFAULT 'none' CHECK (recurrence IN ('none', 'daily', 'weekly', 'monthly')),
   completed_at TIMESTAMP WITH TIME ZONE,
   -- Integration fields
   source TEXT DEFAULT 'manual' CHECK (source IN ('manual', 'google_classroom', 'canvas')),

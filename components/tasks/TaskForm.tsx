@@ -22,7 +22,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Save, X, Plus, AlertCircle, Sparkles, Calendar, Tag, Flag, BookOpen, FileText, Zap } from 'lucide-react';
+import { Save, X, Plus, AlertCircle, Sparkles, Calendar, Tag, Flag, BookOpen, FileText, Zap, Repeat, Clock } from 'lucide-react';
 import { calculateSuggestedPriority } from '@/lib/utils';
 import { cn } from '@/lib/utils';
 
@@ -47,6 +47,8 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
   const [status, setStatus] = useState<TaskStatus>('pending');
   const [subjectId, setSubjectId] = useState('none');
   const [dueDate, setDueDate] = useState('');
+  const [dueTime, setDueTime] = useState('');
+  const [recurrence, setRecurrence] = useState<'none' | 'daily' | 'weekly' | 'monthly'>('none');
   
   const [showNewSubject, setShowNewSubject] = useState(false);
   const [newSubjectName, setNewSubjectName] = useState('');
@@ -72,6 +74,8 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
       setStatus(task.status);
       setSubjectId(task.subject_id || 'none');
       setDueDate(task.due_date ? new Date(task.due_date).toISOString().split('T')[0] : '');
+      setDueTime(task.due_time || '');
+      setRecurrence(task.recurrence || 'none');
     } else {
       resetForm();
     }
@@ -103,6 +107,8 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
       status,
       subject_id: subjectId === 'none' ? null : subjectId,
       due_date: dueDate ? new Date(dueDate + 'T00:00:00').toISOString() : null,
+      due_time: dueTime || null,
+      recurrence,
       completed_at: status === 'completed' ? new Date().toISOString() : null,
     };
 
@@ -124,6 +130,8 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
     setStatus('pending');
     setSubjectId('none');
     setDueDate('');
+    setDueTime('');
+    setRecurrence('none');
     setShowNewSubject(false);
     setNewSubjectName('');
   };
@@ -359,6 +367,42 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
                 onChange={(e) => setDueDate(e.target.value)}
                 className="h-9 bg-muted/30 border-border/50"
               />
+            </div>
+          </div>
+
+          {/* Time & Recurrence row */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="dueTime" className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+                <Clock className="w-3 h-3" />
+                Time
+                <span className="text-muted-foreground/50 normal-case tracking-normal font-normal">(optional)</span>
+              </Label>
+              <Input
+                id="dueTime"
+                type="time"
+                value={dueTime}
+                onChange={(e) => setDueTime(e.target.value)}
+                className="h-9 bg-muted/30 border-border/50"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+                <Repeat className="w-3 h-3" />
+                Repeat
+              </Label>
+              <Select value={recurrence} onValueChange={(v) => setRecurrence(v as 'none' | 'daily' | 'weekly' | 'monthly')}>
+                <SelectTrigger className="h-9 bg-muted/30 border-border/50">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No Repeat</SelectItem>
+                  <SelectItem value="daily">Daily</SelectItem>
+                  <SelectItem value="weekly">Weekly</SelectItem>
+                  <SelectItem value="monthly">Monthly</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
 

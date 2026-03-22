@@ -33,6 +33,7 @@ import {
   AlertTriangle,
   ArrowRight,
   Zap,
+  Repeat,
 } from 'lucide-react';
 
 interface TaskCardProps {
@@ -55,6 +56,15 @@ export const TaskCard = memo(function TaskCard({ task, onEdit, compact = false, 
   const isExamTask = isExamType(task.title, task.assignment_type);
   const isCompleted = task.status === 'completed';
   const isInProgress = task.status === 'in_progress';
+  const isRecurring = task.recurrence && task.recurrence !== 'none';
+
+  const formatTime = (time: string) => {
+    const [h, m] = time.split(':');
+    const hour = parseInt(h);
+    const ampm = hour >= 12 ? 'PM' : 'AM';
+    const hour12 = hour % 12 || 12;
+    return `${hour12}:${m} ${ampm}`;
+  };
 
   const handleComplete = async () => {
     if (isCompleted) {
@@ -160,7 +170,11 @@ export const TaskCard = memo(function TaskCard({ task, onEdit, compact = false, 
               dueInfo.urgent ? 'text-red-400' : dueInfo.warning ? 'text-amber-400' : 'text-muted-foreground'
             )}>
               {dueInfo.text}
+              {task.due_time && ` ${formatTime(task.due_time)}`}
             </span>
+          )}
+          {isRecurring && (
+            <Repeat className="w-3 h-3 text-indigo-400 shrink-0" />
           )}
           <div className={cn('w-1.5 h-1.5 rounded-full shrink-0', pConfig.dot)} />
         </motion.div>
@@ -392,6 +406,20 @@ export const TaskCard = memo(function TaskCard({ task, onEdit, compact = false, 
 
                   {subject && (
                     <SubjectBadge name={subject.name} color={subject.color} />
+                  )}
+
+                  {isRecurring && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium bg-indigo-500/15 text-indigo-400">
+                      <Repeat className="w-3 h-3" />
+                      {task.recurrence === 'daily' ? 'Daily' : task.recurrence === 'weekly' ? 'Weekly' : 'Monthly'}
+                    </span>
+                  )}
+
+                  {task.due_time && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium bg-muted/50 text-muted-foreground">
+                      <Clock className="w-3 h-3" />
+                      {formatTime(task.due_time)}
+                    </span>
                   )}
                 </div>
 

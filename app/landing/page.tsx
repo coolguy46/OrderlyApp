@@ -1,8 +1,10 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import Link from 'next/link';
 import { Button } from '@/components/ui/Button';
+import { supabase } from '@/lib/supabase/client';
 import {
   Sparkles,
   CheckCircle2,
@@ -19,6 +21,10 @@ import {
   Zap,
   Brain,
   Gamepad2,
+  BookOpen,
+  Layout,
+  Shield,
+  Plug,
 } from 'lucide-react';
 
 const features = [
@@ -95,26 +101,49 @@ const testimonials = [
 ];
 
 export default function LandingPage() {
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => {
+      setIsLoggedIn(!!data.user);
+    });
+  }, []);
+
   return (
     <div className="min-h-screen bg-background">
       {/* Navigation */}
       <nav className="fixed top-0 left-0 right-0 z-50 bg-background/80 backdrop-blur-md border-b border-border/40">
         <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center">
-              <Sparkles className="w-5 h-5 text-white" />
-            </div>
+            <img src="/logo.svg" alt="Orderly Logo" className="w-10 h-10 rounded-xl" />
             <span className="text-xl font-bold">Orderly</span>
           </div>
+          <div className="hidden md:flex items-center gap-6 text-sm text-muted-foreground">
+            <a href="#features" className="hover:text-foreground transition-colors">Features</a>
+            <a href="#how-it-works" className="hover:text-foreground transition-colors">How It Works</a>
+            <a href="#integrations" className="hover:text-foreground transition-colors">Integrations</a>
+            <a href="#testimonials" className="hover:text-foreground transition-colors">Testimonials</a>
+          </div>
           <div className="flex items-center gap-4">
-            <Link href="/auth/login">
-              <Button variant="ghost">Sign In</Button>
-            </Link>
-            <Link href="/auth/register">
-              <Button className="bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700">
-                Get Started Free
-              </Button>
-            </Link>
+            {isLoggedIn ? (
+              <Link href="/">
+                <Button className="bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700">
+                  Go to Dashboard
+                  <ArrowRight className="w-4 h-4 ml-2" />
+                </Button>
+              </Link>
+            ) : (
+              <>
+                <Link href="/auth/login">
+                  <Button variant="ghost">Sign In</Button>
+                </Link>
+                <Link href="/auth/register">
+                  <Button className="bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700">
+                    Get Started Free
+                  </Button>
+                </Link>
+              </>
+            )}
           </div>
         </div>
       </nav>
@@ -180,17 +209,17 @@ export default function LandingPage() {
             </p>
 
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-              <Link href="/auth/register">
+              <Link href={isLoggedIn ? '/' : '/auth/register'}>
                 <Button size="lg" className="text-lg px-8 py-6 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 shadow-lg shadow-indigo-500/25">
-                  Start Free Today
+                  {isLoggedIn ? 'Go to Dashboard' : 'Start Free Today'}
                   <ArrowRight className="w-5 h-5 ml-2" />
                 </Button>
               </Link>
-              <Link href="#features">
+              <a href="#features">
                 <Button size="lg" variant="outline" className="text-lg px-8 py-6">
                   See Features
                 </Button>
-              </Link>
+              </a>
             </div>
 
             {/* Trust badges */}
@@ -227,9 +256,7 @@ export default function LandingPage() {
             <div className="relative mx-auto max-w-5xl rounded-2xl overflow-hidden border border-border/50 shadow-2xl shadow-indigo-500/10 bg-card/50 backdrop-blur-sm">
               <div className="aspect-[16/9] bg-gradient-to-br from-indigo-500/10 to-purple-500/10 flex items-center justify-center">
                 <div className="text-center p-8">
-                  <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center mx-auto mb-6">
-                    <Sparkles className="w-10 h-10 text-white" />
-                  </div>
+                  <img src="/logo.svg" alt="Orderly Logo" className="w-20 h-20 rounded-2xl mx-auto mb-6" />
                   <h3 className="text-2xl font-bold mb-2">Beautiful Dashboard</h3>
                   <p className="text-muted-foreground">Track all your academic progress in one place</p>
                 </div>
@@ -426,8 +453,153 @@ export default function LandingPage() {
         </div>
       </section>
 
+      {/* How It Works Section */}
+      <section id="how-it-works" className="py-24 px-6">
+        <div className="max-w-7xl mx-auto">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            className="text-center mb-16"
+          >
+            <h2 className="text-4xl md:text-5xl font-bold mb-4">
+              Get Started in
+              <span className="bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent"> Minutes</span>
+            </h2>
+            <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
+              Three simple steps to transform your academic life
+            </p>
+          </motion.div>
+
+          <div className="grid md:grid-cols-3 gap-8">
+            {[
+              {
+                step: '01',
+                icon: BookOpen,
+                title: 'Create Your Account',
+                description: 'Sign up for free with your email or Google account. Set up your subjects and preferences in our quick onboarding wizard.',
+                color: 'from-indigo-500 to-blue-600',
+              },
+              {
+                step: '02',
+                icon: Plug,
+                title: 'Connect Your Tools',
+                description: 'Import assignments automatically from Google Classroom or Canvas LMS. Your coursework syncs in seconds.',
+                color: 'from-purple-500 to-pink-600',
+              },
+              {
+                step: '03',
+                icon: Target,
+                title: 'Start Achieving',
+                description: 'Use the Pomodoro timer, track your goals, and earn XP as you study. Watch your productivity soar.',
+                color: 'from-pink-500 to-orange-500',
+              },
+            ].map((item, i) => (
+              <motion.div
+                key={item.step}
+                initial={{ opacity: 0, y: 20 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ duration: 0.5, delay: i * 0.15 }}
+                className="relative text-center"
+              >
+                <div className={`w-16 h-16 rounded-2xl bg-gradient-to-br ${item.color} flex items-center justify-center mx-auto mb-6 shadow-lg`}>
+                  <item.icon className="w-8 h-8 text-white" />
+                </div>
+                <span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Step {item.step}</span>
+                <h3 className="text-xl font-bold mt-2 mb-3">{item.title}</h3>
+                <p className="text-muted-foreground">{item.description}</p>
+                {i < 2 && (
+                  <div className="hidden md:block absolute top-8 -right-4 w-8 text-muted-foreground/30">
+                    <ArrowRight className="w-8 h-8" />
+                  </div>
+                )}
+              </motion.div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Integrations Section */}
+      <section id="integrations" className="py-24 px-6 bg-gradient-to-b from-transparent via-indigo-500/5 to-transparent">
+        <div className="max-w-7xl mx-auto">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            className="text-center mb-16"
+          >
+            <h2 className="text-4xl md:text-5xl font-bold mb-4">
+              Works With Your
+              <span className="bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent"> Favorite Tools</span>
+            </h2>
+            <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
+              Seamlessly connect with the platforms your school already uses
+            </p>
+          </motion.div>
+
+          <div className="grid md:grid-cols-2 gap-8 max-w-4xl mx-auto">
+            <motion.div
+              initial={{ opacity: 0, x: -20 }}
+              whileInView={{ opacity: 1, x: 0 }}
+              viewport={{ once: true }}
+              whileHover={{ y: -4 }}
+              className="p-8 rounded-2xl border border-border/50 bg-card/50 hover:bg-card transition-all hover:shadow-xl hover:shadow-indigo-500/5"
+            >
+              <div className="w-14 h-14 rounded-xl bg-green-500/10 flex items-center justify-center mb-5">
+                <GraduationCap className="w-7 h-7 text-green-400" />
+              </div>
+              <h3 className="text-2xl font-bold mb-3">Google Classroom</h3>
+              <p className="text-muted-foreground mb-4">
+                Connect your Google Classroom account to automatically import all your courses, 
+                assignments, and due dates. Stay in sync with one click.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <span className="px-3 py-1 rounded-full bg-green-500/10 text-green-400 text-xs font-medium">Auto-sync</span>
+                <span className="px-3 py-1 rounded-full bg-green-500/10 text-green-400 text-xs font-medium">Read-only</span>
+                <span className="px-3 py-1 rounded-full bg-green-500/10 text-green-400 text-xs font-medium">OAuth 2.0</span>
+              </div>
+            </motion.div>
+
+            <motion.div
+              initial={{ opacity: 0, x: 20 }}
+              whileInView={{ opacity: 1, x: 0 }}
+              viewport={{ once: true }}
+              whileHover={{ y: -4 }}
+              className="p-8 rounded-2xl border border-border/50 bg-card/50 hover:bg-card transition-all hover:shadow-xl hover:shadow-indigo-500/5"
+            >
+              <div className="w-14 h-14 rounded-xl bg-orange-500/10 flex items-center justify-center mb-5">
+                <Layout className="w-7 h-7 text-orange-400" />
+              </div>
+              <h3 className="text-2xl font-bold mb-3">Canvas LMS</h3>
+              <p className="text-muted-foreground mb-4">
+                Paste your Canvas iCal feed URL to instantly import all your assignments 
+                and deadlines. Calendar events sync automatically to your tasks.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <span className="px-3 py-1 rounded-full bg-orange-500/10 text-orange-400 text-xs font-medium">iCal Feed</span>
+                <span className="px-3 py-1 rounded-full bg-orange-500/10 text-orange-400 text-xs font-medium">Auto-import</span>
+                <span className="px-3 py-1 rounded-full bg-orange-500/10 text-orange-400 text-xs font-medium">Real-time</span>
+              </div>
+            </motion.div>
+          </div>
+
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            className="text-center mt-10"
+          >
+            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-muted/50 border border-border/50">
+              <Shield className="w-4 h-4 text-indigo-400" />
+              <span className="text-sm text-muted-foreground">Your data is always secure — we never modify your school accounts</span>
+            </div>
+          </motion.div>
+        </div>
+      </section>
+
       {/* Testimonials Section */}
-      <section className="py-24 px-6">
+      <section id="testimonials" className="py-24 px-6">
         <div className="max-w-7xl mx-auto">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
@@ -491,9 +663,9 @@ export default function LandingPage() {
             <p className="text-xl text-muted-foreground mb-8 max-w-2xl mx-auto">
               Join thousands of students who are already achieving their academic goals with Orderly.
             </p>
-            <Link href="/auth/register">
+            <Link href={isLoggedIn ? '/' : '/auth/register'}>
               <Button size="lg" className="text-lg px-10 py-6 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 shadow-lg shadow-indigo-500/25">
-                Get Started Free
+                {isLoggedIn ? 'Go to Dashboard' : 'Get Started Free'}
                 <ArrowRight className="w-5 h-5 ml-2" />
               </Button>
             </Link>
@@ -507,22 +679,42 @@ export default function LandingPage() {
       {/* Footer */}
       <footer className="py-12 px-6 border-t border-border/40">
         <div className="max-w-7xl mx-auto">
-          <div className="flex flex-col md:flex-row items-center justify-between gap-6">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center">
-                <Sparkles className="w-5 h-5 text-white" />
+          <div className="grid md:grid-cols-4 gap-8 mb-10">
+            <div className="md:col-span-2">
+              <div className="flex items-center gap-3 mb-4">
+                <img src="/logo.svg" alt="Orderly Logo" className="w-10 h-10 rounded-xl" />
+                <span className="text-xl font-bold">Orderly</span>
               </div>
-              <span className="text-xl font-bold">Orderly</span>
+              <p className="text-muted-foreground max-w-sm">
+                The all-in-one study platform that helps students manage tasks, track progress, 
+                and achieve their academic goals.
+              </p>
             </div>
-            <div className="flex items-center gap-8 text-sm text-muted-foreground">
-              <Link href="#" className="hover:text-foreground transition-colors">About</Link>
-              <Link href="#features" className="hover:text-foreground transition-colors">Features</Link>
-              <Link href="#" className="hover:text-foreground transition-colors">Privacy</Link>
-              <Link href="#" className="hover:text-foreground transition-colors">Terms</Link>
+            <div>
+              <h4 className="font-semibold mb-4">Product</h4>
+              <div className="space-y-3 text-sm text-muted-foreground">
+                <a href="#features" className="block hover:text-foreground transition-colors">Features</a>
+                <a href="#how-it-works" className="block hover:text-foreground transition-colors">How It Works</a>
+                <a href="#integrations" className="block hover:text-foreground transition-colors">Integrations</a>
+                <a href="#testimonials" className="block hover:text-foreground transition-colors">Testimonials</a>
+              </div>
             </div>
+            <div>
+              <h4 className="font-semibold mb-4">Legal</h4>
+              <div className="space-y-3 text-sm text-muted-foreground">
+                <Link href="/privacy" className="block hover:text-foreground transition-colors">Privacy Policy</Link>
+                <Link href="/terms" className="block hover:text-foreground transition-colors">Terms of Service</Link>
+              </div>
+            </div>
+          </div>
+          <div className="pt-8 border-t border-border/40 flex flex-col md:flex-row items-center justify-between gap-4">
             <p className="text-sm text-muted-foreground">
-              © 2026 Orderly. All rights reserved.
+              © 2025 Orderly. All rights reserved.
             </p>
+            <div className="flex items-center gap-6 text-sm text-muted-foreground">
+              <Link href="/privacy" className="hover:text-foreground transition-colors">Privacy</Link>
+              <Link href="/terms" className="hover:text-foreground transition-colors">Terms</Link>
+            </div>
           </div>
         </div>
       </footer>

@@ -350,6 +350,47 @@ export const useAppStore = create<AppState>()(
             }));
             toast.success('Task completed! 🎉');
             
+            // Auto-create next occurrence for recurring tasks
+            const completedTask = get().tasks.find((t) => t.id === id) || result;
+            if (completedTask.recurrence && completedTask.recurrence !== 'none' && completedTask.due_date) {
+              const currentDue = new Date(completedTask.due_date);
+              let nextDue: Date;
+              switch (completedTask.recurrence) {
+                case 'daily':
+                  nextDue = new Date(currentDue);
+                  nextDue.setDate(nextDue.getDate() + 1);
+                  break;
+                case 'weekly':
+                  nextDue = new Date(currentDue);
+                  nextDue.setDate(nextDue.getDate() + 7);
+                  break;
+                case 'monthly':
+                  nextDue = new Date(currentDue);
+                  nextDue.setMonth(nextDue.getMonth() + 1);
+                  break;
+                default:
+                  nextDue = currentDue;
+              }
+              
+              const nextTask = await db.createTask({
+                user_id: completedTask.user_id,
+                title: completedTask.title,
+                description: completedTask.description,
+                priority: completedTask.priority,
+                status: 'pending',
+                subject_id: completedTask.subject_id,
+                due_date: nextDue.toISOString(),
+                due_time: completedTask.due_time || null,
+                recurrence: completedTask.recurrence,
+                completed_at: null,
+              });
+              
+              if (nextTask) {
+                set((state) => ({ tasks: [nextTask, ...state.tasks] }));
+                toast.success(`Next ${completedTask.recurrence} task created`);
+              }
+            }
+            
             // Update user stats
             if (user) {
               const updatedProfile = await db.updateProfile(user.id, {

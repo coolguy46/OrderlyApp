@@ -12,6 +12,8 @@ const PUBLIC_ROUTES = [
   '/auth/forgot-password',
   '/auth/callback',
   '/landing',
+  '/privacy',
+  '/terms',
 ];
 
 // Routes that are accessible when authenticated but exempt from setup redirect
@@ -42,9 +44,12 @@ export function AuthGuard({ children }: AuthGuardProps) {
     const isPublicRoute = PUBLIC_ROUTES.some(route => pathname.startsWith(route));
     const isSetupExempt = SETUP_EXEMPT_ROUTES.some(route => pathname.startsWith(route));
 
+    // Routes where authenticated users should be redirected to dashboard
+    const isAuthRoute = pathname.startsWith('/auth/');
+
     if (!isAuthenticated && !isPublicRoute) {
-      router.push('/auth/login');
-    } else if (isAuthenticated && isPublicRoute) {
+      router.push('/landing');
+    } else if (isAuthenticated && isAuthRoute) {
       router.push('/');
     } else if (isAuthenticated && !isSetupExempt && dataLoaded) {
       // Redirect new users to setup if they haven't completed it
@@ -74,13 +79,13 @@ export function AuthGuard({ children }: AuthGuardProps) {
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="flex flex-col items-center gap-4">
           <Loader2 className="w-8 h-8 animate-spin text-indigo-500" />
-          <p className="text-sm text-muted-foreground">Redirecting to login...</p>
+          <p className="text-sm text-muted-foreground">Redirecting...</p>
         </div>
       </div>
     );
   }
 
-  if (isAuthenticated && isPublicRoute) {
+  if (isAuthenticated && pathname.startsWith('/auth/')) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="flex flex-col items-center gap-4">

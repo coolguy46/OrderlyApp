@@ -28,6 +28,7 @@ import {
   Edit3,
   Zap,
   ArrowUpRight,
+  Repeat,
 } from 'lucide-react';
 
 interface TaskDetailViewerProps {
@@ -49,6 +50,15 @@ export function TaskDetailViewer({ task, open, onOpenChange, onEdit }: TaskDetai
   const isExamTask = isExamType(task.title, task.assignment_type);
   const isCompleted = task.status === 'completed';
   const isInProgress = task.status === 'in_progress';
+  const isRecurring = task.recurrence && task.recurrence !== 'none';
+
+  const formatTime = (time: string) => {
+    const [h, m] = time.split(':');
+    const hour = parseInt(h);
+    const ampm = hour >= 12 ? 'PM' : 'AM';
+    const hour12 = hour % 12 || 12;
+    return `${hour12}:${m} ${ampm}`;
+  };
 
   const handleComplete = async () => {
     if (isCompleted) {
@@ -216,6 +226,13 @@ export function TaskDetailViewer({ task, open, onOpenChange, onEdit }: TaskDetai
                   {sourceInfo.label}
                 </Badge>
               )}
+
+              {isRecurring && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium bg-indigo-500/15 text-indigo-400 border border-indigo-500/20">
+                  <Repeat className="w-3 h-3" />
+                  {task.recurrence === 'daily' ? 'Daily' : task.recurrence === 'weekly' ? 'Weekly' : 'Monthly'}
+                </span>
+              )}
             </div>
           </DialogHeader>
         </div>
@@ -252,6 +269,7 @@ export function TaskDetailViewer({ task, open, onOpenChange, onEdit }: TaskDetai
                       dueDisplay.warning ? 'text-amber-400' : ''
                     )}>
                       {dueDisplay.text}
+                      {task.due_time && ` at ${formatTime(task.due_time)}`}
                     </p>
                     <p className="text-[11px] text-muted-foreground">{dueDisplay.sub}</p>
                   </div>
