@@ -221,6 +221,9 @@ export function Calendar() {
           parseInt(newItemTime.split(':')[0]),
           parseInt(newItemTime.split(':')[1])
         ).toISOString(),
+        due_time: null,
+        recurrence: 'none',
+        recurrence_days: null,
         completed_at: null,
       });
     } else {
