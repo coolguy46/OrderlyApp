@@ -13,6 +13,9 @@ const inter = Inter({
 export const metadata: Metadata = {
   title: "Orderly - Student Time Management Platform",
   description: "Master your academic journey with intelligent study planning, gamified progress tracking, and collaborative learning features.",
+  icons: {
+    icon: "/logo.svg",
+  },
 };
 
 export default function RootLayout({
