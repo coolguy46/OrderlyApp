@@ -25,9 +25,12 @@ import {
   Monitor,
   Check,
   Rocket,
+  Link2,
+  ExternalLink,
 } from 'lucide-react';
 import { useAppStore } from '@/lib/store';
 import type { Theme } from '@/lib/store';
+import * as db from '@/lib/supabase/services';
 
 const SUBJECT_COLORS = [
   '#6366f1', '#8b5cf6', '#a855f7', '#d946ef',
@@ -36,7 +39,7 @@ const SUBJECT_COLORS = [
   '#3b82f6', '#2563eb',
 ];
 
-const STEPS = ['welcome', 'profile', 'subjects', 'preferences', 'complete'] as const;
+const STEPS = ['welcome', 'profile', 'subjects', 'integrations', 'preferences', 'complete'] as const;
 type Step = typeof STEPS[number];
 
 export default function SetupPage() {
@@ -52,6 +55,9 @@ export default function SetupPage() {
   const [newSubjectName, setNewSubjectName] = useState('');
   const [newSubjectColor, setNewSubjectColor] = useState(SUBJECT_COLORS[0]);
   const [addedSubjects, setAddedSubjects] = useState<Array<{ name: string; color: string }>>([]);
+
+  // Integrations state
+  const [canvasUrl, setCanvasUrl] = useState('');
 
   // Preferences state
   const [selectedTheme, setSelectedTheme] = useState<Theme>(theme);
@@ -107,6 +113,19 @@ export default function SetupPage() {
       // Save subjects
       for (const subject of addedSubjects) {
         await addSubject({ user_id: user.id, name: subject.name, color: subject.color });
+      }
+
+      // Save Canvas integration if URL provided
+      if (canvasUrl.trim()) {
+        try {
+          await db.upsertCanvasSettings(user.id, {
+            ical_url: canvasUrl.trim(),
+            last_sync_at: null,
+            sync_enabled: true,
+          });
+        } catch (err) {
+          console.error('Error saving Canvas settings:', err);
+        }
       }
 
       // Save theme
@@ -348,6 +367,71 @@ export default function SetupPage() {
                   </div>
                 )}
 
+                {/* Step: Integrations */}
+                {currentStep === 'integrations' && (
+                  <div className="space-y-6">
+                    <div className="text-center">
+                      <div className="mx-auto w-12 h-12 rounded-xl bg-orange-500/10 flex items-center justify-center mb-4">
+                        <Link2 className="w-6 h-6 text-orange-400" />
+                      </div>
+                      <h2 className="text-2xl font-bold">Connect your LMS</h2>
+                      <p className="text-muted-foreground mt-1">
+                        Import assignments automatically from Canvas or Google Classroom. You can always set this up later in Settings &rarr; Integrations.
+                      </p>
+                    </div>
+
+                    {/* Canvas */}
+                    <div className="p-4 rounded-xl border border-border/50 bg-muted/30 space-y-3">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 rounded-lg bg-orange-500/10">
+                          <svg className="w-5 h-5 text-orange-500" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M12 2L3 7v10l9 5 9-5V7l-9-5zm0 2.18L18.82 8 12 11.82 5.18 8 12 4.18zM5 9.5l6.5 3.61v7.71L5 17.21V9.5zm8.5 11.32v-7.71L20 9.5v7.71l-6.5 3.61z" />
+                          </svg>
+                        </div>
+                        <div>
+                          <p className="font-medium text-sm">Canvas LMS</p>
+                          <p className="text-xs text-muted-foreground">Paste your Canvas calendar iCal URL to auto-import assignments</p>
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="canvasUrl">Canvas iCal Feed URL</Label>
+                        <Input
+                          id="canvasUrl"
+                          type="url"
+                          placeholder="https://canvas.instructure.com/feeds/calendars/user_xxx.ics"
+                          value={canvasUrl}
+                          onChange={(e) => setCanvasUrl(e.target.value)}
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Find this in Canvas &rarr; Calendar &rarr; Calendar Feed (link at the bottom)
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Google Classroom */}
+                    <div className="p-4 rounded-xl border border-border/50 bg-muted/30 space-y-3">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 rounded-lg bg-blue-500/10">
+                          <GraduationCap className="w-5 h-5 text-blue-500" />
+                        </div>
+                        <div className="flex-1">
+                          <p className="font-medium text-sm">Google Classroom</p>
+                          <p className="text-xs text-muted-foreground">Connect your Google account to sync courses and assignments</p>
+                        </div>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Connect Google Classroom in Settings &rarr; Integrations after setup to import your courses and assignments automatically.
+                      </p>
+                    </div>
+
+                    <div className="text-center">
+                      <p className="text-sm text-muted-foreground">
+                        Integrations automatically create classes, import assignments as tasks, and keep everything in sync.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
                 {/* Step: Preferences */}
                 {currentStep === 'preferences' && (
                   <div className="space-y-8">
@@ -417,6 +501,9 @@ export default function SetupPage() {
                       {addedSubjects.length > 0 && (
                         <p>{addedSubjects.length} subject{addedSubjects.length !== 1 ? 's' : ''} ready to go</p>
                       )}
+                      {canvasUrl.trim() && (
+                        <p>Canvas integration connected</p>
+                      )}
                       <p>Theme: {selectedTheme.charAt(0).toUpperCase() + selectedTheme.slice(1)}</p>
                     </div>
                   </div>
@@ -460,6 +547,15 @@ export default function SetupPage() {
                     className="bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700"
                   >
                     {addedSubjects.length === 0 ? 'Skip' : 'Continue'}
+                    <ArrowRight className="w-4 h-4" />
+                  </Button>
+                )}
+                {currentStep === 'integrations' && (
+                  <Button
+                    onClick={goNext}
+                    className="bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700"
+                  >
+                    {canvasUrl.trim() ? 'Continue' : 'Skip'}
                     <ArrowRight className="w-4 h-4" />
                   </Button>
                 )}

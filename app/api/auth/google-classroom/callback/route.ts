@@ -4,6 +4,27 @@ const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
 const GOOGLE_REDIRECT_URI = process.env.NEXT_PUBLIC_GOOGLE_REDIRECT_URI || '';
 
+/**
+ * GET /api/auth/google-classroom/callback
+ * Handles the OAuth redirect from Google — redirects to integrations page with the code
+ */
+export async function GET(request: NextRequest) {
+  const { searchParams, origin } = new URL(request.url);
+  const code = searchParams.get('code');
+  const error = searchParams.get('error');
+
+  if (error) {
+    return NextResponse.redirect(`${origin}/settings/integrations?gc_error=${encodeURIComponent(error)}`);
+  }
+
+  if (!code) {
+    return NextResponse.redirect(`${origin}/settings/integrations?gc_error=no_code`);
+  }
+
+  // Redirect to integrations page with the auth code for client-side token exchange
+  return NextResponse.redirect(`${origin}/settings/integrations?gc_code=${encodeURIComponent(code)}`);
+}
+
 export async function POST(request: NextRequest) {
   try {
     const { code } = await request.json();

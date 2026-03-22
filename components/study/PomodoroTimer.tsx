@@ -140,7 +140,8 @@ export function PomodoroTimer({ selectedSubjectId, selectedTaskId }: PomodoroTim
   const restoredRef = useRef(false);
   const dbSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const wasEverStartedRef = useRef(false);
-  const restoredDoneRef = useRef(false);
+  const [restoredDone, setRestoredDone] = useState(false);
+  const switchingTypeRef = useRef(false);
   const [pomodoroStarted, setPomodoroStarted] = useState(false);
   const [stopwatchStarted, setStopwatchStarted] = useState(false);
   const timerStarted = timerType === 'pomodoro' ? pomodoroStarted : stopwatchStarted;
@@ -170,10 +171,13 @@ export function PomodoroTimer({ selectedSubjectId, selectedTaskId }: PomodoroTim
     }
   }, [pomodoroSettings]);
 
-  // Reset timer when mode or settings change (skip when restoring from localStorage)
+  // Reset timer when mode or settings change (skip when restoring or switching timer type)
   useEffect(() => {
     if (restoredRef.current) {
-      restoredRef.current = false;
+      return;
+    }
+    if (switchingTypeRef.current) {
+      switchingTypeRef.current = false;
       return;
     }
     if (timerType === 'pomodoro') {
@@ -313,11 +317,12 @@ export function PomodoroTimer({ selectedSubjectId, selectedTaskId }: PomodoroTim
         setStopwatchTime(state.stopwatchTime + elapsedSinceSave);
         setTimeLeft(state.timeLeft);
       }
-      setIsRunning(true);
     } else {
       setTimeLeft(state.timeLeft);
       setStopwatchTime(state.stopwatchTime);
     }
+    // Always restore as paused — user can resume manually
+    setIsRunning(false);
     return true;
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -346,7 +351,7 @@ export function PomodoroTimer({ selectedSubjectId, selectedTaskId }: PomodoroTim
     // Also try DB (if user is logged in and localStorage had nothing)
     if (!restoredFromLocal && user?.id) {
       timerDb.getTimerState(user.id).then((dbState) => {
-        if (!dbState) { restoredDoneRef.current = true; return; }
+        if (!dbState) { setRestoredDone(true); return; }
         const applied = applyRestoredState({
           timerType: dbState.timer_type,
           mode: dbState.mode,
@@ -363,16 +368,17 @@ export function PomodoroTimer({ selectedSubjectId, selectedTaskId }: PomodoroTim
           stopwatchStarted: dbState.stopwatch_started,
         });
         if (applied) wasEverStartedRef.current = true;
-        restoredDoneRef.current = true;
+        setRestoredDone(true);
+      }).catch(() => {
+        setRestoredDone(true);
       });
     } else {
-      restoredDoneRef.current = true;
+      setRestoredDone(true);
     }
 
     // Mark restore done (for localStorage path)
     if (restoredFromLocal) {
       wasEverStartedRef.current = true;
-      restoredDoneRef.current = true;
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -385,7 +391,7 @@ export function PomodoroTimer({ selectedSubjectId, selectedTaskId }: PomodoroTim
   // Persist timer state to localStorage + debounced DB save
   useEffect(() => {
     // Don't clear storage until restore has completed (prevents race condition)
-    if (!restoredDoneRef.current) return;
+    if (!restoredDone) return;
 
     if (!eitherStarted) {
       localStorage.removeItem(TIMER_STATE_KEY);
@@ -428,24 +434,14 @@ export function PomodoroTimer({ selectedSubjectId, selectedTaskId }: PomodoroTim
     return () => {
       if (dbSaveTimeoutRef.current) clearTimeout(dbSaveTimeoutRef.current);
     };
-  }, [eitherStarted, timerType, mode, isRunning, timeLeft, stopwatchTime, subjectId, sessionsCompleted, soundEnabled, pomodoroStarted, stopwatchStarted, user?.id]);
-
-  // Warn before closing browser tab with active timer
-  useEffect(() => {
-    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      if (eitherStarted) {
-        e.preventDefault();
-      }
-    };
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, [eitherStarted]);
+  }, [restoredDone, eitherStarted, timerType, mode, isRunning, timeLeft, stopwatchTime, subjectId, sessionsCompleted, soundEnabled, pomodoroStarted, stopwatchStarted, user?.id]);
 
   const handlePause = () => {
     setIsRunning(false);
   };
 
   const handleReset = async () => {
+    restoredRef.current = false;
     setIsRunning(false);
 
     // Auto-save the session before resetting (minimum 1 minute)
@@ -493,6 +489,7 @@ export function PomodoroTimer({ selectedSubjectId, selectedTaskId }: PomodoroTim
   };
 
   const handleModeChange = (newMode: TimerMode) => {
+    restoredRef.current = false;
     setIsRunning(false);
     setPomodoroStarted(false);
     setMode(newMode);
@@ -529,7 +526,7 @@ export function PomodoroTimer({ selectedSubjectId, selectedTaskId }: PomodoroTim
         {/* Timer Type Toggle */}
         <div className="flex items-center justify-center gap-2 mb-4 relative">
           <button
-            onClick={() => { if (timerType !== 'pomodoro') { setIsRunning(false); setTimerType('pomodoro'); } }}
+            onClick={() => { if (timerType !== 'pomodoro') { switchingTypeRef.current = true; setIsRunning(false); setTimerType('pomodoro'); } }}
             className={cn(
               'relative flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all',
               timerType === 'pomodoro'
@@ -548,7 +545,7 @@ export function PomodoroTimer({ selectedSubjectId, selectedTaskId }: PomodoroTim
             <span className="relative z-10">Pomodoro</span>
           </button>
           <button
-            onClick={() => { if (timerType !== 'stopwatch') { setIsRunning(false); setTimerType('stopwatch'); } }}
+            onClick={() => { if (timerType !== 'stopwatch') { switchingTypeRef.current = true; setIsRunning(false); setTimerType('stopwatch'); } }}
             className={cn(
               'relative flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all',
               timerType === 'stopwatch'
