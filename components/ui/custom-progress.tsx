@@ -37,11 +37,11 @@ export function ProgressBar({
   };
 
   const colorClasses = {
-    indigo: 'bg-indigo-500',
-    green: 'bg-green-500',
-    yellow: 'bg-yellow-500',
-    red: 'bg-red-500',
-    purple: 'bg-purple-500',
+    indigo: 'bg-gradient-to-r from-indigo-500 to-indigo-400',
+    green: 'bg-gradient-to-r from-green-500 to-emerald-400',
+    yellow: 'bg-gradient-to-r from-yellow-500 to-amber-400',
+    red: 'bg-gradient-to-r from-red-500 to-rose-400',
+    purple: 'bg-gradient-to-r from-purple-500 to-violet-400',
   };
 
   return (

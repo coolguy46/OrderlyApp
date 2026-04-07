@@ -374,8 +374,8 @@ export function Calendar() {
                     ))}
                   </div>
 
-                  {/* Calendar Days */}
-                  <div className="grid grid-cols-7 gap-1">
+                  {/* Calendar Days - Google Calendar style with inline events */}
+                  <div className="grid grid-cols-7 gap-0.5">
                     {viewDays.map((day, index) => {
                       const events = getEventsForDate(day);
                       const hasEvents = events.tasks.length > 0 || events.exams.length > 0 || events.events.length > 0;
@@ -383,65 +383,62 @@ export function Calendar() {
                       return (
                         <motion.button
                           key={day.toString()}
-                          whileHover={{ scale: 1.02 }}
-                          whileTap={{ scale: 0.98 }}
+                          whileHover={{ scale: 1.01 }}
+                          whileTap={{ scale: 0.99 }}
                           onClick={() => handleDateClick(day)}
                           className={cn(
-                            'aspect-square p-1 rounded-lg flex flex-col items-center justify-start transition-all min-h-[60px]',
+                            'p-1 rounded-lg flex flex-col items-stretch transition-all min-h-[80px] text-left',
                             !isSameMonth(day, currentDate) && 'opacity-30',
-                            isToday(day) && 'bg-primary/20 border border-primary',
-                            selectedDate && isSameDay(day, selectedDate) && 'bg-primary/10 border border-primary/50',
-                            !isToday(day) && !(selectedDate && isSameDay(day, selectedDate)) && 'hover:bg-muted'
+                            isToday(day) && 'bg-primary/10 border border-primary',
+                            selectedDate && isSameDay(day, selectedDate) && !isToday(day) && 'bg-primary/5 border border-primary/40',
+                            !isToday(day) && !(selectedDate && isSameDay(day, selectedDate)) && 'hover:bg-muted border border-transparent'
                           )}
                         >
-                          <span className={cn(
-                            'text-xs font-medium',
-                            isToday(day) ? 'text-primary' : 'text-foreground'
-                          )}>
-                            {format(day, 'd')}
-                          </span>
+                          <div className="flex items-center justify-between mb-1">
+                            <span className={cn(
+                              'text-xs font-semibold w-5 h-5 flex items-center justify-center rounded-full',
+                              isToday(day) ? 'bg-primary text-primary-foreground' : 'text-foreground'
+                            )}>
+                              {format(day, 'd')}
+                            </span>
+                          </div>
 
-                          {/* Today pulse ring */}
-                          {isToday(day) && (
-                            <motion.div
-                              animate={{ scale: [1, 1.4, 1], opacity: [0.5, 0, 0.5] }}
-                              transition={{ duration: 2, repeat: Infinity }}
-                              className="absolute top-0.5 right-0.5 w-2 h-2 rounded-full bg-primary"
-                            />
-                          )}
-
-                          {hasEvents && (
-                            <div className="flex gap-0.5 mt-1 flex-wrap justify-center">
-                              {events.tasks.slice(0, 2).map((task, i) => (
-                                <motion.div
-                                  key={i}
-                                  initial={{ scale: 0 }}
-                                  animate={{ scale: 1 }}
-                                  transition={{ delay: i * 0.05 }}
-                                  className={cn(
-                                    'w-1.5 h-1.5 rounded-full',
-                                    task.priority === 'high' ? 'bg-red-500' : task.priority === 'medium' ? 'bg-yellow-500' : 'bg-green-500'
-                                  )}
-                                />
-                              ))}
-                              {events.exams.slice(0, 1).map((_, i) => (
-                                <motion.div
-                                  key={`exam-${i}`}
-                                  initial={{ scale: 0 }}
-                                  animate={{ scale: 1 }}
-                                  className="w-1.5 h-1.5 rounded-full bg-purple-500"
-                                />
-                              ))}
-                              {events.events.slice(0, 1).map((_, i) => (
-                                <motion.div
-                                  key={`event-${i}`}
-                                  initial={{ scale: 0 }}
-                                  animate={{ scale: 1 }}
-                                  className="w-1.5 h-1.5 rounded-full bg-blue-500"
-                                />
-                              ))}
-                            </div>
-                          )}
+                          {/* Inline events — Google Calendar style */}
+                          <div className="space-y-0.5 flex-1">
+                            {events.tasks.slice(0, 2).map((task, i) => (
+                              <div
+                                key={task.id}
+                                className={cn(
+                                  'text-[9px] px-1 py-0.5 rounded truncate font-medium leading-tight',
+                                  task.priority === 'high' ? 'bg-red-500/20 text-red-400' :
+                                  task.priority === 'medium' ? 'bg-yellow-500/20 text-yellow-400' :
+                                  'bg-green-500/20 text-green-400'
+                                )}
+                              >
+                                {task.title}
+                              </div>
+                            ))}
+                            {events.exams.slice(0, 1).map((exam) => (
+                              <div key={exam.id} className="text-[9px] px-1 py-0.5 rounded truncate font-medium leading-tight bg-purple-500/20 text-purple-400">
+                                📝 {exam.title}
+                              </div>
+                            ))}
+                            {events.events.slice(0, 1).map((event) => (
+                              <div key={event.id} className="text-[9px] px-1 py-0.5 rounded truncate font-medium leading-tight bg-blue-500/20 text-blue-400">
+                                {event.title}
+                              </div>
+                            ))}
+                            {/* +N more indicator */}
+                            {(() => {
+                              const total = events.tasks.length + events.exams.length + events.events.length;
+                              const shown = Math.min(events.tasks.length, 2) + Math.min(events.exams.length, 1) + Math.min(events.events.length, 1);
+                              return total > shown ? (
+                                <div className="text-[9px] text-muted-foreground px-1">
+                                  +{total - shown} more
+                                </div>
+                              ) : null;
+                            })()}
+                          </div>
                         </motion.button>
                       );
                     })}

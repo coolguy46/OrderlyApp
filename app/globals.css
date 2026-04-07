@@ -5,6 +5,7 @@
 
 :root {
   --font-inter: 'Inter', sans-serif;
+  --font-display: 'Plus Jakarta Sans', 'Inter', sans-serif;
   --radius: 0.625rem;
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
@@ -41,6 +42,7 @@
 
 @theme inline {
   --font-sans: var(--font-inter);
+  --font-display: var(--font-display);
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-indigo-400: #818cf8;
@@ -89,15 +91,20 @@
 
 * {
   box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
 }
 
 html {
   scroll-behavior: smooth;
+  /* Prevent 300ms tap delay */
+  touch-action: manipulation;
 }
 
 body {
   font-family: var(--font-inter), system-ui, -apple-system, sans-serif;
-  min-height: 100vh;
+  min-height: 100dvh;
+  /* Prevent overscroll bounce on iOS */
+  overscroll-behavior: none;
 }
 
 /* Custom Scrollbar - Sleek */
@@ -515,37 +522,37 @@ input[type="number"] {
 }
 
 .dark {
-  --background: oklch(0.12 0.01 280);
-  --foreground: oklch(0.98 0 0);
-  --card: oklch(0.16 0.01 280);
-  --card-foreground: oklch(0.98 0 0);
-  --popover: oklch(0.16 0.01 280);
-  --popover-foreground: oklch(0.98 0 0);
-  --primary: oklch(0.65 0.2 265);
+  --background: oklch(0.115 0.015 275);
+  --foreground: oklch(0.97 0.005 280);
+  --card: oklch(0.155 0.015 275);
+  --card-foreground: oklch(0.97 0.005 280);
+  --popover: oklch(0.155 0.015 275);
+  --popover-foreground: oklch(0.97 0.005 280);
+  --primary: oklch(0.68 0.19 268);
   --primary-foreground: oklch(0.98 0 0);
-  --secondary: oklch(0.22 0.01 280);
-  --secondary-foreground: oklch(0.98 0 0);
-  --muted: oklch(0.22 0.01 280);
-  --muted-foreground: oklch(0.65 0 0);
-  --accent: oklch(0.22 0.01 280);
-  --accent-foreground: oklch(0.98 0 0);
+  --secondary: oklch(0.2 0.015 275);
+  --secondary-foreground: oklch(0.97 0 0);
+  --muted: oklch(0.2 0.015 275);
+  --muted-foreground: oklch(0.62 0.01 275);
+  --accent: oklch(0.2 0.015 275);
+  --accent-foreground: oklch(0.97 0 0);
   --destructive: oklch(0.65 0.25 25);
-  --border: oklch(1 0 0 / 8%);
-  --input: oklch(1 0 0 / 10%);
-  --ring: oklch(0.65 0.2 265);
-  --chart-1: oklch(0.65 0.2 265);
+  --border: oklch(1 0.01 275 / 10%);
+  --input: oklch(1 0.01 275 / 12%);
+  --ring: oklch(0.68 0.19 268);
+  --chart-1: oklch(0.68 0.19 268);
   --chart-2: oklch(0.696 0.17 162.48);
   --chart-3: oklch(0.769 0.188 70.08);
   --chart-4: oklch(0.627 0.265 303.9);
   --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.14 0.01 280);
-  --sidebar-foreground: oklch(0.98 0 0);
-  --sidebar-primary: oklch(0.65 0.2 265);
+  --sidebar: oklch(0.13 0.015 275);
+  --sidebar-foreground: oklch(0.97 0 0);
+  --sidebar-primary: oklch(0.68 0.19 268);
   --sidebar-primary-foreground: oklch(0.98 0 0);
-  --sidebar-accent: oklch(0.22 0.01 280);
-  --sidebar-accent-foreground: oklch(0.98 0 0);
-  --sidebar-border: oklch(1 0 0 / 8%);
-  --sidebar-ring: oklch(0.65 0.2 265);
+  --sidebar-accent: oklch(0.2 0.015 275);
+  --sidebar-accent-foreground: oklch(0.97 0 0);
+  --sidebar-border: oklch(1 0.01 275 / 10%);
+  --sidebar-ring: oklch(0.68 0.19 268);
 }
 
 @layer base {
@@ -675,5 +682,231 @@ input[type="number"] {
 .dark .prose h1, .dark .prose h2, .dark .prose h3, 
 .dark .prose h4, .dark .prose h5, .dark .prose h6 {
   color: var(--foreground);
+}
+
+/* ============================================
+   DISPLAY FONT UTILITY
+   ============================================ */
+
+.font-display {
+  font-family: var(--font-display), var(--font-inter), system-ui, sans-serif;
+}
+
+/* ============================================
+   ENHANCED SURFACE TREATMENTS
+   ============================================ */
+
+/* Elevated card with subtle inner highlight */
+.card-elevated {
+  background: oklch(from var(--card) l c h / 70%);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid oklch(from var(--border) l c h / 60%);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.04),
+    0 4px 16px rgba(0, 0, 0, 0.04),
+    inset 0 1px 0 oklch(1 0 0 / 4%);
+}
+
+.dark .card-elevated {
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.2),
+    0 4px 16px rgba(0, 0, 0, 0.15),
+    inset 0 1px 0 oklch(1 0 0 / 3%);
+}
+
+/* Stat card treatment */
+.stat-card {
+  position: relative;
+  overflow: hidden;
+  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.3s ease;
+}
+
+.stat-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, oklch(1 0 0 / 10%), transparent);
+}
+
+.stat-card:hover {
+  transform: translateY(-2px);
+}
+
+.dark .stat-card::before {
+  background: linear-gradient(90deg, transparent, oklch(1 0 0 / 6%), transparent);
+}
+
+/* Mesh gradient background */
+.mesh-gradient {
+  background:
+    radial-gradient(at 20% 30%, oklch(0.55 0.2 265 / 8%) 0%, transparent 50%),
+    radial-gradient(at 80% 70%, oklch(0.6 0.2 300 / 6%) 0%, transparent 50%),
+    radial-gradient(at 50% 50%, oklch(0.6 0.15 200 / 4%) 0%, transparent 50%);
+}
+
+.dark .mesh-gradient {
+  background:
+    radial-gradient(at 20% 30%, oklch(0.55 0.2 265 / 12%) 0%, transparent 50%),
+    radial-gradient(at 80% 70%, oklch(0.6 0.2 300 / 8%) 0%, transparent 50%),
+    radial-gradient(at 50% 50%, oklch(0.6 0.15 200 / 6%) 0%, transparent 50%);
+}
+
+/* Accent line - top border glow */
+.accent-line-top {
+  position: relative;
+}
+
+.accent-line-top::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 20%;
+  right: 20%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, oklch(0.65 0.2 265 / 50%), oklch(0.65 0.2 300 / 50%), transparent);
+  border-radius: 1px;
+}
+
+/* Subtle noise overlay for surfaces */
+.surface-noise {
+  position: relative;
+}
+
+.surface-noise::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  opacity: 0.02;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+  pointer-events: none;
+  border-radius: inherit;
+  z-index: 0;
+}
+
+/* Gradient pill badge */
+.gradient-pill {
+  background: linear-gradient(135deg, oklch(0.55 0.2 265 / 15%), oklch(0.6 0.2 300 / 15%));
+  border: 1px solid oklch(0.55 0.2 265 / 20%);
+}
+
+/* Level badge glow */
+@keyframes levelGlow {
+  0%, 100% { box-shadow: 0 0 8px oklch(0.55 0.2 265 / 30%); }
+  50% { box-shadow: 0 0 16px oklch(0.55 0.2 265 / 50%); }
+}
+
+.level-glow {
+  animation: levelGlow 3s ease-in-out infinite;
+}
+
+/* Smooth progress bar fill */
+@keyframes progressFill {
+  from { width: 0; }
+}
+
+.progress-animated {
+  animation: progressFill 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Better focus ring for interactive cards */
+.interactive-card {
+  transition: border-color 0.2s ease, box-shadow 0.3s ease;
+}
+
+.interactive-card:hover {
+  border-color: oklch(from var(--primary) l c h / 25%);
+  box-shadow:
+    0 0 0 1px oklch(from var(--primary) l c h / 8%),
+    0 4px 20px oklch(from var(--primary) l c h / 8%);
+}
+
+/* Subtle animated border shimmer for premium feel */
+@keyframes borderShimmer {
+  0% { opacity: 0; transform: translateX(-100%); }
+  50% { opacity: 1; }
+  100% { opacity: 0; transform: translateX(100%); }
+}
+
+.shimmer-border {
+  position: relative;
+  overflow: hidden;
+}
+
+.shimmer-border::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 50%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, oklch(0.7 0.2 265 / 40%), transparent);
+  animation: borderShimmer 4s ease-in-out infinite;
+}
+
+/* ============================================
+   SAFE AREA & MOBILE UTILITIES
+   ============================================ */
+
+/* Safe area padding for notch/gesture-bar devices */
+.safe-area-top {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+.safe-area-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.safe-area-left {
+  padding-left: env(safe-area-inset-left, 0px);
+}
+
+.safe-area-right {
+  padding-right: env(safe-area-inset-right, 0px);
+}
+
+/* Ensure minimum touch targets on mobile */
+@media (pointer: coarse) {
+  button:not([data-size]),
+  [role="button"],
+  a[href] {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  /* Exceptions for inline tiny elements */
+  [data-slot="badge"],
+  [data-size="icon-sm"],
+  .calendar-day-btn {
+    min-height: unset;
+    min-width: unset;
+  }
+}
+
+/* Prevent text selection on interactive elements on mobile */
+@media (hover: none) {
+  button,
+  [role="button"],
+  nav a {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+}
+
+/* Improve scrolling on iOS */
+.scroll-touch {
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Hide scrollbar on mobile but keep scrollable */
+.hide-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
 }
 

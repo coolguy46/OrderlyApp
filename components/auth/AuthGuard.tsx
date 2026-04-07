@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useAppStore } from '@/lib/store';
 import { Loader2 } from 'lucide-react';
@@ -17,7 +17,7 @@ const PUBLIC_ROUTES = [
 ];
 
 // Routes that are accessible when authenticated but exempt from setup redirect
-const SETUP_EXEMPT_ROUTES = ['/setup'];
+const SETUP_EXEMPT_ROUTES = ['/setup', '/paywall'];
 
 interface AuthGuardProps {
   children: React.ReactNode;
@@ -28,15 +28,21 @@ export function AuthGuard({ children }: AuthGuardProps) {
   const pathname = usePathname();
   const { isAuthenticated, isLoading: authLoading, initializeAuth, dataLoaded, subjects } = useAppStore();
   const [initialized, setInitialized] = useState(false);
+  const initCalledRef = useRef(false);
 
   useEffect(() => {
-    // Initialize auth on mount
+    // Prevent double-call in React 18 Strict Mode
+    if (initCalledRef.current) return;
+    initCalledRef.current = true;
+
     const init = async () => {
       await initializeAuth();
       setInitialized(true);
     };
     init();
-  }, [initializeAuth]);
+    // intentionally no deps — run once on mount only
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (!initialized || authLoading) return;

@@ -12,12 +12,11 @@ import {
   Timer,
   BarChart3,
   GraduationCap,
-  Users,
   ChevronLeft,
   ChevronRight,
   Sparkles,
-  LogOut,
   Settings,
+  Crown,
 } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
@@ -27,10 +26,9 @@ const navItems = [
   { href: '/tasks', icon: CheckSquare, label: 'Tasks' },
   { href: '/calendar', icon: Calendar, label: 'Calendar' },
   { href: '/goals', icon: Target, label: 'Goals' },
-  { href: '/study', icon: Timer, label: 'Study Session' },
-  { href: '/analytics', icon: BarChart3, label: 'Analytics' },
+  { href: '/study', icon: Timer, label: 'Study' },
   { href: '/exams', icon: GraduationCap, label: 'Exams' },
-  { href: '/social', icon: Users, label: 'Social' },
+  { href: '/analytics', icon: BarChart3, label: 'Analytics' },
   { href: '/settings', icon: Settings, label: 'Settings' },
 ];
 
@@ -60,7 +58,7 @@ export function Sidebar({ mobile, onNavigate }: SidebarProps = {}) {
       <div className="h-16 flex items-center px-4 border-b border-border/40">
         <div className="flex items-center gap-3">
           <motion.div 
-            className="w-10 h-10 rounded-xl flex-shrink-0 shadow-lg"
+            className="w-10 h-10 rounded-xl flex-shrink-0 shadow-lg ring-1 ring-white/10"
             whileHover={{ scale: 1.08, rotate: 5 }}
             whileTap={{ scale: 0.95 }}
             transition={{ type: 'spring', stiffness: 400, damping: 15 }}
@@ -73,7 +71,7 @@ export function Sidebar({ mobile, onNavigate }: SidebarProps = {}) {
                 initial={{ opacity: 0, x: -10 }}
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: -10 }}
-                className="font-semibold text-base whitespace-nowrap"
+                className="font-bold text-base whitespace-nowrap font-display tracking-tight"
               >
                 Orderly
               </motion.span>
@@ -103,7 +101,7 @@ export function Sidebar({ mobile, onNavigate }: SidebarProps = {}) {
                   {isActive && (
                     <motion.div
                       layoutId="navActiveIndicator"
-                      className="absolute inset-0 bg-primary/10 rounded-xl shadow-sm"
+                      className="absolute inset-0 bg-primary/10 rounded-xl shadow-sm border border-primary/10"
                       transition={{ type: 'spring', stiffness: 350, damping: 25 }}
                     />
                   )}
@@ -111,7 +109,7 @@ export function Sidebar({ mobile, onNavigate }: SidebarProps = {}) {
                   {isActive && (
                     <motion.div
                       layoutId="navActiveEdge"
-                      className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 bg-primary rounded-full"
+                      className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 bg-gradient-to-b from-primary to-purple-500 rounded-full shadow-sm shadow-primary/50"
                       transition={{ type: 'spring', stiffness: 350, damping: 25 }}
                     />
                   )}
@@ -140,6 +138,31 @@ export function Sidebar({ mobile, onNavigate }: SidebarProps = {}) {
 
       {/* Footer */}
       <div className="p-3 border-t space-y-2">
+        {/* Upgrade to Pro button */}
+        <Link href="/paywall" onClick={onNavigate}>
+          <motion.div
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+            className={cn(
+              'flex items-center gap-2 px-3 py-2 rounded-xl bg-gradient-to-r from-amber-500/20 to-orange-500/20 border border-amber-500/30 hover:from-amber-500/30 hover:to-orange-500/30 transition-all cursor-pointer',
+              !effectiveOpen && 'justify-center'
+            )}
+          >
+            <Crown className="w-4 h-4 text-amber-400 flex-shrink-0" />
+            <AnimatePresence>
+              {effectiveOpen && (
+                <motion.span
+                  initial={{ opacity: 0, x: -8 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -8 }}
+                  className="text-xs font-semibold text-amber-400 whitespace-nowrap"
+                >
+                  Upgrade to Pro
+                </motion.span>
+              )}
+            </AnimatePresence>
+          </motion.div>
+        </Link>
         {/* Collapse button - hidden on mobile */}
         {!mobile && (
           <Button
@@ -167,12 +190,12 @@ export function Sidebar({ mobile, onNavigate }: SidebarProps = {}) {
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
             className={cn(
-              'flex items-center gap-3 p-2 rounded-lg hover:bg-accent transition-all',
+              'flex items-center gap-3 p-2 rounded-xl hover:bg-accent/50 transition-all',
               !effectiveOpen && 'justify-center'
             )}
           >
-            <Avatar className="h-8 w-8 ring-2 ring-indigo-500/20 ring-offset-1 ring-offset-background">
-              <AvatarFallback className="bg-gradient-to-br from-indigo-500 to-purple-600 text-white text-xs">
+            <Avatar className="h-8 w-8 ring-2 ring-indigo-500/30 ring-offset-1 ring-offset-background">
+              <AvatarFallback className="bg-gradient-to-br from-indigo-500 to-purple-600 text-white text-xs font-semibold">
                 {user?.full_name?.[0] || 'U'}
               </AvatarFallback>
             </Avatar>
@@ -184,12 +207,15 @@ export function Sidebar({ mobile, onNavigate }: SidebarProps = {}) {
                   exit={{ opacity: 0, x: -10 }}
                   className="flex-1 min-w-0"
                 >
-                  <p className="text-xs font-medium truncate">
+                  <p className="text-xs font-semibold truncate">
                     {user?.full_name || 'Demo User'}
                   </p>
-                  <p className="text-[10px] text-muted-foreground truncate">
-                    {user?.current_streak || 0} day streak
-                  </p>
+                  <div className="flex items-center gap-1 mt-0.5">
+                    <span className="inline-flex items-center gap-1 text-[10px] font-medium text-indigo-400 bg-indigo-500/10 px-1.5 py-0.5 rounded-full">
+                      <Sparkles className="w-2.5 h-2.5" />
+                      {user?.current_streak || 0} day streak
+                    </span>
+                  </div>
                 </motion.div>
               )}
             </AnimatePresence>

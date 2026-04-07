@@ -4,9 +4,11 @@ import { useState, useMemo, useEffect } from 'react';
 import { Exam, Task } from '@/lib/supabase/types';
 import { useAppStore } from '@/lib/store';
 import { Card, CardHeader, ProgressBar, Button, Modal, Input, Textarea, SelectField, SubjectBadge, Badge, ConfirmDialog } from '@/components/ui';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { motion, AnimatePresence } from 'framer-motion';
 import { formatDate, getDaysUntil, cn, isExamType } from '@/lib/utils';
 import Link from 'next/link';
+import { ExamPrep } from './ExamPrep';
 import {
   GraduationCap,
   Plus,
@@ -562,7 +564,7 @@ export function ExamList() {
       className="space-y-6"
     >
       {/* Stats */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         {statCards.map((stat) => {
           const Icon = stat.icon;
           return (
@@ -578,7 +580,7 @@ export function ExamList() {
                   <Icon className={`w-5 h-5 text-${stat.color}-500 dark:text-${stat.color}-400`} />
                 </div>
                 <div>
-                  <p className="text-2xl font-bold text-foreground">{stat.value}</p>
+                  <p className="text-2xl font-bold text-foreground font-display">{stat.value}</p>
                   <p className="text-xs text-muted-foreground">{stat.label}</p>
                 </div>
               </div>
@@ -587,95 +589,88 @@ export function ExamList() {
         })}
       </div>
 
-      <motion.div variants={itemVariants} className="flex items-center justify-between">
-        <div className="flex items-center gap-2 bg-muted/50 rounded-xl p-1.5">
-          {(['upcoming', 'all', 'past'] as const).map((f) => (
-            <button
-              key={f}
-              onClick={() => setFilter(f)}
-              className={cn(
-                'relative px-4 py-2 text-[clamp(0.65rem,1.5vw,0.75rem)] font-medium rounded-lg transition-all capitalize',
-                filter === f
-                  ? 'text-white'
-                  : 'text-muted-foreground hover:text-foreground'
-              )}
-            >
-              {filter === f && (
-                <motion.div
-                  layoutId="examFilterIndicator"
-                  className="absolute inset-0 bg-indigo-500 rounded-lg"
-                  transition={{ type: 'spring', stiffness: 400, damping: 30 }}
-                />
-              )}
-              <span className="relative z-10">{f}</span>
-            </button>
-          ))}
+      <Tabs defaultValue="exams">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <TabsList className="bg-muted/50">
+            <TabsTrigger value="exams" className="flex items-center gap-1.5">
+              <GraduationCap className="w-3.5 h-3.5" /> Exams
+            </TabsTrigger>
+            <TabsTrigger value="prep" className="flex items-center gap-1.5">
+              <BookOpen className="w-3.5 h-3.5" /> Exam Prep
+            </TabsTrigger>
+          </TabsList>
+          <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+            <Button onClick={() => setShowForm(true)} size="sm">
+              <Plus className="w-4 h-4" /> Add Exam
+            </Button>
+          </motion.div>
         </div>
 
-        <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
-          <Button onClick={() => setShowForm(true)}>
-            <Plus className="w-4 h-4" />
-            Add Exam
-          </Button>
-        </motion.div>
-      </motion.div>
-
-      <motion.div variants={itemVariants} className="space-y-4">
-        <AnimatePresence mode="popLayout">
-          {filteredExams.length === 0 && filteredExamTasks.length === 0 ? (
-            <motion.div
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              className="text-center py-12"
-            >
-              <motion.div
-                animate={{ y: [0, -8, 0] }}
-                transition={{ duration: 3, repeat: Infinity }}
-                className="w-16 h-16 mx-auto mb-4 rounded-full bg-muted/50 flex items-center justify-center"
+        <TabsContent value="exams" className="mt-5">
+          <div className="flex items-center gap-2 bg-muted/50 rounded-xl p-1.5 w-fit mb-5">
+            {(['upcoming', 'all', 'past'] as const).map((f) => (
+              <button
+                key={f}
+                onClick={() => setFilter(f)}
+                className={cn(
+                  'relative px-4 py-2 text-[clamp(0.65rem,1.5vw,0.75rem)] font-medium rounded-lg transition-all capitalize',
+                  filter === f ? 'text-white' : 'text-muted-foreground hover:text-foreground'
+                )}
               >
-                <GraduationCap className="w-8 h-8 text-muted-foreground" />
-              </motion.div>
-              <p className="text-muted-foreground">No exams found</p>
-              <p className="text-sm text-muted-foreground/70 mt-1">
-                Add an exam to start tracking your preparation
-              </p>
-            </motion.div>
-          ) : (
-            <>
-              {filteredExams.map((exam) => (
-                <ExamCard
-                  key={exam.id}
-                  exam={exam}
-                  onEdit={(e) => {
-                    setEditingExam(e);
-                    setShowForm(true);
-                  }}
-                />
-              ))}
-              {filteredExamTasks.length > 0 && (
+                {filter === f && (
+                  <motion.div
+                    layoutId="examFilterIndicator"
+                    className="absolute inset-0 bg-indigo-500 rounded-lg"
+                    transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+                  />
+                )}
+                <span className="relative z-10">{f}</span>
+              </button>
+            ))}
+          </div>
+
+          <div className="space-y-4">
+            <AnimatePresence mode="popLayout">
+              {filteredExams.length === 0 && filteredExamTasks.length === 0 ? (
+                <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="text-center py-12">
+                  <motion.div animate={{ y: [0, -8, 0] }} transition={{ duration: 3, repeat: Infinity }}
+                    className="w-16 h-16 mx-auto mb-4 rounded-full bg-muted/50 flex items-center justify-center">
+                    <GraduationCap className="w-8 h-8 text-muted-foreground" />
+                  </motion.div>
+                  <p className="text-muted-foreground">No exams found</p>
+                  <p className="text-sm text-muted-foreground/70 mt-1">Add an exam to start tracking your preparation</p>
+                </motion.div>
+              ) : (
                 <>
-                  <div className="flex items-center gap-2 pt-2">
-                    <ClipboardList className="w-4 h-4 text-muted-foreground" />
-                    <h3 className="text-sm font-medium text-muted-foreground">Exam-type Tasks</h3>
-                    <Badge variant="secondary" className="text-[10px]">{filteredExamTasks.length}</Badge>
-                  </div>
-                  {filteredExamTasks.map((task) => (
-                    <ExamTaskCard key={task.id} task={task} onDismiss={handleDismissTask} />
+                  {filteredExams.map((exam) => (
+                    <ExamCard key={exam.id} exam={exam} onEdit={(e) => { setEditingExam(e); setShowForm(true); }} />
                   ))}
+                  {filteredExamTasks.length > 0 && (
+                    <>
+                      <div className="flex items-center gap-2 pt-2">
+                        <ClipboardList className="w-4 h-4 text-muted-foreground" />
+                        <h3 className="text-sm font-medium text-muted-foreground">Exam-type Tasks</h3>
+                        <Badge variant="secondary" className="text-[10px]">{filteredExamTasks.length}</Badge>
+                      </div>
+                      {filteredExamTasks.map((task) => (
+                        <ExamTaskCard key={task.id} task={task} onDismiss={handleDismissTask} />
+                      ))}
+                    </>
+                  )}
                 </>
               )}
-            </>
-          )}
-        </AnimatePresence>
-      </motion.div>
+            </AnimatePresence>
+          </div>
+        </TabsContent>
 
-      {/* Exam Form Modal */}
+        <TabsContent value="prep" className="mt-5">
+          <ExamPrep />
+        </TabsContent>
+      </Tabs>
+
       <ExamForm
         isOpen={showForm}
-        onClose={() => {
-          setShowForm(false);
-          setEditingExam(null);
-        }}
+        onClose={() => { setShowForm(false); setEditingExam(null); }}
         exam={editingExam}
       />
     </motion.div>

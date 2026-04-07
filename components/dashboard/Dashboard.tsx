@@ -247,9 +247,9 @@ export function Dashboard() {
       variants={containerVariants}
     >
       {/* Welcome Header */}
-      <motion.div variants={itemVariants} className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div className="space-y-1">
-          <h1 className="text-xl font-bold tracking-tight flex items-center gap-2">
+      <motion.div variants={itemVariants} className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+        <div className="space-y-0.5 sm:space-y-1">
+          <h1 className="text-lg sm:text-xl font-bold tracking-tight flex items-center gap-2">
             Welcome back, {user?.full_name?.split(' ')[0] || 'Student'}! 
             <motion.span
               animate={{ rotate: [0, 14, -8, 14, -4, 10, 0] }}
@@ -259,68 +259,61 @@ export function Dashboard() {
               👋
             </motion.span>
           </h1>
-          <p className="text-sm text-muted-foreground">
+          <p className="text-xs sm:text-sm text-muted-foreground">
             {mounted ? format(new Date(), "EEEE, MMMM d, yyyy") : '\u00A0'}
           </p>
         </div>
-        <Link href="/study">
-          <motion.div whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.97 }}>
-            <Button size="default" className="gap-2 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 shadow-lg shadow-indigo-500/20 rounded-xl">
-              <Play className="w-4 h-4" />
-              Start Study Session
-            </Button>
-          </motion.div>
+        <Link href="/study" className="self-start sm:self-auto">
+          <Button size="sm" className="gap-2 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 shadow-lg shadow-indigo-500/20 rounded-xl text-white h-9 sm:h-10 sm:px-5">
+            <Play className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+            <span className="text-xs sm:text-sm">Start Study</span>
+          </Button>
         </Link>
       </motion.div>
 
       {/* Stats Grid - Animated */}
-      <motion.div variants={containerVariants} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <motion.div variants={containerVariants} className="grid grid-cols-2 gap-2.5 sm:gap-3 lg:grid-cols-4">
         {[
-          { label: 'Study Time Today', value: formatDuration(todayStats.studyMinutes), sub: `${todayStats.sessionsCount} sessions`, icon: Clock, color: 'indigo', gradient: 'from-indigo-500/10 to-blue-500/10', borderColor: 'border-indigo-500/20' },
-          { label: 'Tasks Completed', value: String(todayStats.tasksCompleted), sub: `${todayStats.tasksDue} due today`, icon: CheckCircle2, color: 'green', gradient: 'from-green-500/10 to-emerald-500/10', borderColor: 'border-green-500/20' },
-          { label: 'Current Streak', value: `${user?.current_streak || 0} days`, sub: `Best: ${user?.longest_streak || 0} days`, icon: Flame, color: 'orange', gradient: 'from-orange-500/10 to-amber-500/10', borderColor: 'border-orange-500/20' },
-          { label: 'Active Goals', value: String(activeGoals.length), sub: `${goals.filter((g) => g.status === 'completed').length} completed`, icon: Target, color: 'purple', gradient: 'from-purple-500/10 to-pink-500/10', borderColor: 'border-purple-500/20' },
+          { label: 'Study Time', value: formatDuration(todayStats.studyMinutes), sub: `${todayStats.sessionsCount} sessions`, icon: Clock, color: 'indigo', gradient: 'from-indigo-500/10 to-blue-500/10', borderColor: 'border-indigo-500/20' },
+          { label: 'Completed', value: String(todayStats.tasksCompleted), sub: `${todayStats.tasksDue} due today`, icon: CheckCircle2, color: 'green', gradient: 'from-green-500/10 to-emerald-500/10', borderColor: 'border-green-500/20' },
+          { label: 'Streak', value: `${user?.current_streak || 0}d`, sub: `Best: ${user?.longest_streak || 0}d`, icon: Flame, color: 'orange', gradient: 'from-orange-500/10 to-amber-500/10', borderColor: 'border-orange-500/20' },
+          { label: 'Goals', value: String(activeGoals.length), sub: `${goals.filter((g) => g.status === 'completed').length} done`, icon: Target, color: 'purple', gradient: 'from-purple-500/10 to-pink-500/10', borderColor: 'border-purple-500/20' },
         ].map((stat, i) => (
           <motion.div key={stat.label} variants={itemVariants}>
-            <motion.div initial="rest" whileHover="hover" variants={cardHover}>
-              <Card className={cn(
-                'overflow-hidden border bg-gradient-to-br backdrop-blur-sm transition-shadow hover:shadow-lg',
-                stat.gradient, stat.borderColor
-              )}>
-                <CardContent className="p-4">
-                  <div className="flex items-center justify-between">
-                    <div className="space-y-1">
-                      <p className="text-xs font-medium text-muted-foreground">{stat.label}</p>
-                      <p className="text-xl font-bold tracking-tight">{stat.value}</p>
-                      <p className="text-xs text-muted-foreground">{stat.sub}</p>
-                    </div>
-                    <motion.div 
-                      className={`p-2.5 rounded-xl bg-${stat.color}-500/10`}
-                      whileHover={{ rotate: [0, -10, 10, 0], transition: { duration: 0.5 } }}
-                    >
-                      <stat.icon className={`w-5 h-5 text-${stat.color}-500`} />
-                    </motion.div>
+            <Card className={cn(
+              'overflow-hidden border bg-gradient-to-br backdrop-blur-sm transition-shadow active:scale-[0.98]',
+              stat.gradient, stat.borderColor
+            )}>
+              <CardContent className="p-3 sm:p-4">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="space-y-0.5 sm:space-y-1 min-w-0">
+                    <p className="text-[10px] sm:text-xs font-medium text-muted-foreground truncate">{stat.label}</p>
+                    <p className="text-lg sm:text-xl font-bold tracking-tight">{stat.value}</p>
+                    <p className="text-[10px] sm:text-xs text-muted-foreground truncate">{stat.sub}</p>
                   </div>
-                </CardContent>
-              </Card>
-            </motion.div>
+                  <div className={`p-2 sm:p-2.5 rounded-xl bg-${stat.color}-500/10 shrink-0`}>
+                    <stat.icon className={`w-4 h-4 sm:w-5 sm:h-5 text-${stat.color}-500`} />
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
           </motion.div>
         ))}
       </motion.div>
 
       {/* Main Content - Tasks on left, Calendar on right */}
       <motion.div variants={itemVariants} className="grid gap-4 lg:grid-cols-3">
-        {/* Upcoming Tasks - Left side */}
-        <div className="lg:col-span-2">
-          <Card className="border-border/50 glow-border">
+        {/* Upcoming Tasks - shown first on mobile for priority */}
+        <div className="lg:col-span-2 order-2 lg:order-1">
+          <Card className="border-border/50 interactive-card">
             <CardHeader className="pb-2">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <div className="p-1.5 rounded-lg bg-indigo-500/10">
-                    <CheckCircle2 className="w-4 h-4 text-indigo-500" />
+                  <div className="p-1.5 rounded-lg bg-gradient-to-br from-indigo-500 to-blue-500 shadow-sm">
+                    <CheckCircle2 className="w-4 h-4 text-white" />
                   </div>
                   <div>
-                    <CardTitle className="text-base">
+                    <CardTitle className="text-base font-display">
                       {selectedDate ? `Tasks for ${format(selectedDate, 'MMM d')}` : 'Upcoming Tasks'}
                     </CardTitle>
                     <CardDescription className="text-xs">
@@ -400,8 +393,8 @@ export function Dashboard() {
           </Card>
         </div>
 
-        {/* Mini Calendar - Right side */}
-        <div>
+        {/* Mini Calendar - shown first on mobile for context */}
+        <div className="order-1 lg:order-2">
           <Card className="border-border/50">
             <CardHeader className="pb-2">
               <div className="flex items-center justify-between">
@@ -451,7 +444,7 @@ export function Dashboard() {
                       key={index}
                       onClick={() => setSelectedDateStr(format(day, 'yyyy-MM-dd'))}
                       className={cn(
-                        'aspect-square text-xs rounded-lg flex flex-col items-center justify-center transition-all relative group/day',
+                        'aspect-square text-xs rounded-lg flex flex-col items-center justify-center transition-all relative group/day min-h-[36px] sm:min-h-0',
                         !isCurrentMonth && 'opacity-30',
                         isToday(day) && 'bg-primary/20 border border-primary font-bold dot-pulse',
                         selectedDateStr === format(day, 'yyyy-MM-dd') && 'bg-primary/10 ring-1 ring-primary/50',
@@ -486,14 +479,14 @@ export function Dashboard() {
       {/* Bottom Section - Goals and Exams side by side */}
       <motion.div variants={itemVariants} className="grid gap-4 lg:grid-cols-2">
         {/* Goals Progress */}
-        <Card className="border-border/50 glow-border">
+        <Card className="border-border/50 interactive-card">
           <CardHeader className="pb-2">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <div className="p-1.5 rounded-lg bg-purple-500/10">
-                  <Target className="w-4 h-4 text-purple-500" />
+                <div className="p-1.5 rounded-lg bg-gradient-to-br from-purple-500 to-pink-500 shadow-sm">
+                  <Target className="w-4 h-4 text-white" />
                 </div>
-                <CardTitle className="text-base">Goals</CardTitle>
+                <CardTitle className="text-base font-display">Goals</CardTitle>
               </div>
               <Link href="/goals">
                 <Button variant="ghost" size="icon" className="h-6 w-6">
@@ -551,14 +544,14 @@ export function Dashboard() {
         </Card>
 
         {/* Upcoming Exams */}
-        <Card className="border-border/50 glow-border">
+        <Card className="border-border/50 interactive-card">
           <CardHeader className="pb-2">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <div className="p-1.5 rounded-lg bg-red-500/10">
-                  <GraduationCap className="w-4 h-4 text-red-500" />
+                <div className="p-1.5 rounded-lg bg-gradient-to-br from-red-500 to-orange-500 shadow-sm">
+                  <GraduationCap className="w-4 h-4 text-white" />
                 </div>
-                <CardTitle className="text-base">Upcoming Exams</CardTitle>
+                <CardTitle className="text-base font-display">Upcoming Exams</CardTitle>
               </div>
               <Link href="/exams">
                 <Button variant="ghost" size="icon" className="h-6 w-6">
@@ -616,22 +609,22 @@ export function Dashboard() {
 
       {/* Quick Actions - Animated */}
       <motion.div variants={itemVariants}>
-        <Card className="border-border/50">
-          <CardContent className="p-3">
-            <div className="grid grid-cols-4 gap-2">
+        <Card className="border-border/50 accent-line-top">
+          <CardContent className="p-2.5 sm:p-3">
+            <div className="grid grid-cols-4 gap-1.5 sm:gap-2">
               {[
-                { href: '/tasks', icon: Plus, label: 'Add Task', color: 'green' },
-                { href: '/study', icon: Clock, label: 'Study', color: 'indigo' },
-                { href: '/goals', icon: Target, label: 'Set Goal', color: 'purple' },
-                { href: '/calendar', icon: Calendar, label: 'Calendar', color: 'blue' },
+                { href: '/tasks', icon: Plus, label: 'Add Task', gradient: 'from-emerald-500 to-teal-500' },
+                { href: '/study', icon: Clock, label: 'Study', gradient: 'from-indigo-500 to-blue-500' },
+                { href: '/goals', icon: Target, label: 'Goals', gradient: 'from-purple-500 to-pink-500' },
+                { href: '/calendar', icon: Calendar, label: 'Calendar', gradient: 'from-blue-500 to-cyan-500' },
               ].map((action) => (
                 <Link key={action.href} href={action.href}>
-                  <motion.div whileHover={{ scale: 1.05, y: -2 }} whileTap={{ scale: 0.97 }}>
-                    <Button variant="outline" className={`w-full h-auto py-3 flex-col gap-1.5 hover:bg-${action.color}-500/10 hover:border-${action.color}-500/30 transition-all`}>
-                      <action.icon className={`w-4 h-4 text-${action.color}-500`} />
-                      <span className="text-xs font-medium">{action.label}</span>
-                    </Button>
-                  </motion.div>
+                  <Button variant="outline" className="w-full h-auto py-3 sm:py-3.5 flex-col gap-1.5 sm:gap-2 hover:bg-muted/50 hover:border-border transition-all group active:scale-[0.97]">
+                    <div className={cn('p-1.5 rounded-lg bg-gradient-to-br opacity-80 group-hover:opacity-100 transition-opacity', action.gradient)}>
+                      <action.icon className="w-3.5 h-3.5 text-white" />
+                    </div>
+                    <span className="text-[10px] sm:text-xs font-medium">{action.label}</span>
+                  </Button>
                 </Link>
               ))}
             </div>

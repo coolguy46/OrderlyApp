@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useAppStore } from '@/lib/store';
 import { Sidebar } from './Sidebar';
 import { Header } from './Header';
+import { BottomNav } from './BottomNav';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
 import { ErrorBoundary } from '@/components/ui/error-boundary';
@@ -30,16 +31,21 @@ export function MainLayout({ children }: MainLayoutProps) {
     return () => window.removeEventListener('resize', check);
   }, []);
 
+  // Close mobile menu on route change
+  useEffect(() => {
+    setMobileMenuOpen(false);
+  }, [pathname]);
+
   return (
-    <div className="min-h-screen bg-background bg-grain">
+    <div className="min-h-dvh bg-background bg-grain mesh-gradient">
       {/* Desktop sidebar */}
       <div className="hidden lg:block">
         <Sidebar />
       </div>
 
-      {/* Mobile sidebar using Sheet */}
+      {/* Mobile sidebar using Sheet — triggered by "More" in bottom nav */}
       <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
-        <SheetContent side="left" className="p-0 w-[260px]">
+        <SheetContent side="left" className="p-0 w-[280px]">
           <Sidebar mobile onNavigate={() => setMobileMenuOpen(false)} />
         </SheetContent>
       </Sheet>
@@ -48,10 +54,10 @@ export function MainLayout({ children }: MainLayoutProps) {
         initial={false}
         animate={{ marginLeft: isDesktop ? (sidebarOpen ? 240 : 72) : 0 }}
         transition={{ duration: 0.2, ease: 'easeInOut' }}
-        className="flex flex-col min-h-screen"
+        className="flex flex-col min-h-dvh"
       >
         <Header onMobileMenuToggle={() => setMobileMenuOpen(!mobileMenuOpen)} />
-        <main className="flex-1 p-4 sm:p-6 lg:p-10 relative">
+        <main className="flex-1 px-4 pt-4 pb-20 sm:px-6 sm:pb-6 lg:px-10 lg:pb-10 lg:pt-6 relative">
           <ErrorBoundary>
             <AnimatePresence mode="wait">
               <motion.div
@@ -67,6 +73,9 @@ export function MainLayout({ children }: MainLayoutProps) {
           </ErrorBoundary>
         </main>
       </motion.div>
+
+      {/* Mobile bottom navigation */}
+      <BottomNav onMoreTap={() => setMobileMenuOpen(true)} />
     </div>
   );
 }

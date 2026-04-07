@@ -198,7 +198,7 @@ export default function LandingPage() {
               <span className="text-sm text-indigo-400 font-medium">Supercharge your studies</span>
             </div>
             
-            <h1 className="text-5xl md:text-7xl font-bold leading-tight mb-6">
+            <h1 className="text-5xl md:text-7xl font-extrabold leading-tight mb-6 font-display">
               Master Your
               <span className="gradient-text-animated"> Academic Journey</span>
             </h1>
@@ -333,7 +333,7 @@ export default function LandingPage() {
             viewport={{ once: true }}
             className="text-center mb-16"
           >
-            <h2 className="text-4xl md:text-5xl font-bold mb-4">
+            <h2 className="text-4xl md:text-5xl font-bold mb-4 font-display">
               Everything You Need to
               <span className="bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent"> Succeed</span>
             </h2>
@@ -380,7 +380,7 @@ export default function LandingPage() {
                 <Gamepad2 className="w-4 h-4 text-purple-400" />
                 <span className="text-sm text-purple-400 font-medium">Gamified Learning</span>
               </div>
-              <h2 className="text-4xl font-bold mb-6">
+              <h2 className="text-4xl font-bold mb-6 font-display">
                 Make Studying
                 <span className="bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent"> Fun & Rewarding</span>
               </h2>
@@ -462,7 +462,7 @@ export default function LandingPage() {
             viewport={{ once: true }}
             className="text-center mb-16"
           >
-            <h2 className="text-4xl md:text-5xl font-bold mb-4">
+            <h2 className="text-4xl md:text-5xl font-bold mb-4 font-display">
               Get Started in
               <span className="bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent"> Minutes</span>
             </h2>
@@ -529,7 +529,7 @@ export default function LandingPage() {
             viewport={{ once: true }}
             className="text-center mb-16"
           >
-            <h2 className="text-4xl md:text-5xl font-bold mb-4">
+            <h2 className="text-4xl md:text-5xl font-bold mb-4 font-display">
               Works With Your
               <span className="bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent"> Favorite Tools</span>
             </h2>
@@ -607,7 +607,7 @@ export default function LandingPage() {
             viewport={{ once: true }}
             className="text-center mb-16"
           >
-            <h2 className="text-4xl md:text-5xl font-bold mb-4">
+            <h2 className="text-4xl md:text-5xl font-bold mb-4 font-display">
               Loved by
               <span className="bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent"> Students Worldwide</span>
             </h2>
@@ -657,7 +657,7 @@ export default function LandingPage() {
             viewport={{ once: true }}
             className="text-center p-12 rounded-3xl bg-gradient-to-br from-indigo-500/10 via-purple-500/10 to-pink-500/10 border border-indigo-500/20"
           >
-            <h2 className="text-4xl md:text-5xl font-bold mb-4">
+            <h2 className="text-4xl md:text-5xl font-bold mb-4 font-display">
               Ready to Transform Your Studies?
             </h2>
             <p className="text-xl text-muted-foreground mb-8 max-w-2xl mx-auto">

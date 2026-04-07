@@ -324,6 +324,196 @@ export interface Database {
         };
         Update: {};
       };
+      resume_items: {
+        Row: {
+          id: string; user_id: string;
+          category: 'skills'|'experience'|'projects'|'certifications'|'education';
+          title: string; subtitle: string|null; description: string|null;
+          date_label: string|null;
+          level: 'beginner'|'intermediate'|'advanced'|'expert'|null;
+          completed: boolean; sort_order: number;
+          created_at: string; updated_at: string;
+        };
+        Insert: {
+          id?: string; user_id: string;
+          category: 'skills'|'experience'|'projects'|'certifications'|'education';
+          title: string; subtitle?: string|null; description?: string|null;
+          date_label?: string|null;
+          level?: 'beginner'|'intermediate'|'advanced'|'expert'|null;
+          completed?: boolean; sort_order?: number;
+          created_at?: string; updated_at?: string;
+        };
+        Update: Partial<{
+          category: 'skills'|'experience'|'projects'|'certifications'|'education';
+          title: string; subtitle: string|null; description: string|null;
+          date_label: string|null;
+          level: 'beginner'|'intermediate'|'advanced'|'expert'|null;
+          completed: boolean; sort_order: number; updated_at: string;
+        }>;
+      };
+      college_courses: {
+        Row: {
+          id: string; user_id: string; name: string; grade: string;
+          credits: number; weighted: boolean; semester: string; created_at: string;
+        };
+        Insert: {
+          id?: string; user_id: string; name: string; grade: string;
+          credits?: number; weighted?: boolean; semester?: string; created_at?: string;
+        };
+        Update: Partial<{ name: string; grade: string; credits: number; weighted: boolean; semester: string; }>;
+      };
+      extracurriculars: {
+        Row: {
+          id: string; user_id: string; name: string; role: string;
+          category: 'sports'|'arts'|'academic'|'volunteer'|'work'|'leadership'|'other';
+          years_involved: number; hours_per_week: number; weeks_per_year: number;
+          description: string; achievements: string|null; highlighted: boolean;
+          sort_order: number; created_at: string; updated_at: string;
+        };
+        Insert: {
+          id?: string; user_id: string; name: string; role?: string;
+          category: 'sports'|'arts'|'academic'|'volunteer'|'work'|'leadership'|'other';
+          years_involved?: number; hours_per_week?: number; weeks_per_year?: number;
+          description?: string; achievements?: string|null; highlighted?: boolean;
+          sort_order?: number; created_at?: string; updated_at?: string;
+        };
+        Update: Partial<{
+          name: string; role: string;
+          category: 'sports'|'arts'|'academic'|'volunteer'|'work'|'leadership'|'other';
+          years_involved: number; hours_per_week: number; weeks_per_year: number;
+          description: string; achievements: string|null; highlighted: boolean;
+          sort_order: number; updated_at: string;
+        }>;
+      };
+      college_applications: {
+        Row: {
+          id: string; user_id: string; name: string;
+          app_type: 'reach'|'match'|'safety';
+          deadline: string|null;
+          deadline_type: 'ED'|'EA'|'RD'|'Rolling';
+          status: 'researching'|'applying'|'applied'|'accepted'|'rejected'|'waitlisted'|'deferred';
+          notes: string|null; scholarships: boolean;
+          essays_done: number; essays_total: number;
+          created_at: string; updated_at: string;
+        };
+        Insert: {
+          id?: string; user_id: string; name: string;
+          app_type: 'reach'|'match'|'safety';
+          deadline?: string|null; deadline_type?: 'ED'|'EA'|'RD'|'Rolling';
+          status?: 'researching'|'applying'|'applied'|'accepted'|'rejected'|'waitlisted'|'deferred';
+          notes?: string|null; scholarships?: boolean;
+          essays_done?: number; essays_total?: number;
+          created_at?: string; updated_at?: string;
+        };
+        Update: Partial<{
+          name: string; app_type: 'reach'|'match'|'safety';
+          deadline: string|null; deadline_type: 'ED'|'EA'|'RD'|'Rolling';
+          status: 'researching'|'applying'|'applied'|'accepted'|'rejected'|'waitlisted'|'deferred';
+          notes: string|null; scholarships: boolean;
+          essays_done: number; essays_total: number; updated_at: string;
+        }>;
+      };
+      test_scores: {
+        Row: {
+          id: string; user_id: string; test_name: string;
+          score: number; max_score: number; date_taken: string|null;
+          notes: string|null; created_at: string;
+        };
+        Insert: {
+          id?: string; user_id: string; test_name: string;
+          score: number; max_score?: number; date_taken?: string|null;
+          notes?: string|null; created_at?: string;
+        };
+        Update: Partial<{ test_name: string; score: number; max_score: number; date_taken: string|null; notes: string|null; }>;
+      };
+      recommendations: {
+        Row: {
+          id: string; user_id: string; recommender_name: string;
+          recommender_role: string;
+          status: 'not_asked'|'asked'|'confirmed'|'submitted';
+          deadline: string|null; notes: string|null;
+          created_at: string; updated_at: string;
+        };
+        Insert: {
+          id?: string; user_id: string; recommender_name: string;
+          recommender_role?: string;
+          status?: 'not_asked'|'asked'|'confirmed'|'submitted';
+          deadline?: string|null; notes?: string|null;
+          created_at?: string; updated_at?: string;
+        };
+        Update: Partial<{
+          recommender_name: string; recommender_role: string;
+          status: 'not_asked'|'asked'|'confirmed'|'submitted';
+          deadline: string|null; notes: string|null; updated_at: string;
+        }>;
+      };
+      study_sets: {
+        Row: {
+          id: string; user_id: string; exam_id: string|null;
+          name: string; linked_task_ids: string[];
+          created_at: string; updated_at: string;
+        };
+        Insert: {
+          id?: string; user_id: string; exam_id?: string|null;
+          name: string; linked_task_ids?: string[];
+          created_at?: string; updated_at?: string;
+        };
+        Update: Partial<{ exam_id: string|null; name: string; linked_task_ids: string[]; updated_at: string; }>;
+      };
+      flashcards: {
+        Row: {
+          id: string; study_set_id: string; user_id: string;
+          front: string; back: string; subject: string|null;
+          sort_order: number; created_at: string;
+        };
+        Insert: {
+          id?: string; study_set_id: string; user_id: string;
+          front: string; back: string; subject?: string|null;
+          sort_order?: number; created_at?: string;
+        };
+        Update: Partial<{ front: string; back: string; subject: string|null; sort_order: number; }>;
+      };
+      mcq_questions: {
+        Row: {
+          id: string; study_set_id: string; user_id: string;
+          question: string; options: string[]; correct_index: number;
+          explanation: string|null; subject: string|null;
+          sort_order: number; created_at: string;
+        };
+        Insert: {
+          id?: string; study_set_id: string; user_id: string;
+          question: string; options: string[]; correct_index: number;
+          explanation?: string|null; subject?: string|null;
+          sort_order?: number; created_at?: string;
+        };
+        Update: Partial<{ question: string; options: string[]; correct_index: number; explanation: string|null; subject: string|null; sort_order: number; }>;
+      };
+      study_set_files: {
+        Row: {
+          id: string; study_set_id: string; user_id: string;
+          file_name: string; storage_path: string; mime_type: string;
+          size_bytes: number|null; created_at: string;
+        };
+        Insert: {
+          id?: string; study_set_id: string; user_id: string;
+          file_name: string; storage_path: string; mime_type?: string;
+          size_bytes?: number|null; created_at?: string;
+        };
+        Update: Partial<{ file_name: string; storage_path: string; mime_type: string; size_bytes: number|null; }>;
+      };
+      sat_act_progress: {
+        Row: {
+          id: string; user_id: string; test_type: 'SAT'|'ACT';
+          section_name: string; progress_pct: number;
+          target_score: string|null; updated_at: string;
+        };
+        Insert: {
+          id?: string; user_id: string; test_type: 'SAT'|'ACT';
+          section_name: string; progress_pct?: number;
+          target_score?: string|null; updated_at?: string;
+        };
+        Update: Partial<{ test_type: 'SAT'|'ACT'; section_name: string; progress_pct: number; target_score: string|null; updated_at: string; }>;
+      };
     };
   };
 }
@@ -342,3 +532,142 @@ export type Achievement = Database['public']['Tables']['achievements']['Row'];
 export type TaskPriority = 'high' | 'medium' | 'low';
 export type TaskStatus = 'pending' | 'in_progress' | 'completed';
 export type GoalType = 'short_term' | 'long_term';
+
+// ── New feature types ──────────────────────────────────────────────
+
+export interface ResumeItem {
+  id: string;
+  user_id: string;
+  category: 'skills' | 'experience' | 'projects' | 'certifications' | 'education';
+  title: string;
+  subtitle: string | null;
+  description: string | null;
+  date_label: string | null;
+  level: 'beginner' | 'intermediate' | 'advanced' | 'expert' | null;
+  completed: boolean;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CollegeCourse {
+  id: string;
+  user_id: string;
+  name: string;
+  grade: string;
+  credits: number;
+  weighted: boolean;
+  semester: string;
+  created_at: string;
+}
+
+export interface Extracurricular {
+  id: string;
+  user_id: string;
+  name: string;
+  role: string;
+  category: 'sports' | 'arts' | 'academic' | 'volunteer' | 'work' | 'leadership' | 'other';
+  years_involved: number;
+  hours_per_week: number;
+  weeks_per_year: number;
+  description: string;
+  achievements: string | null;
+  highlighted: boolean;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CollegeApplication {
+  id: string;
+  user_id: string;
+  name: string;
+  app_type: 'reach' | 'match' | 'safety';
+  deadline: string | null;
+  deadline_type: 'ED' | 'EA' | 'RD' | 'Rolling';
+  status: 'researching' | 'applying' | 'applied' | 'accepted' | 'rejected' | 'waitlisted' | 'deferred';
+  notes: string | null;
+  scholarships: boolean;
+  essays_done: number;
+  essays_total: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TestScore {
+  id: string;
+  user_id: string;
+  test_name: string;
+  score: number;
+  max_score: number;
+  date_taken: string | null;
+  notes: string | null;
+  created_at: string;
+}
+
+export interface Recommendation {
+  id: string;
+  user_id: string;
+  recommender_name: string;
+  recommender_role: string;
+  status: 'not_asked' | 'asked' | 'confirmed' | 'submitted';
+  deadline: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface StudySet {
+  id: string;
+  user_id: string;
+  exam_id: string | null;
+  name: string;
+  linked_task_ids: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Flashcard {
+  id: string;
+  study_set_id: string;
+  user_id: string;
+  front: string;
+  back: string;
+  subject: string | null;
+  sort_order: number;
+  created_at: string;
+}
+
+export interface MCQQuestion {
+  id: string;
+  study_set_id: string;
+  user_id: string;
+  question: string;
+  options: string[];
+  correct_index: number;
+  explanation: string | null;
+  subject: string | null;
+  sort_order: number;
+  created_at: string;
+}
+
+export interface StudySetFile {
+  id: string;
+  study_set_id: string;
+  user_id: string;
+  file_name: string;
+  storage_path: string;
+  mime_type: string;
+  size_bytes: number | null;
+  created_at: string;
+}
+
+export interface SatActProgress {
+  id: string;
+  user_id: string;
+  test_type: 'SAT' | 'ACT';
+  section_name: string;
+  progress_pct: number;
+  target_score: string | null;
+  updated_at: string;
+}

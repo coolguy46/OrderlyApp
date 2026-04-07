@@ -309,8 +309,8 @@ export const TaskCard = memo(function TaskCard({ task, onEdit, compact = false, 
 
                 {/* Actions */}
                 <div className="flex items-center gap-1 shrink-0">
-                  {/* Quick action buttons on hover */}
-                  <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-all duration-200">
+                  {/* Quick action buttons - always visible on mobile, hover on desktop */}
+                  <div className="flex items-center gap-0.5 sm:opacity-0 sm:group-hover:opacity-100 transition-all duration-200">
                     {task.status === 'pending' && (
                       <motion.div whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}>
                         <Button
@@ -335,13 +335,13 @@ export const TaskCard = memo(function TaskCard({ task, onEdit, compact = false, 
                     </motion.div>
                   </div>
 
-                  {/* Menu */}
+                  {/* Menu - always visible on mobile */}
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <Button 
                         variant="ghost" 
                         size="icon-sm"
-                        className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
+                        className="h-8 w-8 sm:h-7 sm:w-7 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity"
                       >
                         <MoreHorizontal className="w-4 h-4" />
                       </Button>

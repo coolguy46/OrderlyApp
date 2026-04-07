@@ -3,12 +3,14 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useAppStore } from '@/lib/store';
 import { PomodoroTimer } from './PomodoroTimer';
+import { AIScheduler } from './AIScheduler';
 import { EggHatching, IceMelting } from './GamifiedProgress';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { TaskCard } from '@/components/tasks';
 import { motion } from 'framer-motion';
 import { formatDuration } from '@/lib/utils';
@@ -21,6 +23,8 @@ import {
   Snowflake,
   Settings,
   CheckCircle2,
+  Brain,
+  Sparkles,
 } from 'lucide-react';
 
 type VisualizationType = 'egg' | 'ice';
@@ -156,7 +160,7 @@ export function StudySession() {
       className="space-y-4"
     >
       {/* Stats Grid */}
-      <div className="grid grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {statCards.map((stat) => {
           const Icon = stat.icon;
           return (
@@ -181,114 +185,128 @@ export function StudySession() {
         })}
       </div>
 
-      <motion.div variants={itemVariants} className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* Pomodoro Timer */}
-        <div>
-          <PomodoroTimer />
-        </div>
+      <Tabs defaultValue="timer">
+        <TabsList className="bg-muted/50 mb-4">
+          <TabsTrigger value="timer" className="flex items-center gap-1.5">
+            <Timer className="w-3.5 h-3.5" /> Timer
+          </TabsTrigger>
+          <TabsTrigger value="scheduler" className="flex items-center gap-1.5">
+            <Brain className="w-3.5 h-3.5" /> AI Scheduler
+            <span className="ml-1 px-1.5 py-0.5 text-[9px] bg-indigo-500/30 text-indigo-300 rounded-full font-medium">New</span>
+          </TabsTrigger>
+        </TabsList>
 
-        {/* Gamified Progress */}
-        <Card className="glow-border">
-          <CardHeader className="pb-2">
-            <div className="flex items-center justify-between">
-              <div>
-                <CardTitle className="text-base">Daily Progress</CardTitle>
-                <CardDescription className="text-xs">
-                  Study {goalHours >= 1 ? `${Math.floor(goalHours)}h` : ''}{goalHours % 1 !== 0 ? ` ${Math.round((goalHours % 1) * 60)}m` : goalHours >= 1 ? '' : `${Math.round(goalHours * 60)}m`} to {visualType === 'egg' ? 'hatch the egg' : 'melt the ice'}
-                </CardDescription>
-              </div>
-              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={openGoalSettings}>
-                <Settings className="w-4 h-4" />
-              </Button>
-            </div>
-          </CardHeader>
-          <CardContent className="pt-0">
-            {/* Visualization Type Toggle */}
-            <div className="flex items-center justify-center gap-2 mb-4">
-              <button
-                onClick={() => setVisualType('egg')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                  visualType === 'egg'
-                    ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-muted'
-                }`}
-              >
-                <Egg className="w-3 h-3" />
-                Hatch Egg
-              </button>
-              <button
-                onClick={() => setVisualType('ice')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                  visualType === 'ice'
-                    ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-muted'
-                }`}
-              >
-                <Snowflake className="w-3 h-3" />
-                Melt Ice
-              </button>
+        <TabsContent value="timer">
+          <motion.div variants={itemVariants} className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {/* Pomodoro Timer */}
+            <div>
+              <PomodoroTimer />
             </div>
 
-            {/* Visualization */}
-            <div className="flex items-center justify-center py-2">
-              {visualType === 'egg' ? (
-                <EggHatching progress={dailyProgress} size={180} />
-              ) : (
-                <IceMelting progress={dailyProgress} size={180} />
-              )}
-            </div>
-
-            {/* Study Time Breakdown */}
-            <div className="mt-4 pt-3 border-t border-border">
-              <p className="text-xs text-muted-foreground text-center mb-3">
-                Study {formatDuration(Math.max(0, dailyGoal - todayStats.totalMinutes))} more to reach your goal
-              </p>
-              
-              <div className="flex items-center justify-center gap-3 text-center">
-                <div>
-                  <p className="text-sm font-bold text-foreground">{pomodoroSettings.focusDuration}m</p>
-                  <p className="text-[10px] text-muted-foreground">Focus</p>
+            {/* Gamified Progress */}
+            <Card className="glow-border">
+              <CardHeader className="pb-2">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle className="text-base">Daily Progress</CardTitle>
+                    <CardDescription className="text-xs">
+                      Study {goalHours >= 1 ? `${Math.floor(goalHours)}h` : ''}{goalHours % 1 !== 0 ? ` ${Math.round((goalHours % 1) * 60)}m` : goalHours >= 1 ? '' : `${Math.round(goalHours * 60)}m`} to {visualType === 'egg' ? 'hatch the egg' : 'melt the ice'}
+                    </CardDescription>
+                  </div>
+                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={openGoalSettings}>
+                    <Settings className="w-4 h-4" />
+                  </Button>
                 </div>
-                <div className="w-px h-6 bg-border" />
-                <div>
-                  <p className="text-sm font-bold text-foreground">{pomodoroSettings.shortBreakDuration}m</p>
-                  <p className="text-[10px] text-muted-foreground">Break</p>
+              </CardHeader>
+              <CardContent className="pt-0">
+                <div className="flex items-center justify-center gap-2 mb-4">
+                  <button
+                    onClick={() => setVisualType('egg')}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                      visualType === 'egg'
+                        ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                        : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+                    }`}
+                  >
+                    <Egg className="w-3 h-3" />
+                    Hatch Egg
+                  </button>
+                  <button
+                    onClick={() => setVisualType('ice')}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                      visualType === 'ice'
+                        ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30'
+                        : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+                    }`}
+                  >
+                    <Snowflake className="w-3 h-3" />
+                    Melt Ice
+                  </button>
                 </div>
-                <div className="w-px h-6 bg-border" />
-                <div>
-                  <p className="text-sm font-bold text-foreground">{pomodoroSettings.sessionsBeforeLongBreak}</p>
-                  <p className="text-[10px] text-muted-foreground">Sessions</p>
-                </div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </motion.div>
 
-      {/* Pending Tasks instead of Recent Sessions */}
-      <motion.div variants={itemVariants}>
-      <Card className="glow-border">
-        <CardHeader className="pb-2">
-          <div className="flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4 text-primary" />
-            <CardTitle className="text-base">Tasks to Complete</CardTitle>
-          </div>
-        </CardHeader>
-        <CardContent className="pt-0">
-          <div className="space-y-2">
-            {pendingTasks.length > 0 ? (
-              pendingTasks.map((task) => (
-                <TaskCard key={task.id} task={task} compact />
-              ))
-            ) : (
-              <p className="text-center text-muted-foreground py-6 text-sm">
-                No pending tasks. Great job! 🎉
-              </p>
-            )}
-          </div>
-        </CardContent>
-      </Card>
-      </motion.div>
+                <div className="flex items-center justify-center py-2">
+                  {visualType === 'egg' ? (
+                    <EggHatching progress={dailyProgress} size={180} />
+                  ) : (
+                    <IceMelting progress={dailyProgress} size={180} />
+                  )}
+                </div>
+
+                <div className="mt-4 pt-3 border-t border-border">
+                  <p className="text-xs text-muted-foreground text-center mb-3">
+                    Study {formatDuration(Math.max(0, dailyGoal - todayStats.totalMinutes))} more to reach your goal
+                  </p>
+                  <div className="flex items-center justify-center gap-3 text-center">
+                    <div>
+                      <p className="text-sm font-bold text-foreground">{pomodoroSettings.focusDuration}m</p>
+                      <p className="text-[10px] text-muted-foreground">Focus</p>
+                    </div>
+                    <div className="w-px h-6 bg-border" />
+                    <div>
+                      <p className="text-sm font-bold text-foreground">{pomodoroSettings.shortBreakDuration}m</p>
+                      <p className="text-[10px] text-muted-foreground">Break</p>
+                    </div>
+                    <div className="w-px h-6 bg-border" />
+                    <div>
+                      <p className="text-sm font-bold text-foreground">{pomodoroSettings.sessionsBeforeLongBreak}</p>
+                      <p className="text-[10px] text-muted-foreground">Sessions</p>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </motion.div>
+
+          {/* Pending Tasks */}
+          <motion.div variants={itemVariants} className="mt-4">
+            <Card className="glow-border">
+              <CardHeader className="pb-2">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-primary" />
+                  <CardTitle className="text-base">Tasks to Complete</CardTitle>
+                </div>
+              </CardHeader>
+              <CardContent className="pt-0">
+                <div className="space-y-2">
+                  {pendingTasks.length > 0 ? (
+                    pendingTasks.map((task) => (
+                      <TaskCard key={task.id} task={task} compact />
+                    ))
+                  ) : (
+                    <p className="text-center text-muted-foreground py-6 text-sm">
+                      No pending tasks. Great job! 🎉
+                    </p>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          </motion.div>
+        </TabsContent>
+
+        <TabsContent value="scheduler">
+          <AIScheduler />
+        </TabsContent>
+      </Tabs>
 
       {/* Goal Settings Modal */}
       <Dialog open={showGoalSettings} onOpenChange={(open) => !open && setShowGoalSettings(false)}>
@@ -300,7 +318,6 @@ export function StudySession() {
             <p className="text-xs text-muted-foreground">
               Set how long you want to study each day (minimum 1 hour, maximum 24 hours)
             </p>
-            
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
                 <Label className="text-sm">Hours</Label>
@@ -325,7 +342,6 @@ export function StudySession() {
                 />
               </div>
             </div>
-
             <div className="flex gap-2">
               <Button variant="outline" onClick={() => setShowGoalSettings(false)} className="flex-1 h-8">
                 Cancel

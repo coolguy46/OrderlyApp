@@ -6,6 +6,13 @@ import * as db from '@/lib/supabase/services';
 import type { FriendWithProfile } from '@/lib/supabase/services';
 import { toast } from 'sonner';
 
+// Module-level subscription ref to prevent duplicate listeners
+let authSubscription: { unsubscribe: () => void } | null = null;
+// Guard against concurrent data loads
+let isLoadingData = false;
+// Guard against re-initializing in React Strict Mode
+let initializationDone = false;
+
 export type Theme = 'light' | 'dark' | 'system';
 
 interface AppState {
@@ -141,41 +148,71 @@ export const useAppStore = create<AppState>()(
       
       // Initialize auth state
       initializeAuth: async () => {
+        // Prevent double-init from React Strict Mode
+        if (initializationDone) return;
+        initializationDone = true;
+
+        // Clean up any existing subscription to prevent duplicate listeners
+        if (authSubscription) {
+          authSubscription.unsubscribe();
+          authSubscription = null;
+        }
+
         try {
-          const { data: { session } } = await supabase.auth.getSession();
-          
-          if (session?.user) {
+          const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+
+          if (sessionError) {
+            // Don't treat a session fetch error as a logout
+            console.warn('Session fetch error (non-fatal):', sessionError.message);
+            set({ isLoading: false });
+          } else if (session?.user) {
             const profile = await db.getProfile(session.user.id);
-            set({ 
-              isAuthenticated: true, 
+            set({
+              isAuthenticated: true,
               user: profile,
               isLoading: false,
             });
-            
-            // Load user data
             await get().loadUserData(session.user.id);
           } else {
             set({ isAuthenticated: false, user: null, isLoading: false });
           }
-        } catch (error) {
+        } catch (error: any) {
+          // Ignore aborted-signal errors (React Strict Mode artefact)
+          if (error?.name === 'AbortError' || error?.message?.includes('signal')) {
+            console.warn('Auth init aborted (harmless in dev):', error.message);
+            set({ isLoading: false });
+            initializationDone = false; // allow retry
+            return;
+          }
           console.error('Error initializing auth:', error);
-          set({ isAuthenticated: false, user: null, isLoading: false });
+          set({ isLoading: false });
         }
-        
-        // Listen for auth changes (clean up previous listener if any)
+
+        // Listen for auth changes — register only once
         const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+          const currentUser = get().user;
+
           if (event === 'SIGNED_IN' && session?.user) {
-            // Small delay to allow the profile trigger to complete (especially for OAuth)
+            // Skip redundant reload if it's the same user and data is already loaded
+            if (currentUser?.id === session.user.id && get().dataLoaded) return;
+
+            // Small delay to allow the profile trigger to create the profile (OAuth)
             let profile = await db.getProfile(session.user.id);
             if (!profile) {
               await new Promise(resolve => setTimeout(resolve, 1500));
               profile = await db.getProfile(session.user.id);
             }
-            set({ isAuthenticated: true, user: profile });
+            set({ isAuthenticated: true, user: profile, isLoading: false });
             await get().loadUserData(session.user.id);
+
+          } else if (event === 'TOKEN_REFRESHED') {
+            // Token refreshed silently — no state change needed
+          } else if (event === 'INITIAL_SESSION') {
+            // Already handled above via getSession()
           } else if (event === 'SIGNED_OUT') {
-            set({ 
-              isAuthenticated: false, 
+            initializationDone = false; // allow re-init after next login
+            set({
+              isAuthenticated: false,
               user: null,
               tasks: [],
               goals: [],
@@ -185,13 +222,18 @@ export const useAppStore = create<AppState>()(
               friends: [],
               achievements: [],
               dataLoaded: false,
+              isLoading: false,
             });
           }
         });
+        authSubscription = subscription;
       },
       
       // Load all user data from Supabase
       loadUserData: async (userId: string) => {
+        // Prevent concurrent loads — main cause of "signal aborted" errors
+        if (isLoadingData) return;
+        isLoadingData = true;
         try {
           const [tasks, goals, studySessions, exams, subjects, friends, achievements] = await Promise.all([
             db.getTasks(userId),
@@ -202,19 +244,15 @@ export const useAppStore = create<AppState>()(
             db.getFriends(userId),
             db.getAchievements(userId),
           ]);
-          
-          set({
-            tasks,
-            goals,
-            studySessions,
-            exams,
-            subjects,
-            friends,
-            achievements,
-            dataLoaded: true,
-          });
-        } catch (error) {
-          console.error('Error loading user data:', error);
+          set({ tasks, goals, studySessions, exams, subjects, friends, achievements, dataLoaded: true });
+        } catch (error: any) {
+          if (error?.name === 'AbortError' || error?.message?.includes('signal')) {
+            console.warn('Data load aborted (retrying next interaction):', error.message);
+          } else {
+            console.error('Error loading user data:', error);
+          }
+        } finally {
+          isLoadingData = false;
         }
       },
       
@@ -264,6 +302,7 @@ export const useAppStore = create<AppState>()(
       logout: async () => {
         try {
           await db.signOut();
+          initializationDone = false; // allow re-init after next login
           set({ 
             isAuthenticated: false, 
             user: null,

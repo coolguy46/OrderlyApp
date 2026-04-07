@@ -209,7 +209,7 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
           </div>
 
           {/* Priority & Status row */}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
                 <Flag className="w-3 h-3" />
@@ -267,7 +267,7 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
           </div>
 
           {/* Subject & Due Date row */}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
                 <BookOpen className="w-3 h-3" />
@@ -383,7 +383,7 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
           </div>
 
           {/* Time & Recurrence row */}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label htmlFor="dueTime" className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
                 <Clock className="w-3 h-3" />

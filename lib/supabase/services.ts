@@ -15,6 +15,16 @@ import type {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const db = supabase as any;
 
+/** Returns true if the error is a harmless request abort (e.g. React Strict Mode). */
+function isAbortError(e: any): boolean {
+  return (
+    e?.name === 'AbortError' ||
+    e?.message?.includes('signal') ||
+    e?.message?.includes('aborted') ||
+    e?.code === 'PGRST_REQUEST_ABORTED'
+  );
+}
+
 // ============== PROFILE SERVICES ==============
 
 export async function getProfile(userId: string): Promise<Profile | null> {
@@ -847,4 +857,552 @@ export function onAuthStateChange(callback: (user: any) => void) {
   return db.auth.onAuthStateChange((event: any, session: any) => {
     callback(session?.user || null);
   });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NEW FEATURE SERVICES
+// ─────────────────────────────────────────────────────────────────────────────
+
+import type {
+  ResumeItem,
+  CollegeCourse,
+  Extracurricular,
+  CollegeApplication,
+  TestScore,
+  Recommendation,
+  StudySet,
+  Flashcard,
+  MCQQuestion,
+  StudySetFile,
+  SatActProgress,
+} from '@/lib/supabase/types';
+
+// Supabase client alias used throughout the new service functions
+const supabaseClient = supabase;
+
+// ── Resume Items ─────────────────────────────────────────────
+export async function getResumeItems(userId: string): Promise<ResumeItem[]> {
+  const { data, error } = await (supabaseClient as any)
+    .from('resume_items')
+    .select('*')
+    .eq('user_id', userId)
+    .order('sort_order', { ascending: true });
+  if (error) {
+    if (isAbortError(error)) return [];
+    console.error('getResumeItems::', error); return [];
+  }
+  return data ?? [];
+}
+
+export async function upsertResumeItem(
+  userId: string,
+  item: Omit<ResumeItem, 'id' | 'user_id' | 'created_at' | 'updated_at'> & { id?: string }
+): Promise<ResumeItem | null> {
+  const payload = { ...item, user_id: userId };
+  const { data, error } = await (supabaseClient as any)
+    .from('resume_items')
+    .upsert(payload, { onConflict: 'id' })
+    .select()
+    .single();
+  if (error) {
+    if (isAbortError(error)) return null;
+    console.error('upsertResumeItem::', error); return null;
+  }
+  return data;
+}
+
+export async function deleteResumeItem(id: string): Promise<boolean> {
+  const { error } = await (supabaseClient as any).from('resume_items').delete().eq('id', id);
+  if (error) {
+    if (isAbortError(error)) return false;
+    console.error('deleteResumeItem::', error); return false;
+  }
+  return true;
+}
+
+// ── College Courses (GPA) ────────────────────────────────────
+export async function getCollegeCourses(userId: string): Promise<CollegeCourse[]> {
+  const { data, error } = await (supabaseClient as any)
+    .from('college_courses')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: true });
+  if (error) {
+    if (isAbortError(error)) return [];
+    console.error('getCollegeCourses::', error); return [];
+  }
+  return data ?? [];
+}
+
+export async function createCollegeCourse(
+  course: Omit<CollegeCourse, 'id' | 'created_at'>
+): Promise<CollegeCourse | null> {
+  const { data, error } = await (supabaseClient as any)
+    .from('college_courses')
+    .insert(course)
+    .select()
+    .single();
+  if (error) {
+    if (isAbortError(error)) return null;
+    console.error('createCollegeCourse::', error); return null;
+  }
+  return data;
+}
+
+export async function updateCollegeCourse(
+  id: string,
+  updates: Partial<Omit<CollegeCourse, 'id' | 'user_id' | 'created_at'>>
+): Promise<CollegeCourse | null> {
+  const { data, error } = await (supabaseClient as any)
+    .from('college_courses')
+    .update(updates)
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) {
+    if (isAbortError(error)) return null;
+    console.error('updateCollegeCourse::', error); return null;
+  }
+  return data;
+}
+
+export async function deleteCollegeCourse(id: string): Promise<boolean> {
+  const { error } = await (supabaseClient as any).from('college_courses').delete().eq('id', id);
+  if (error) {
+    if (isAbortError(error)) return false;
+    console.error('deleteCollegeCourse::', error); return false;
+  }
+  return true;
+}
+
+// ── Extracurriculars ─────────────────────────────────────────
+export async function getExtracurriculars(userId: string): Promise<Extracurricular[]> {
+  const { data, error } = await (supabaseClient as any)
+    .from('extracurriculars')
+    .select('*')
+    .eq('user_id', userId)
+    .order('sort_order', { ascending: true });
+  if (error) {
+    if (isAbortError(error)) return [];
+    console.error('getExtracurriculars::', error); return [];
+  }
+  return data ?? [];
+}
+
+export async function createExtracurricular(
+  ec: Omit<Extracurricular, 'id' | 'created_at' | 'updated_at'>
+): Promise<Extracurricular | null> {
+  const { data, error } = await (supabaseClient as any)
+    .from('extracurriculars')
+    .insert(ec)
+    .select()
+    .single();
+  if (error) {
+    if (isAbortError(error)) return null;
+    console.error('createExtracurricular::', error); return null;
+  }
+  return data;
+}
+
+export async function updateExtracurricular(
+  id: string,
+  updates: Partial<Omit<Extracurricular, 'id' | 'user_id' | 'created_at' | 'updated_at'>>
+): Promise<Extracurricular | null> {
+  const { data, error } = await (supabaseClient as any)
+    .from('extracurriculars')
+    .update(updates)
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) {
+    if (isAbortError(error)) return null;
+    console.error('updateExtracurricular::', error); return null;
+  }
+  return data;
+}
+
+export async function deleteExtracurricular(id: string): Promise<boolean> {
+  const { error } = await (supabaseClient as any).from('extracurriculars').delete().eq('id', id);
+  if (error) {
+    if (isAbortError(error)) return false;
+    console.error('deleteExtracurricular::', error); return false;
+  }
+  return true;
+}
+
+// ── College Applications ─────────────────────────────────────
+export async function getCollegeApplications(userId: string): Promise<CollegeApplication[]> {
+  const { data, error } = await (supabaseClient as any)
+    .from('college_applications')
+    .select('*')
+    .eq('user_id', userId)
+    .order('deadline', { ascending: true, nullsFirst: false });
+  if (error) {
+    if (isAbortError(error)) return [];
+    console.error('getCollegeApplications::', error); return [];
+  }
+  return data ?? [];
+}
+
+export async function createCollegeApplication(
+  app: Omit<CollegeApplication, 'id' | 'created_at' | 'updated_at'>
+): Promise<CollegeApplication | null> {
+  const { data, error } = await (supabaseClient as any)
+    .from('college_applications')
+    .insert(app)
+    .select()
+    .single();
+  if (error) {
+    if (isAbortError(error)) return null;
+    console.error('createCollegeApplication::', error); return null;
+  }
+  return data;
+}
+
+export async function updateCollegeApplication(
+  id: string,
+  updates: Partial<Omit<CollegeApplication, 'id' | 'user_id' | 'created_at' | 'updated_at'>>
+): Promise<CollegeApplication | null> {
+  const { data, error } = await (supabaseClient as any)
+    .from('college_applications')
+    .update(updates)
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) {
+    if (isAbortError(error)) return null;
+    console.error('updateCollegeApplication::', error); return null;
+  }
+  return data;
+}
+
+export async function deleteCollegeApplication(id: string): Promise<boolean> {
+  const { error } = await (supabaseClient as any).from('college_applications').delete().eq('id', id);
+  if (error) {
+    if (isAbortError(error)) return false;
+    console.error('deleteCollegeApplication::', error); return false;
+  }
+  return true;
+}
+
+// ── Test Scores ──────────────────────────────────────────────
+export async function getTestScores(userId: string): Promise<TestScore[]> {
+  const { data, error } = await (supabaseClient as any)
+    .from('test_scores')
+    .select('*')
+    .eq('user_id', userId)
+    .order('date_taken', { ascending: false, nullsFirst: false });
+  if (error) {
+    if (isAbortError(error)) return [];
+    console.error('getTestScores::', error); return [];
+  }
+  return data ?? [];
+}
+
+export async function createTestScore(
+  score: Omit<TestScore, 'id' | 'created_at'>
+): Promise<TestScore | null> {
+  const { data, error } = await (supabaseClient as any)
+    .from('test_scores')
+    .insert(score)
+    .select()
+    .single();
+  if (error) {
+    if (isAbortError(error)) return null;
+    console.error('createTestScore::', error); return null;
+  }
+  return data;
+}
+
+export async function deleteTestScore(id: string): Promise<boolean> {
+  const { error } = await (supabaseClient as any).from('test_scores').delete().eq('id', id);
+  if (error) {
+    if (isAbortError(error)) return false;
+    console.error('deleteTestScore::', error); return false;
+  }
+  return true;
+}
+
+// ── Recommendations ──────────────────────────────────────────
+export async function getRecommendations(userId: string): Promise<Recommendation[]> {
+  const { data, error } = await (supabaseClient as any)
+    .from('recommendations')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: true });
+  if (error) {
+    if (isAbortError(error)) return [];
+    console.error('getRecommendations::', error); return [];
+  }
+  return data ?? [];
+}
+
+export async function createRecommendation(
+  rec: Omit<Recommendation, 'id' | 'created_at' | 'updated_at'>
+): Promise<Recommendation | null> {
+  const { data, error } = await (supabaseClient as any)
+    .from('recommendations')
+    .insert(rec)
+    .select()
+    .single();
+  if (error) {
+    if (isAbortError(error)) return null;
+    console.error('createRecommendation::', error); return null;
+  }
+  return data;
+}
+
+export async function updateRecommendation(
+  id: string,
+  updates: Partial<Omit<Recommendation, 'id' | 'user_id' | 'created_at' | 'updated_at'>>
+): Promise<Recommendation | null> {
+  const { data, error } = await (supabaseClient as any)
+    .from('recommendations')
+    .update(updates)
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) {
+    if (isAbortError(error)) return null;
+    console.error('updateRecommendation::', error); return null;
+  }
+  return data;
+}
+
+export async function deleteRecommendation(id: string): Promise<boolean> {
+  const { error } = await (supabaseClient as any).from('recommendations').delete().eq('id', id);
+  if (error) {
+    if (isAbortError(error)) return false;
+    console.error('deleteRecommendation::', error); return false;
+  }
+  return true;
+}
+
+// ── Study Sets ───────────────────────────────────────────────
+export async function getStudySets(userId: string): Promise<StudySet[]> {
+  const { data, error } = await (supabaseClient as any)
+    .from('study_sets')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false });
+  if (error) {
+    if (isAbortError(error)) return [];
+    console.error('getStudySets::', error); return [];
+  }
+  // cast jsonb → string[]
+  return (data ?? []).map((s: any) => ({ ...s, linked_task_ids: s.linked_task_ids ?? [] }));
+}
+
+export async function createStudySet(
+  set: Omit<StudySet, 'id' | 'created_at' | 'updated_at'>
+): Promise<StudySet | null> {
+  const { data, error } = await (supabaseClient as any)
+    .from('study_sets')
+    .insert(set)
+    .select()
+    .single();
+  if (error) {
+    if (isAbortError(error)) return null;
+    console.error('createStudySet::', error); return null;
+  }
+  return { ...data, linked_task_ids: data.linked_task_ids ?? [] };
+}
+
+export async function updateStudySet(
+  id: string,
+  updates: Partial<Omit<StudySet, 'id' | 'user_id' | 'created_at' | 'updated_at'>>
+): Promise<StudySet | null> {
+  const { data, error } = await (supabaseClient as any)
+    .from('study_sets')
+    .update(updates)
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) {
+    if (isAbortError(error)) return null;
+    console.error('updateStudySet::', error); return null;
+  }
+  return { ...data, linked_task_ids: data.linked_task_ids ?? [] };
+}
+
+export async function deleteStudySet(id: string): Promise<boolean> {
+  const { error } = await (supabaseClient as any).from('study_sets').delete().eq('id', id);
+  if (error) {
+    if (isAbortError(error)) return false;
+    console.error('deleteStudySet::', error); return false;
+  }
+  return true;
+}
+
+// ── Flashcards ───────────────────────────────────────────────
+export async function getFlashcards(studySetId: string): Promise<Flashcard[]> {
+  const { data, error } = await (supabaseClient as any)
+    .from('flashcards')
+    .select('*')
+    .eq('study_set_id', studySetId)
+    .order('sort_order', { ascending: true });
+  if (error) {
+    if (isAbortError(error)) return [];
+    console.error('getFlashcards::', error); return [];
+  }
+  return data ?? [];
+}
+
+export async function createFlashcard(
+  card: Omit<Flashcard, 'id' | 'created_at'>
+): Promise<Flashcard | null> {
+  const { data, error } = await (supabaseClient as any)
+    .from('flashcards')
+    .insert(card)
+    .select()
+    .single();
+  if (error) {
+    if (isAbortError(error)) return null;
+    console.error('createFlashcard::', error); return null;
+  }
+  return data;
+}
+
+export async function deleteFlashcard(id: string): Promise<boolean> {
+  const { error } = await (supabaseClient as any).from('flashcards').delete().eq('id', id);
+  if (error) {
+    if (isAbortError(error)) return false;
+    console.error('deleteFlashcard::', error); return false;
+  }
+  return true;
+}
+
+// ── MCQ Questions ────────────────────────────────────────────
+export async function getMCQQuestions(studySetId: string): Promise<MCQQuestion[]> {
+  const { data, error } = await (supabaseClient as any)
+    .from('mcq_questions')
+    .select('*')
+    .eq('study_set_id', studySetId)
+    .order('sort_order', { ascending: true });
+  if (error) {
+    if (isAbortError(error)) return [];
+    console.error('getMCQQuestions::', error); return [];
+  }
+  return (data ?? []).map((q: any) => ({ ...q, options: q.options ?? [] }));
+}
+
+export async function createMCQQuestion(
+  q: Omit<MCQQuestion, 'id' | 'created_at'>
+): Promise<MCQQuestion | null> {
+  const { data, error } = await (supabaseClient as any)
+    .from('mcq_questions')
+    .insert(q)
+    .select()
+    .single();
+  if (error) {
+    if (isAbortError(error)) return null;
+    console.error('createMCQQuestion::', error); return null;
+  }
+  return { ...data, options: data.options ?? [] };
+}
+
+export async function deleteMCQQuestion(id: string): Promise<boolean> {
+  const { error } = await (supabaseClient as any).from('mcq_questions').delete().eq('id', id);
+  if (error) {
+    if (isAbortError(error)) return false;
+    console.error('deleteMCQQuestion::', error); return false;
+  }
+  return true;
+}
+
+// ── Study Set Files (metadata) ───────────────────────────────
+export async function getStudySetFiles(studySetId: string): Promise<StudySetFile[]> {
+  const { data, error } = await (supabaseClient as any)
+    .from('study_set_files')
+    .select('*')
+    .eq('study_set_id', studySetId)
+    .order('created_at', { ascending: true });
+  if (error) {
+    if (isAbortError(error)) return [];
+    console.error('getStudySetFiles::', error); return [];
+  }
+  return data ?? [];
+}
+
+export async function createStudySetFile(
+  file: Omit<StudySetFile, 'id' | 'created_at'>
+): Promise<StudySetFile | null> {
+  const { data, error } = await (supabaseClient as any)
+    .from('study_set_files')
+    .insert(file)
+    .select()
+    .single();
+  if (error) {
+    if (isAbortError(error)) return null;
+    console.error('createStudySetFile::', error); return null;
+  }
+  return data;
+}
+
+export async function deleteStudySetFile(id: string, storagePath: string): Promise<boolean> {
+  // Remove file from Storage first
+  await (supabaseClient as any).storage.from('study-materials').remove([storagePath]);
+  const { error } = await (supabaseClient as any).from('study_set_files').delete().eq('id', id);
+  if (error) {
+    if (isAbortError(error)) return false;
+    console.error('deleteStudySetFile::', error); return false;
+  }
+  return true;
+}
+
+/** Upload a file to the study-materials bucket and return its public URL */
+export async function uploadStudyFile(
+  userId: string,
+  studySetId: string,
+  file: File
+): Promise<{ path: string; url: string } | null> {
+  const ext = file.name.split('.').pop();
+  const path = `${userId}/${studySetId}/${crypto.randomUUID()}.${ext}`;
+
+  const { error: uploadError } = await (supabaseClient as any).storage
+    .from('study-materials')
+    .upload(path, file, { upsert: false });
+
+  if (uploadError) { console.error('uploadStudyFile:', uploadError); return null; }
+
+  const { data } = (supabaseClient as any).storage.from('study-materials').getPublicUrl(path);
+  return { path, url: data.publicUrl };
+}
+
+// ── SAT/ACT Progress ─────────────────────────────────────────
+export async function getSatActProgress(userId: string): Promise<SatActProgress[]> {
+  const { data, error } = await (supabaseClient as any)
+    .from('sat_act_progress')
+    .select('*')
+    .eq('user_id', userId);
+  if (error) {
+    if (isAbortError(error)) return [];
+    console.error('getSatActProgress::', error); return [];
+  }
+  return data ?? [];
+}
+
+export async function upsertSatActProgress(
+  userId: string,
+  sectionName: string,
+  testType: 'SAT' | 'ACT',
+  progressPct: number,
+  targetScore?: string
+): Promise<SatActProgress | null> {
+  const { data, error } = await (supabaseClient as any)
+    .from('sat_act_progress')
+    .upsert({
+      user_id: userId,
+      section_name: sectionName,
+      test_type: testType,
+      progress_pct: progressPct,
+      target_score: targetScore ?? null,
+    }, { onConflict: 'user_id,section_name' })
+    .select()
+    .single();
+  if (error) {
+    if (isAbortError(error)) return null;
+    console.error('upsertSatActProgress::', error); return null;
+  }
+  return data;
 }

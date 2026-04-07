@@ -12,6 +12,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
 import * as timerDb from '@/lib/supabase/services';
+import { requestNotificationPermission, sendDesktopNotification } from '@/lib/notifications';
+import { usePathname } from 'next/navigation';
 import {
   Play,
   Pause,
@@ -146,6 +148,23 @@ export function PomodoroTimer({ selectedSubjectId, selectedTaskId }: PomodoroTim
   const [stopwatchStarted, setStopwatchStarted] = useState(false);
   const timerStarted = timerType === 'pomodoro' ? pomodoroStarted : stopwatchStarted;
   const eitherStarted = pomodoroStarted || stopwatchStarted;
+  const pathname = usePathname();
+
+  // Pause timer when navigating away from /study page
+  const prevPathnameRef = useRef(pathname);
+  useEffect(() => {
+    if (prevPathnameRef.current !== pathname) {
+      prevPathnameRef.current = pathname;
+      if (pathname !== '/study' && isRunning) {
+        setIsRunning(false);
+      }
+    }
+  }, [pathname, isRunning]);
+
+  // Request desktop notification permission on mount
+  useEffect(() => {
+    requestNotificationPermission();
+  }, []);
 
   // Load presets from localStorage
   useEffect(() => {
@@ -230,6 +249,17 @@ export function PomodoroTimer({ selectedSubjectId, selectedTaskId }: PomodoroTim
     if (soundEnabled) {
       playNotificationSound();
     }
+
+    // Send desktop notification
+    const isBreak = mode !== 'focus';
+    sendDesktopNotification(
+      isBreak ? '☕ Break time is over! Time to focus.' : '🎉 Focus session complete!',
+      {
+        body: isBreak ? 'Your break is up. Start your next focus session.' : `Great work! You completed a ${getDuration('focus') / 60} minute focus session.`,
+        tag: 'pomodoro-timer',
+        requireInteraction: true,
+      }
+    );
 
     if (mode === 'focus') {
       // Save study session with actual elapsed time

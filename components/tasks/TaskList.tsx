@@ -150,7 +150,7 @@ export function TaskList() {
               />
             </div>
             <div>
-              <h1 className="text-2xl font-bold tracking-tight">Tasks</h1>
+              <h1 className="text-2xl font-bold tracking-tight font-display">Tasks</h1>
               <p className="text-sm text-muted-foreground">
                 {stats.pending > 0
                   ? `${stats.pending} task${stats.pending !== 1 ? 's' : ''} to complete`
@@ -170,7 +170,7 @@ export function TaskList() {
       {/* Stats Bar */}
       <motion.div
         initial="hidden" animate="show" variants={containerVariants}
-        className="grid grid-cols-2 sm:grid-cols-4 gap-3"
+        className="grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3"
       >
         {[
           { label: 'Total', value: stats.total, icon: ListTodo, gradient: 'from-slate-500/15 to-slate-400/5', iconBg: 'bg-slate-500/20', iconColor: 'text-slate-400' },
@@ -179,25 +179,23 @@ export function TaskList() {
           { label: 'Rate', value: `${stats.completionRate}%`, icon: TrendingUp, gradient: 'from-indigo-500/15 to-purple-400/5', iconBg: 'bg-indigo-500/20', iconColor: 'text-indigo-400' },
         ].map((stat) => (
           <motion.div key={stat.label} variants={itemVariants}>
-            <motion.div
-              whileHover={{ scale: 1.03, y: -2 }}
-              transition={{ type: 'spring' as const, stiffness: 400, damping: 20 }}
+            <div
               className={cn(
-                'relative overflow-hidden rounded-xl border border-border/50 p-3.5',
+                'relative overflow-hidden rounded-xl border border-border/50 p-3 sm:p-3.5',
                 'bg-gradient-to-br backdrop-blur-sm',
                 stat.gradient
               )}
             >
-              <div className="flex items-center gap-3">
-                <div className={cn('p-2 rounded-lg', stat.iconBg)}>
-                  <stat.icon className={cn('w-4 h-4', stat.iconColor)} />
+              <div className="flex items-center gap-2.5 sm:gap-3">
+                <div className={cn('p-1.5 sm:p-2 rounded-lg', stat.iconBg)}>
+                  <stat.icon className={cn('w-3.5 h-3.5 sm:w-4 sm:h-4', stat.iconColor)} />
                 </div>
                 <div className="min-w-0">
-                  <p className="text-xl font-bold tracking-tight leading-none">{stat.value}</p>
-                  <p className="text-[11px] text-muted-foreground mt-0.5">{stat.label}</p>
+                  <p className="text-lg sm:text-xl font-bold tracking-tight leading-none">{stat.value}</p>
+                  <p className="text-[10px] sm:text-[11px] text-muted-foreground mt-0.5">{stat.label}</p>
                 </div>
               </div>
-            </motion.div>
+            </div>
           </motion.div>
         ))}
       </motion.div>
@@ -242,9 +240,9 @@ export function TaskList() {
           </motion.div>
         </div>
 
-        {/* Filter Tabs */}
+        {/* Filter Tabs — horizontally scrollable on mobile */}
         <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-1 bg-muted/40 rounded-xl p-1 border border-border/30">
+          <div className="flex items-center gap-1 bg-muted/40 rounded-xl p-1 border border-border/30 overflow-x-auto hide-scrollbar">
             {filterOptions.map((filter) => (
               <button
                 key={filter.key}

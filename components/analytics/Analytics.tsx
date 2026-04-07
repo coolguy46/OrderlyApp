@@ -226,7 +226,7 @@ export function Analytics() {
                     <stat.icon className={cn('w-6 h-6', stat.iconColor)} />
                   </motion.div>
                   <div>
-                    <p className="text-3xl font-bold text-foreground">{stat.value}</p>
+                    <p className="text-3xl font-bold text-foreground font-display">{stat.value}</p>
                     <p className="text-sm text-muted-foreground">{stat.label}</p>
                   </div>
                 </div>
@@ -243,7 +243,7 @@ export function Analytics() {
             <CardHeader>
             <div className="flex items-center gap-2">
               <Calendar className="w-5 h-5 text-indigo-400" />
-              <CardTitle>Study Time This Week</CardTitle>
+              <CardTitle className="font-display">Study Time This Week</CardTitle>
             </div>
             <CardDescription>Daily study hours for the past 7 days</CardDescription>
           </CardHeader>
@@ -291,7 +291,7 @@ export function Analytics() {
           <CardHeader>
             <div className="flex items-center gap-2">
               <BookOpen className="w-5 h-5 text-indigo-400" />
-              <CardTitle>Time by Subject</CardTitle>
+              <CardTitle className="font-display">Time by Subject</CardTitle>
             </div>
             <CardDescription>Distribution of study time across subjects</CardDescription>
           </CardHeader>
@@ -350,7 +350,7 @@ export function Analytics() {
           <CardHeader>
             <div className="flex items-center gap-2">
               <Target className="w-5 h-5 text-indigo-400" />
-              <CardTitle>Task Completion</CardTitle>
+              <CardTitle className="font-display">Task Completion</CardTitle>
             </div>
             <CardDescription>Progress by priority level</CardDescription>
           </CardHeader>
@@ -427,7 +427,7 @@ export function Analytics() {
           <CardHeader>
             <div className="flex items-center gap-2">
               <TrendingUp className="w-5 h-5 text-indigo-400" />
-              <CardTitle>Peak Productivity Hours</CardTitle>
+              <CardTitle className="font-display">Peak Productivity Hours</CardTitle>
             </div>
             <CardDescription>
               {peakHour
@@ -467,7 +467,7 @@ export function Analytics() {
       <motion.div variants={itemVariants}>
       <Card className="glow-border">
         <CardHeader>
-          <CardTitle>Quick Insights</CardTitle>
+          <CardTitle className="font-display">Quick Insights</CardTitle>
         </CardHeader>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 px-6 pb-6">
           {[
