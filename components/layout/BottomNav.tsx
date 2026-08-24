@@ -28,7 +28,7 @@ export function BottomNav({ onMoreTap }: BottomNavProps) {
   const pathname = usePathname();
 
   // Check if current page is one of the "more" pages
-  const morePaths = ['/goals', '/analytics', '/calendar', '/social', '/settings', '/profile', '/paywall'];
+  const morePaths = ['/goals', '/calendar', '/social', '/settings', '/profile', '/paywall'];
   const isMoreActive = morePaths.some((p) => pathname.startsWith(p));
 
   return (

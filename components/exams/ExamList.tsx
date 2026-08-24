@@ -4,11 +4,9 @@ import { useState, useMemo, useEffect } from 'react';
 import { Exam, Task } from '@/lib/supabase/types';
 import { useAppStore } from '@/lib/store';
 import { Card, CardHeader, ProgressBar, Button, Modal, Input, Textarea, SelectField, SubjectBadge, Badge, ConfirmDialog } from '@/components/ui';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { motion, AnimatePresence } from 'framer-motion';
 import { formatDate, getDaysUntil, cn, isExamType } from '@/lib/utils';
 import Link from 'next/link';
-import { ExamPrep } from './ExamPrep';
 import {
   GraduationCap,
   Plus,
@@ -589,16 +587,12 @@ export function ExamList() {
         })}
       </div>
 
-      <Tabs defaultValue="exams">
+      <div>
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <TabsList className="bg-muted/50">
-            <TabsTrigger value="exams" className="flex items-center gap-1.5">
-              <GraduationCap className="w-3.5 h-3.5" /> Exams
-            </TabsTrigger>
-            <TabsTrigger value="prep" className="flex items-center gap-1.5">
-              <BookOpen className="w-3.5 h-3.5" /> Exam Prep
-            </TabsTrigger>
-          </TabsList>
+          <div>
+            <h1 className="text-2xl font-bold font-display">Exams</h1>
+            <p className="text-sm text-muted-foreground">Track upcoming exams and preparation progress</p>
+          </div>
           <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
             <Button onClick={() => setShowForm(true)} size="sm">
               <Plus className="w-4 h-4" /> Add Exam
@@ -606,7 +600,7 @@ export function ExamList() {
           </motion.div>
         </div>
 
-        <TabsContent value="exams" className="mt-5">
+        <div className="mt-5">
           <div className="flex items-center gap-2 bg-muted/50 rounded-xl p-1.5 w-fit mb-5">
             {(['upcoming', 'all', 'past'] as const).map((f) => (
               <button
@@ -661,12 +655,8 @@ export function ExamList() {
               )}
             </AnimatePresence>
           </div>
-        </TabsContent>
-
-        <TabsContent value="prep" className="mt-5">
-          <ExamPrep />
-        </TabsContent>
-      </Tabs>
+        </div>
+      </div>
 
       <ExamForm
         isOpen={showForm}

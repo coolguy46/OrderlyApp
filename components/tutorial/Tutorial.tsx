@@ -6,7 +6,7 @@ import { cn } from '@/lib/utils';
 import {
   X, ChevronRight, ChevronLeft, CheckCircle2,
   LayoutDashboard, CheckSquare, Calendar, Target,
-  Timer, BarChart3, GraduationCap, Crown, Sparkles,
+  Timer, GraduationCap, Crown, Sparkles,
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 
@@ -59,11 +59,11 @@ const TUTORIAL_STEPS: TutorialStep[] = [
   {
     id: 'goals',
     title: 'Goals',
-    description: 'Set and track academic goals. Use Auto-Track to sync with completed tasks automatically. The Resume tab helps you track skills and experience.',
+    description: 'Set and track short-term and long-term academic goals with clear progress indicators and deadlines.',
     icon: Target,
     color: 'amber',
     page: '/goals',
-    tip: 'Goals with unit "tasks" can be auto-tracked from your task completions',
+    tip: 'Update goal progress as you complete each milestone',
   },
   {
     id: 'study',
@@ -76,26 +76,17 @@ const TUTORIAL_STEPS: TutorialStep[] = [
   },
   {
     id: 'exams',
-    title: 'Exams & Exam Prep',
-    description: 'Track upcoming exams and prepare with flashcards, MCQ quizzes, file uploads, and SAT/ACT prep tools. Create study sets linked to specific exams.',
+    title: 'Exams',
+    description: 'Track upcoming exams, locations, subjects, dates, and your preparation progress in one place.',
     icon: GraduationCap,
     color: 'violet',
     page: '/exams',
-    tip: 'Switch to "Exam Prep" tab to create flashcard sets and MCQ quizzes',
-  },
-  {
-    id: 'analytics',
-    title: 'Analytics',
-    description: 'Deep insights into your study habits, task completion rates, subject breakdown, and productivity trends over time.',
-    icon: BarChart3,
-    color: 'cyan',
-    page: '/analytics',
-    tip: 'Check your weekly report every Sunday',
+    tip: 'Update preparation progress as the exam gets closer',
   },
   {
     id: 'pro',
     title: 'Upgrade to Pro 🚀',
-    description: 'Unlock unlimited goals, AI Scheduler, advanced exam prep, desktop notifications, and much more with Orderly Pro.',
+    description: 'Unlock unlimited goals, AI scheduling, desktop notifications, and more with Orderly Pro.',
     icon: Crown,
     color: 'amber',
     page: '/paywall',

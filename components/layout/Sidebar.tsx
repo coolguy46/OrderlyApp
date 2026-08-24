@@ -10,7 +10,6 @@ import {
   Calendar,
   Target,
   Timer,
-  BarChart3,
   GraduationCap,
   ChevronLeft,
   ChevronRight,
@@ -28,7 +27,6 @@ const navItems = [
   { href: '/goals', icon: Target, label: 'Goals' },
   { href: '/study', icon: Timer, label: 'Study' },
   { href: '/exams', icon: GraduationCap, label: 'Exams' },
-  { href: '/analytics', icon: BarChart3, label: 'Analytics' },
   { href: '/settings', icon: Settings, label: 'Settings' },
 ];
 

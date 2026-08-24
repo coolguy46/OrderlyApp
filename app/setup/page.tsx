@@ -13,7 +13,6 @@ import {
   ArrowLeft,
   CheckSquare,
   Timer,
-  BarChart3,
   Users,
   GraduationCap,
   User,
@@ -151,9 +150,8 @@ export default function SetupPage() {
   const features = [
     { icon: CheckSquare, label: 'Smart Tasks', desc: 'Manage assignments with priorities & due dates' },
     { icon: Timer, label: 'Pomodoro Timer', desc: 'Focus sessions with gamified progress' },
-    { icon: BarChart3, label: 'Analytics', desc: 'Track your study habits over time' },
     { icon: Users, label: 'Social', desc: 'Study with friends & compete on leaderboards' },
-    { icon: GraduationCap, label: 'Exam Prep', desc: 'Track preparation for upcoming exams' },
+    { icon: GraduationCap, label: 'Exam Tracking', desc: 'Track preparation for upcoming exams' },
     { icon: BookOpen, label: 'LMS Sync', desc: 'Import from Canvas & Google Classroom' },
   ];
 

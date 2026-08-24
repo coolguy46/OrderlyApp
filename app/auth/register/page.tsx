@@ -17,7 +17,7 @@ import { signInWithGoogle } from '@/lib/supabase/services';
 const features = [
   'Smart task management with priorities',
   'Pomodoro timer with gamification',
-  'Progress tracking & analytics',
+  'Visual progress tracking',
   'Social study competitions',
 ];
 

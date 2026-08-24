@@ -26,18 +26,13 @@ const FREE_FEATURES = [
   'Basic study timer',
   'Goal tracking (3 goals)',
   'Calendar view',
-  'Basic analytics',
+  'Dashboard summaries',
 ];
 
 const PRO_FEATURES = [
   'Unlimited tasks & goals',
   'AI Smart Scheduler',
-  'Exam Prep (Flashcards & MCQs)',
-  'File upload for study materials',
-  'Resume / Portfolio tracker',
   'Desktop notifications',
-  'SAT/ACT Prep tracker',
-  'Advanced analytics',
   'Priority support',
   'Early access to new features',
 ];
@@ -112,7 +107,7 @@ export function Paywall() {
         </div>
         <h1 className="text-4xl font-bold font-display">Unlock Your Full Potential</h1>
         <p className="text-muted-foreground text-lg max-w-lg mx-auto">
-          Supercharge your studies with AI scheduling, unlimited goals, and powerful exam prep tools.
+          Supercharge your studies with AI scheduling, unlimited goals, and focused productivity tools.
         </p>
       </motion.div>
 
@@ -237,11 +232,11 @@ export function Paywall() {
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
           {[
             { icon: Brain, title: 'AI Scheduler', desc: 'Smart task scheduling based on your workload and exam dates', color: 'indigo' },
-            { icon: GraduationCap, title: 'Exam Prep', desc: 'Flashcards, MCQ quizzes, and file uploads for every subject', color: 'purple' },
-            { icon: Target, title: 'Unlimited Goals', desc: 'Track unlimited academic and personal goals with auto-tracking', color: 'blue' },
+            { icon: GraduationCap, title: 'Exam Tracking', desc: 'Keep dates, subjects, locations, and preparation progress organized', color: 'purple' },
+            { icon: Target, title: 'Unlimited Goals', desc: 'Track unlimited academic and personal goals', color: 'blue' },
             { icon: Bell, title: 'Notifications', desc: 'Desktop reminders for tasks, exams, and study sessions', color: 'amber' },
             { icon: Calendar, title: 'AI Calendar', desc: 'Intelligent scheduling that adapts to your study patterns', color: 'green' },
-            { icon: Clock, title: 'Timer Analytics', desc: 'Deep insights into your study habits and productivity', color: 'rose' },
+            { icon: Clock, title: 'Study Tracking', desc: 'Keep an accurate record of focused study time', color: 'rose' },
           ].map(f => {
             const Icon = f.icon;
             return (
@@ -260,9 +255,9 @@ export function Paywall() {
       {/* Testimonials */}
       <motion.div variants={itemVariants} className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         {[
-          { name: 'Alex K.', major: 'Pre-Med', text: 'The exam prep flashcards saved my finals week. 10/10!' },
+          { name: 'Alex K.', major: 'Pre-Med', text: 'The exam tracker kept my finals week organized. 10/10!' },
           { name: 'Sarah M.', major: 'Computer Science', text: 'AI scheduler helped me balance 5 courses and a job.' },
-          { name: 'Jordan L.', major: 'Business', text: 'Finally hit my GPA goals with the goal auto-tracker.' },
+          { name: 'Jordan L.', major: 'Business', text: 'Finally stayed consistent with my semester goals.' },
         ].map(t => (
           <div key={t.name} className="p-5 rounded-2xl border border-border bg-card">
             <div className="flex items-center gap-1 mb-3">
