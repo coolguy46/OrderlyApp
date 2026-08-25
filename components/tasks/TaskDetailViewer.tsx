@@ -150,10 +150,10 @@ export function TaskDetailViewer({ task, open, onOpenChange, onEdit }: TaskDetai
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl max-h-[85vh] flex flex-col overflow-hidden p-0">
+      <DialogContent className="max-h-[90dvh] overflow-hidden p-0 sm:max-h-[85dvh] sm:max-w-2xl sm:overflow-hidden flex flex-col">
         {/* Header with gradient accent */}
         <div className={cn(
-          'relative px-6 pt-6 pb-4',
+          'relative shrink-0 px-6 pt-6 pb-4',
           isOverdue && 'bg-gradient-to-b from-red-500/5 to-transparent',
           isInProgress && !isOverdue && 'bg-gradient-to-b from-indigo-500/5 to-transparent',
           isCompleted && 'bg-gradient-to-b from-emerald-500/5 to-transparent'
@@ -238,7 +238,7 @@ export function TaskDetailViewer({ task, open, onOpenChange, onEdit }: TaskDetai
         </div>
 
         {/* Content */}
-        <div className="flex-1 -mt-1 px-6 min-h-0 overflow-y-auto">
+        <div className="flex-1 -mt-1 min-h-0 overflow-y-auto overscroll-contain px-6 touch-pan-y [-webkit-overflow-scrolling:touch]">
           <div className="space-y-5 pb-4">
             {/* Info cards */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
@@ -307,7 +307,7 @@ export function TaskDetailViewer({ task, open, onOpenChange, onEdit }: TaskDetai
                 <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                   Description
                 </h4>
-                <div className="p-4 rounded-xl bg-muted/20 border border-border/40">
+                <div className="p-4 rounded-xl bg-muted/20 border border-border/40 break-words [&_*]:max-w-full">
                   {formatDescription(task.description)}
                 </div>
               </div>
