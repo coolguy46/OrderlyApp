@@ -54,6 +54,10 @@ const GC_SUBJECT_COLORS = [
   '#06b6d4', '#ef4444', '#14b8a6', '#f97316', '#6366f1',
 ];
 
+function formatCanvasDueTime(date: Date): string {
+  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+}
+
 export default function IntegrationsPage() {
   const { addTask, addExam, tasks, exams, subjects, addSubject, user, refreshData } = useAppStore();
   const [removedCount, setRemovedCount] = useState(0);
@@ -275,6 +279,7 @@ export default function IntegrationsPage() {
       if (!user) return;
       
       let importedCount = 0;
+      let updatedCount = 0;
       setRemovedCount(removed);
 
       // Build a map of course name -> subject ID, creating new subjects as needed
@@ -289,7 +294,7 @@ export default function IntegrationsPage() {
       // Collect unique course names from assignments
       const uniqueCourseNames = new Set<string>();
       for (const a of allAssignments) {
-        if (a.courseName) uniqueCourseNames.add(a.courseName);
+        if (a.courseName && a.courseName !== 'Unknown Course') uniqueCourseNames.add(a.courseName);
       }
 
       // Create subjects for new courses
@@ -318,54 +323,97 @@ export default function IntegrationsPage() {
         }
       }
       
-      // Get existing Canvas task external IDs from the database
-      const existingCanvasExternalIds = new Set(
-        tasks
+      // Existing items must be updated as Canvas changes. The previous importer
+      // skipped them entirely, which left bad dates and missing subjects stuck.
+      const existingCanvasTasks = new Map(
+        useAppStore.getState().tasks
           .filter(t => t.source === 'canvas' && t.external_id)
-          .map(t => t.external_id)
+          .map(t => [t.external_id!, t] as const)
       );
       
       for (const assignment of allAssignments) {
         if (!assignment.dueDate) continue;
         const dueDate = new Date(assignment.dueDate);
-        if (dueDate < new Date()) continue;
-        
-        // Skip if already exists in the store (by external_id)
-        if (existingCanvasExternalIds.has(assignment.id)) continue;
-
         const taskTitle = `[Canvas] ${assignment.title}`;
-        const subjectId = assignment.courseName ? (courseNameToSubjectId[assignment.courseName] || null) : null;
+        const existingTask = existingCanvasTasks.get(assignment.id);
+        const resolvedCourseName = assignment.courseName !== 'Unknown Course'
+          ? assignment.courseName
+          : existingTask?.course_name || null;
+        const subjectId = resolvedCourseName
+          ? courseNameToSubjectId[resolvedCourseName] || existingTask?.subject_id || null
+          : existingTask?.subject_id || null;
+        const description = assignment.description || `Course: ${resolvedCourseName || 'Canvas'}`;
+        const dueTime = assignment.hasDueTime ? formatCanvasDueTime(dueDate) : null;
 
-        // Create task in Supabase
-        await addTask({
-          user_id: user.id,
-          title: taskTitle,
-          description: assignment.description || `Course: ${assignment.courseName}`,
-          priority: assignment.type === 'exam' ? 'high' : 'medium',
-          status: 'pending',
-          due_date: dueDate.toISOString(),
-          due_time: null,
-          recurrence: 'none',
-          recurrence_days: null,
-          subject_id: subjectId,
-          completed_at: null,
-          source: 'canvas',
-          external_id: assignment.id,
-          external_url: assignment.url || null,
-          course_name: assignment.courseName || null,
-          assignment_type: assignment.type || 'assignment',
-        });
+        if (existingTask) {
+          const existingDueTime = existingTask.due_time || null;
+          const existingDueDate = existingTask.due_date ? new Date(existingTask.due_date).getTime() : null;
+          const hasChanges =
+            existingTask.title !== taskTitle ||
+            existingTask.description !== description ||
+            existingDueDate !== dueDate.getTime() ||
+            existingDueTime !== dueTime ||
+            existingTask.subject_id !== subjectId ||
+            existingTask.external_url !== (assignment.url || null) ||
+            existingTask.course_name !== resolvedCourseName ||
+            existingTask.assignment_type !== (assignment.type || 'assignment');
 
-        // Also create an exam entry if this is an exam/test/quiz
+          if (hasChanges) {
+            await db.updateTask(existingTask.id, {
+              title: taskTitle,
+              description,
+              due_date: dueDate.toISOString(),
+              due_time: dueTime,
+              subject_id: subjectId,
+              external_url: assignment.url || null,
+              course_name: resolvedCourseName,
+              assignment_type: assignment.type || 'assignment',
+            });
+            updatedCount++;
+          }
+        } else {
+          // Don't import already-expired historical events as brand-new tasks.
+          if (dueDate < new Date()) continue;
+
+          // Create task in Supabase
+          await addTask({
+            user_id: user.id,
+            title: taskTitle,
+            description,
+            priority: assignment.type === 'exam' ? 'high' : 'medium',
+            status: 'pending',
+            due_date: dueDate.toISOString(),
+            due_time: dueTime,
+            recurrence: 'none',
+            recurrence_days: null,
+            subject_id: subjectId,
+            completed_at: null,
+            source: 'canvas',
+            external_id: assignment.id,
+            external_url: assignment.url || null,
+            course_name: resolvedCourseName,
+            assignment_type: assignment.type || 'assignment',
+          });
+          importedCount++;
+        }
+
+        // Keep the corresponding exam entry aligned with Canvas too.
         if (isExamType(assignment.title, assignment.type)) {
-          const examExists = exams.some(
+          const existingExam = useAppStore.getState().exams.find(
             (e) => e.title === taskTitle || e.title === assignment.title
           );
-          if (!examExists) {
+          if (existingExam) {
+            await db.updateExam(existingExam.id, {
+              title: taskTitle,
+              description,
+              exam_date: dueDate.toISOString(),
+              subject_id: subjectId,
+            });
+          } else if (dueDate >= new Date()) {
             await addExam({
               user_id: user.id,
               title: taskTitle,
-              description: assignment.description || `Course: ${assignment.courseName}`,
+              description,
               exam_date: dueDate.toISOString(),
               location: null,
               subject_id: subjectId,
@@ -373,12 +421,10 @@ export default function IntegrationsPage() {
             });
           }
         }
-
-        importedCount++;
       }
       
-      if (importedCount > 0 || removed > 0) {
-        console.log(`Canvas sync: imported ${importedCount} new assignments, removed ${removed} submitted/deleted assignments`);
+      if (importedCount > 0 || updatedCount > 0 || removed > 0) {
+        console.log(`Canvas sync: imported ${importedCount}, updated ${updatedCount}, removed ${removed}`);
         // Refresh data to reflect changes
         await refreshData();
       }

@@ -79,7 +79,9 @@ export function useCanvasSync(options: UseCanvasSyncOptions = {}): UseCanvasSync
         // Convert date strings back to Date objects
         const hydrated = parsed.map((a: CanvasAssignment) => ({
           ...a,
-          dueDate: a.dueDate ? new Date(a.dueDate) : undefined,
+          dueDate: a.dueDateOnly
+            ? new Date(`${a.dueDateOnly}T12:00:00`)
+            : a.dueDate ? new Date(a.dueDate) : undefined,
           startDate: a.startDate ? new Date(a.startDate) : undefined,
           endDate: a.endDate ? new Date(a.endDate) : undefined,
         }));
@@ -128,7 +130,9 @@ export function useCanvasSync(options: UseCanvasSyncOptions = {}): UseCanvasSync
       // Convert date strings to Date objects
       const hydratedAssignments: CanvasAssignment[] = data.assignments.map((a: CanvasAssignment) => ({
         ...a,
-        dueDate: a.dueDate ? new Date(a.dueDate) : undefined,
+        dueDate: a.dueDateOnly
+          ? new Date(`${a.dueDateOnly}T12:00:00`)
+          : a.dueDate ? new Date(a.dueDate) : undefined,
         startDate: a.startDate ? new Date(a.startDate) : undefined,
         endDate: a.endDate ? new Date(a.endDate) : undefined,
       }));

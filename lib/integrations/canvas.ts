@@ -8,6 +8,9 @@ export interface CanvasAssignment {
   title: string;
   description?: string;
   dueDate?: Date;
+  /** Original YYYY-MM-DD value for all-day iCal events. */
+  dueDateOnly?: string;
+  hasDueTime: boolean;
   startDate?: Date;
   endDate?: Date;
   url?: string;
@@ -21,7 +24,9 @@ interface ICalEvent {
   description?: string;
   htmlDescription?: string; // X-ALT-DESC for rich HTML content
   dtstart?: string;
+  dtstartProperty?: string;
   dtend?: string;
+  dtendProperty?: string;
   url?: string;
   sequence?: string;
   dtstamp?: string;
@@ -32,6 +37,7 @@ interface ICalEvent {
  */
 export function parseICalFile(icalContent: string): CanvasAssignment[] {
   const assignments: CanvasAssignment[] = [];
+  const calendarTimeZone = icalContent.match(/^X-WR-TIMEZONE:(.+)$/mi)?.[1].trim();
   
   // Split into individual events
   const events = icalContent.split('BEGIN:VEVENT');
@@ -41,7 +47,7 @@ export function parseICalFile(icalContent: string): CanvasAssignment[] {
     
     const event = parseEvent(eventBlock);
     if (event) {
-      const assignment = convertEventToAssignment(event);
+      const assignment = convertEventToAssignment(event, calendarTimeZone);
       assignments.push(assignment);
     }
   });
@@ -114,9 +120,11 @@ function setEventProperty(event: ICalEvent, key: string, value: string, fullKey?
       break;
     case 'DTSTART':
       event.dtstart = decodedValue;
+      event.dtstartProperty = fullKey;
       break;
     case 'DTEND':
       event.dtend = decodedValue;
+      event.dtendProperty = fullKey;
       break;
     case 'URL':
       event.url = decodedValue;
@@ -133,36 +141,99 @@ function setEventProperty(event: ICalEvent, key: string, value: string, fullKey?
 /**
  * Parse iCal date/time format to JavaScript Date
  */
-function parseICalDate(dateString?: string): Date | undefined {
+interface ParsedICalDate {
+  date: Date;
+  dateOnly?: string;
+  hasTime: boolean;
+}
+
+function zonedDateTimeToUtc(
+  year: number,
+  month: number,
+  day: number,
+  hour: number,
+  minute: number,
+  second: number,
+  timeZone: string
+): Date {
+  const utcGuess = Date.UTC(year, month, day, hour, minute, second);
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  });
+
+  const getOffset = (timestamp: number) => {
+    const parts = Object.fromEntries(
+      formatter.formatToParts(new Date(timestamp)).map(({ type, value }) => [type, value])
+    );
+    const representedAsUtc = Date.UTC(
+      Number(parts.year),
+      Number(parts.month) - 1,
+      Number(parts.day),
+      Number(parts.hour),
+      Number(parts.minute),
+      Number(parts.second)
+    );
+    return representedAsUtc - timestamp;
+  };
+
+  let result = utcGuess - getOffset(utcGuess);
+  // Recalculate once to handle a DST boundary between the guess and result.
+  result = utcGuess - getOffset(result);
+  return new Date(result);
+}
+
+/** Parse an iCal DATE or DATE-TIME without depending on the server's timezone. */
+function parseICalDate(
+  dateString?: string,
+  property?: string,
+  calendarTimeZone?: string
+): ParsedICalDate | undefined {
   if (!dateString) return undefined;
-  
-  // Remove VALUE=DATE if present
-  const cleanDate = dateString.replace(/VALUE=DATE[;:]*/g, '');
-  
-  // Format: YYYYMMDD or YYYYMMDDTHHMMSSZ
-  if (cleanDate.length === 8) {
-    // Date only (YYYYMMDD)
-    const year = parseInt(cleanDate.substring(0, 4));
-    const month = parseInt(cleanDate.substring(4, 6)) - 1; // JS months are 0-indexed
-    const day = parseInt(cleanDate.substring(6, 8));
-    return new Date(year, month, day);
-  } else if (cleanDate.includes('T')) {
-    // DateTime format (YYYYMMDDTHHMMSSZ)
-    const year = parseInt(cleanDate.substring(0, 4));
-    const month = parseInt(cleanDate.substring(4, 6)) - 1;
-    const day = parseInt(cleanDate.substring(6, 8));
-    const hour = parseInt(cleanDate.substring(9, 11));
-    const minute = parseInt(cleanDate.substring(11, 13));
-    const second = parseInt(cleanDate.substring(13, 15));
-    
-    if (cleanDate.endsWith('Z')) {
-      return new Date(Date.UTC(year, month, day, hour, minute, second));
-    } else {
-      return new Date(year, month, day, hour, minute, second);
+
+  const cleanDate = dateString.trim();
+  const isDateOnly = property?.toUpperCase().includes('VALUE=DATE') || /^\d{8}$/.test(cleanDate);
+  const year = Number(cleanDate.substring(0, 4));
+  const month = Number(cleanDate.substring(4, 6)) - 1;
+  const day = Number(cleanDate.substring(6, 8));
+
+  if (![year, month, day].every(Number.isFinite)) return undefined;
+
+  if (isDateOnly) {
+    const dateOnly = `${String(year).padStart(4, '0')}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    // Noon UTC is only a transport value. The client reconstructs date-only
+    // events in its local timezone from dateOnly, avoiding a previous-day shift.
+    return { date: new Date(Date.UTC(year, month, day, 12)), dateOnly, hasTime: false };
+  }
+
+  if (!/^\d{8}T\d{4}(?:\d{2})?Z?$/.test(cleanDate)) return undefined;
+
+  const hour = Number(cleanDate.substring(9, 11));
+  const minute = Number(cleanDate.substring(11, 13));
+  const second = cleanDate.length >= 15 ? Number(cleanDate.substring(13, 15)) : 0;
+
+  if (cleanDate.endsWith('Z')) {
+    return { date: new Date(Date.UTC(year, month, day, hour, minute, second)), hasTime: true };
+  }
+
+  const propertyTimeZone = property?.match(/(?:^|;)TZID=(?:"([^"]+)"|([^;:]+))/i);
+  const timeZone = propertyTimeZone?.[1] || propertyTimeZone?.[2] || calendarTimeZone;
+
+  if (timeZone) {
+    try {
+      return { date: zonedDateTimeToUtc(year, month, day, hour, minute, second, timeZone), hasTime: true };
+    } catch {
+      // Invalid or unsupported TZID: fall through to deterministic UTC parsing.
     }
   }
-  
-  return undefined;
+
+  return { date: new Date(Date.UTC(year, month, day, hour, minute, second)), hasTime: true };
 }
 
 /**
@@ -170,15 +241,22 @@ function parseICalDate(dateString?: string): Date | undefined {
  * Format: "Assignment Name [p+ Course Name - Year]" or "Assignment Name [p Course Name]"
  */
 function extractCourseName(summary: string): string {
-  const match = summary.match(/\[p\+?\s*(.+?)\s*(?:-\s*\d{2}-\d{2})?(?:\/[A-Z0-9]+)?\]/);
-  return match ? match[1].trim() : 'Unknown Course';
+  const match = summary.match(/\[([^\]]+)\]\s*$/);
+  if (!match) return 'Unknown Course';
+
+  return match[1]
+    .trim()
+    .replace(/^\*?\s*p\+?\s+/i, '')
+    .replace(/^\*\s*/, '')
+    .replace(/\s*-\s*\d{2}-\d{2}(?:\/[A-Z0-9]+)?\s*$/i, '')
+    .trim() || 'Unknown Course';
 }
 
 /**
  * Remove course name from assignment title
  */
 function cleanAssignmentTitle(summary: string): string {
-  return summary.replace(/\s*\[p\+?[^\]]+\]\s*$/, '').trim();
+  return summary.replace(/\s*\[[^\]]+\]\s*$/, '').trim();
 }
 
 /**
@@ -223,11 +301,13 @@ function determineStatus(dueDate?: Date): CanvasAssignment['status'] {
 /**
  * Convert parsed iCal event to Canvas assignment
  */
-function convertEventToAssignment(event: ICalEvent): CanvasAssignment {
+function convertEventToAssignment(event: ICalEvent, calendarTimeZone?: string): CanvasAssignment {
   const courseName = extractCourseName(event.summary);
   const title = cleanAssignmentTitle(event.summary);
-  const dueDate = parseICalDate(event.dtstart);
-  const endDate = parseICalDate(event.dtend);
+  const parsedDueDate = parseICalDate(event.dtstart, event.dtstartProperty, calendarTimeZone);
+  const parsedEndDate = parseICalDate(event.dtend, event.dtendProperty, calendarTimeZone);
+  const dueDate = parsedDueDate?.date;
+  const endDate = parsedEndDate?.date;
   const type = determineAssignmentType(event.summary, event.description);
   const status = determineStatus(dueDate);
   
@@ -251,6 +331,8 @@ function convertEventToAssignment(event: ICalEvent): CanvasAssignment {
     title,
     description,
     dueDate,
+    dueDateOnly: parsedDueDate?.dateOnly,
+    hasDueTime: parsedDueDate?.hasTime ?? false,
     startDate: dueDate, // For Canvas, start date is typically the due date
     endDate,
     url: event.url,
