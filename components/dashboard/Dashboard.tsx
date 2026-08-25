@@ -13,7 +13,7 @@ import {
   Badge
 } from '@/components/ui';
 import { SubjectBadge } from '@/components/ui';
-import { TaskCard } from '@/components/tasks';
+import { TaskCard, TaskForm } from '@/components/tasks';
 import { formatDuration, getDaysUntil, cn, isExamType } from '@/lib/utils';
 import { format, isToday, startOfDay, startOfMonth, endOfMonth, startOfWeek, endOfWeek, addDays } from 'date-fns';
 import Link from 'next/link';
@@ -94,6 +94,7 @@ export function Dashboard() {
   const { tasks, goals, exams, studySessions, subjects, user, activeStudySeconds } = useAppStore();
   const [mounted, setMounted] = useState(false);
   const [currentDate, setCurrentDate] = useState(new Date());
+  const [showTaskForm, setShowTaskForm] = useState(false);
   // Store selected date as a stable string to avoid Date reference / timezone issues
   const [selectedDateStr, setSelectedDateStr] = useState<string | null>(null);
 
@@ -263,12 +264,23 @@ export function Dashboard() {
             {mounted ? format(new Date(), "EEEE, MMMM d, yyyy") : '\u00A0'}
           </p>
         </div>
-        <Link href="/study" className="self-start sm:self-auto">
-          <Button size="sm" className="gap-2 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 shadow-lg shadow-indigo-500/20 rounded-xl text-white h-9 sm:h-10 sm:px-5">
-            <Play className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-            <span className="text-xs sm:text-sm">Start Study</span>
+        <div className="flex items-center gap-2 self-start sm:self-auto">
+          <Button
+            size="sm"
+            variant="outline"
+            className="gap-2 rounded-xl h-9 sm:h-10 sm:px-5"
+            onClick={() => setShowTaskForm(true)}
+          >
+            <Plus className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+            <span className="text-xs sm:text-sm">New Task</span>
           </Button>
-        </Link>
+          <Link href="/study">
+            <Button size="sm" className="gap-2 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 shadow-lg shadow-indigo-500/20 rounded-xl text-white h-9 sm:h-10 sm:px-5">
+              <Play className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+              <span className="text-xs sm:text-sm">Start Study</span>
+            </Button>
+          </Link>
+        </div>
       </motion.div>
 
       {/* Stats Grid - Animated */}
@@ -360,12 +372,15 @@ export function Dashboard() {
                     </motion.div>
                     <p className="font-medium text-sm">All caught up!</p>
                     <p className="text-xs mb-3">No upcoming tasks. Great job! 🎉</p>
-                    <Link href="/tasks">
-                      <Button size="sm" variant="outline" className="gap-1">
-                        <Plus className="w-3 h-3" />
-                        Create Task
-                      </Button>
-                    </Link>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="gap-1"
+                      onClick={() => setShowTaskForm(true)}
+                    >
+                      <Plus className="w-3 h-3" />
+                      Create Task
+                    </Button>
                   </motion.div>
                 ) : (
                   <motion.div
@@ -613,24 +628,43 @@ export function Dashboard() {
           <CardContent className="p-2.5 sm:p-3">
             <div className="grid grid-cols-4 gap-1.5 sm:gap-2">
               {[
-                { href: '/tasks', icon: Plus, label: 'Add Task', gradient: 'from-emerald-500 to-teal-500' },
+                { href: null, icon: Plus, label: 'Add Task', gradient: 'from-emerald-500 to-teal-500' },
                 { href: '/study', icon: Clock, label: 'Study', gradient: 'from-indigo-500 to-blue-500' },
                 { href: '/goals', icon: Target, label: 'Goals', gradient: 'from-purple-500 to-pink-500' },
                 { href: '/calendar', icon: Calendar, label: 'Calendar', gradient: 'from-blue-500 to-cyan-500' },
-              ].map((action) => (
-                <Link key={action.href} href={action.href}>
-                  <Button variant="outline" className="w-full h-auto py-3 sm:py-3.5 flex-col gap-1.5 sm:gap-2 hover:bg-muted/50 hover:border-border transition-all group active:scale-[0.97]">
+              ].map((action) => {
+                const actionButton = (
+                  <Button
+                    variant="outline"
+                    className="w-full h-auto py-3 sm:py-3.5 flex-col gap-1.5 sm:gap-2 hover:bg-muted/50 hover:border-border transition-all group active:scale-[0.97]"
+                    onClick={action.href ? undefined : () => setShowTaskForm(true)}
+                  >
                     <div className={cn('p-1.5 rounded-lg bg-gradient-to-br opacity-80 group-hover:opacity-100 transition-opacity', action.gradient)}>
                       <action.icon className="w-3.5 h-3.5 text-white" />
                     </div>
                     <span className="text-[10px] sm:text-xs font-medium">{action.label}</span>
                   </Button>
-                </Link>
-              ))}
+                );
+
+                return action.href ? (
+                  <Link key={action.label} href={action.href}>
+                    {actionButton}
+                  </Link>
+                ) : (
+                  <div key={action.label}>
+                    {actionButton}
+                  </div>
+                );
+              })}
             </div>
           </CardContent>
         </Card>
       </motion.div>
+
+      <TaskForm
+        isOpen={showTaskForm}
+        onClose={() => setShowTaskForm(false)}
+      />
     </motion.div>
   );
 }
