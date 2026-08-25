@@ -5,9 +5,46 @@ import { supabase } from '@/lib/supabase/client';
 import * as db from '@/lib/supabase/services';
 import type { FriendWithProfile } from '@/lib/supabase/services';
 import { toast } from 'sonner';
+import { useScheduleStore } from '@/lib/schedule/store';
+import {
+  addLocalDays,
+  isLocalDate,
+  localDateFromIso,
+  localDateTimeToIso,
+  localTimeFromIso,
+} from '@/lib/schedule/selectors';
+import type { LocalDate, ScheduleRecurrence } from '@/lib/schedule/types';
 
 // Module-level subscription ref to prevent duplicate listeners
 let authSubscription: { unsubscribe: () => void } | null = null;
+
+function nextScheduleDate(
+  currentDate: LocalDate,
+  recurrence: ScheduleRecurrence,
+  recurrenceDays: number[] | null | undefined,
+): LocalDate {
+  if (recurrence === 'daily') return addLocalDays(currentDate, 1);
+  if (recurrence === 'weekly') {
+    const days = [...new Set(recurrenceDays || [])]
+      .filter(day => Number.isInteger(day) && day >= 0 && day <= 6);
+    if (days.length === 0) return addLocalDays(currentDate, 7);
+    for (let offset = 1; offset <= 7; offset += 1) {
+      const candidate = addLocalDays(currentDate, offset);
+      if (days.includes(new Date(`${candidate}T12:00:00Z`).getUTCDay())) return candidate;
+    }
+  }
+  if (recurrence === 'monthly') {
+    const [year, month, day] = currentDate.split('-').map(Number);
+    const targetMonthStart = new Date(Date.UTC(year, month, 1));
+    const targetYear = targetMonthStart.getUTCFullYear();
+    const targetMonth = targetMonthStart.getUTCMonth();
+    const lastDay = new Date(Date.UTC(targetYear, targetMonth + 1, 0)).getUTCDate();
+    return new Date(Date.UTC(targetYear, targetMonth, Math.min(day, lastDay)))
+      .toISOString()
+      .slice(0, 10);
+  }
+  return currentDate;
+}
 // Guard against concurrent data loads
 let isLoadingData = false;
 // Guard against re-initializing in React Strict Mode
@@ -364,6 +401,8 @@ export const useAppStore = create<AppState>()(
             set((state) => ({
               tasks: state.tasks.filter((task) => task.id !== id),
             }));
+            const userId = get().user?.id;
+            if (userId) useScheduleStore.getState().removeTaskSchedule(userId, id);
             toast.success('Task deleted');
           }
         } catch (error) {
@@ -387,6 +426,9 @@ export const useAppStore = create<AppState>()(
             // Auto-create next occurrence for recurring tasks
             const completedTask = get().tasks.find((t) => t.id === id) || result;
             if (completedTask.recurrence && completedTask.recurrence !== 'none') {
+              const scheduleState = useScheduleStore.getState();
+              const completedSchedule = scheduleState.entriesByUser[completedTask.user_id]?.[id] || null;
+              const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
               const currentDue = completedTask.due_date ? new Date(completedTask.due_date) : new Date();
               let nextDue: Date;
               switch (completedTask.recurrence) {
@@ -417,24 +459,79 @@ export const useAppStore = create<AppState>()(
                 default:
                   nextDue = currentDue;
               }
-              
-              const nextTask = await db.createTask({
-                user_id: completedTask.user_id,
-                title: completedTask.title,
-                description: completedTask.description,
-                priority: completedTask.priority,
-                status: 'pending',
-                subject_id: completedTask.subject_id,
-                due_date: nextDue.toISOString(),
-                due_time: completedTask.due_time || null,
-                recurrence: completedTask.recurrence,
-                recurrence_days: completedTask.recurrence_days || null,
-                completed_at: null,
-              });
-              
-              if (nextTask) {
-                set((state) => ({ tasks: [nextTask, ...state.tasks] }));
-                toast.success(`Next ${completedTask.recurrence} task created`);
+
+              const scheduleRecurrence: ScheduleRecurrence = completedSchedule?.recurrence
+                && completedSchedule.recurrence !== 'none'
+                ? completedSchedule.recurrence
+                : completedTask.recurrence;
+              const currentScheduleDate = completedSchedule?.scheduledDate
+                && isLocalDate(completedSchedule.scheduledDate)
+                ? completedSchedule.scheduledDate
+                : localDateFromIso(currentDue.toISOString(), timeZone);
+              const nextScheduleDateKey = currentScheduleDate
+                ? nextScheduleDate(
+                    currentScheduleDate,
+                    scheduleRecurrence,
+                    completedSchedule?.recurrenceDays || completedTask.recurrence_days,
+                  )
+                : null;
+              const boundedSeriesFinished = Boolean(
+                completedSchedule?.recurrenceEndDate
+                && nextScheduleDateKey
+                && nextScheduleDateKey > completedSchedule.recurrenceEndDate,
+              );
+
+              if (!boundedSeriesFinished) {
+                const nextTask = await db.createTask({
+                  user_id: completedTask.user_id,
+                  title: completedTask.title,
+                  description: completedTask.description,
+                  priority: completedTask.priority,
+                  status: 'pending',
+                  subject_id: completedTask.subject_id,
+                  // A repeating scheduled activity without a deadline should
+                  // stay deadline-free when its next occurrence is created.
+                  due_date: completedTask.due_date || !completedSchedule
+                    ? nextDue.toISOString()
+                    : null,
+                  due_time: completedTask.due_time || null,
+                  recurrence: completedTask.recurrence,
+                  recurrence_days: completedTask.recurrence_days || null,
+                  completed_at: null,
+                });
+
+                if (nextTask) {
+                  set((state) => ({ tasks: [nextTask, ...state.tasks] }));
+
+                  if (completedSchedule && nextScheduleDateKey) {
+                    const startTime = completedSchedule.startAt
+                      ? localTimeFromIso(completedSchedule.startAt, timeZone)
+                      : null;
+                    const nextStartAt = startTime
+                      ? localDateTimeToIso(nextScheduleDateKey, `${startTime}:00`, timeZone)
+                      : null;
+                    scheduleState.upsertTaskSchedule(completedTask.user_id, nextTask.id, {
+                      scheduledDate: nextScheduleDateKey,
+                      startAt: nextStartAt,
+                      durationSeconds: completedSchedule.durationSeconds,
+                      recurrence: scheduleRecurrence,
+                      recurrenceDays: completedSchedule.recurrenceDays || completedTask.recurrence_days,
+                      recurrenceEndDate: completedSchedule.recurrenceEndDate,
+                    });
+                    for (const [sourceDate, override] of Object.entries(completedSchedule.occurrenceOverrides)) {
+                      if (sourceDate >= nextScheduleDateKey) {
+                        scheduleState.setOccurrenceOverride(
+                          completedTask.user_id,
+                          nextTask.id,
+                          sourceDate,
+                          override,
+                        );
+                      }
+                    }
+                  }
+
+                  toast.success(`Next ${completedTask.recurrence} task created`);
+                }
               }
             }
             
@@ -661,10 +758,14 @@ export const useAppStore = create<AppState>()(
       removeOrphanedCanvasTasks: async (currentCanvasIds: string[]) => {
         const user = get().user;
         if (!user) return 0;
+        const staleTaskIds = get().tasks
+          .filter((task) => task.source === 'canvas' && task.external_id && !currentCanvasIds.includes(task.external_id))
+          .map((task) => task.id);
         
         const removedCount = await db.removeOrphanedCanvasTasks(user.id, currentCanvasIds);
         
         if (removedCount > 0) {
+          useScheduleStore.getState().clearTaskSchedules(user.id, staleTaskIds);
           // Refresh tasks from database
           const tasks = await db.getTasks(user.id);
           set({ tasks });

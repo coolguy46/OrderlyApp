@@ -13,6 +13,10 @@ import {
 } from '@/components/ui';
 import { SubjectBadge } from '@/components/ui';
 import { formatDate, getDaysUntil, cn, isTaskOverdue, isExamType } from '@/lib/utils';
+import { useScheduleStore } from '@/lib/schedule/store';
+import { formatDurationInput, scheduledEndAt, selectScheduleEntry } from '@/lib/schedule/selectors';
+import type { ScheduleOccurrence } from '@/lib/schedule/types';
+import { format } from 'date-fns';
 import { motion, AnimatePresence } from 'framer-motion';
 import Link from 'next/link';
 import {
@@ -36,10 +40,14 @@ interface TaskDetailViewerProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onEdit?: (task: Task) => void;
+  scheduleOccurrence?: ScheduleOccurrence | null;
 }
 
-export function TaskDetailViewer({ task, open, onOpenChange, onEdit }: TaskDetailViewerProps) {
+export function TaskDetailViewer({ task, open, onOpenChange, onEdit, scheduleOccurrence }: TaskDetailViewerProps) {
   const { subjects, completeTask, updateTask } = useAppStore();
+  const scheduleEntry = useScheduleStore((state) =>
+    selectScheduleEntry(state.entriesByUser, task?.user_id, task?.id)
+  );
   
   if (!task) return null;
   
@@ -102,6 +110,19 @@ export function TaskDetailViewer({ task, open, onOpenChange, onEdit }: TaskDetai
     return { text: formatDate(task.due_date), sub: `${daysUntil} days left`, urgent: false, warning: false };
   };
   const dueDisplay = getDueDisplay();
+  const scheduledStartAt = scheduleOccurrence
+    ? scheduleOccurrence.startAt
+    : scheduleEntry?.startAt || null;
+  const scheduledDuration = scheduleOccurrence
+    ? scheduleOccurrence.durationSeconds
+    : scheduleEntry?.durationSeconds || null;
+  const scheduledEnd = scheduledStartAt
+    ? scheduledEndAt(scheduledStartAt, scheduledDuration)
+    : null;
+  const scheduledDate = scheduleOccurrence?.date || scheduleEntry?.scheduledDate || null;
+  const scheduledDateLabel = scheduledDate
+    ? format(new Date(`${scheduledDate}T12:00:00`), 'EEEE, MMM d')
+    : null;
 
   // Format description
   const formatDescription = (description: string) => {
@@ -278,6 +299,26 @@ export function TaskDetailViewer({ task, open, onOpenChange, onEdit }: TaskDetai
                       {task.due_time && ` at ${formatTime(task.due_time)}`}
                     </p>
                     <p className="text-[11px] text-muted-foreground">{dueDisplay.sub}</p>
+                  </div>
+                </div>
+              )}
+
+              {(scheduleOccurrence || scheduleEntry) && (
+                <div className="flex items-center gap-3 rounded-xl border border-indigo-500/20 bg-indigo-500/5 p-3">
+                  <div className="shrink-0 rounded-lg bg-indigo-500/15 p-2">
+                    <Clock className="h-4 w-4 text-indigo-400" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold">
+                      {scheduledStartAt
+                        ? `${format(new Date(scheduledStartAt), 'h:mm a')}${scheduledEnd ? `–${format(new Date(scheduledEnd), 'h:mm a')}` : ''}`
+                        : 'Untimed'}
+                    </p>
+                    <p className="text-[11px] text-muted-foreground">
+                      {[scheduledDateLabel, formatDurationInput(scheduledDuration) || null]
+                        .filter(Boolean)
+                        .join(' · ')}
+                    </p>
                   </div>
                 </div>
               )}

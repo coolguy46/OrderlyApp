@@ -16,6 +16,9 @@ import {
 import { SubjectBadge } from '@/components/ui';
 import { TaskDetailViewer } from './TaskDetailViewer';
 import { formatDate, getDaysUntil, cn, isTaskOverdue, isExamType } from '@/lib/utils';
+import { useScheduleStore } from '@/lib/schedule/store';
+import { formatDurationInput, scheduledEndAt, selectScheduleEntry } from '@/lib/schedule/selectors';
+import { format } from 'date-fns';
 import { motion } from 'framer-motion';
 import Link from 'next/link';
 import {
@@ -45,6 +48,9 @@ interface TaskCardProps {
 
 export const TaskCard = memo(function TaskCard({ task, onEdit, compact = false, index = 0 }: TaskCardProps) {
   const { completeTask, deleteTask, updateTask, subjects } = useAppStore();
+  const scheduleEntry = useScheduleStore((state) =>
+    selectScheduleEntry(state.entriesByUser, task.user_id, task.id)
+  );
   const [showViewer, setShowViewer] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const subject = subjects.find((s) => s.id === task.subject_id);
@@ -57,6 +63,24 @@ export const TaskCard = memo(function TaskCard({ task, onEdit, compact = false, 
   const isCompleted = task.status === 'completed';
   const isInProgress = task.status === 'in_progress';
   const isRecurring = task.recurrence && task.recurrence !== 'none';
+
+  const scheduledLabel = (() => {
+    if (!scheduleEntry) return null;
+    const dateLabel = scheduleEntry.scheduledDate
+      ? format(new Date(`${scheduleEntry.scheduledDate}T12:00:00`), 'MMM d')
+      : null;
+    if (scheduleEntry.startAt) {
+      const start = new Date(scheduleEntry.startAt);
+      if (Number.isNaN(start.getTime())) return dateLabel;
+      const endIso = scheduledEndAt(scheduleEntry.startAt, scheduleEntry.durationSeconds);
+      const end = endIso ? new Date(endIso) : null;
+      return `${dateLabel ? `${dateLabel} · ` : ''}${format(start, 'h:mm a')}${end ? `–${format(end, 'h:mm a')}` : ''}`;
+    }
+    const duration = formatDurationInput(scheduleEntry.durationSeconds);
+    return [dateLabel ? `${dateLabel} · Untimed` : 'Untimed', duration || null]
+      .filter(Boolean)
+      .join(' · ');
+  })();
 
   const formatTime = (time: string) => {
     const [h, m] = time.split(':');
@@ -419,6 +443,13 @@ export const TaskCard = memo(function TaskCard({ task, onEdit, compact = false, 
                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium bg-muted/50 text-muted-foreground">
                       <Clock className="w-3 h-3" />
                       {formatTime(task.due_time)}
+                    </span>
+                  )}
+
+                  {scheduledLabel && (
+                    <span className="inline-flex items-center gap-1 rounded-md bg-indigo-500/10 px-2 py-0.5 text-[11px] font-medium text-indigo-400">
+                      <Calendar className="h-3 w-3" />
+                      Scheduled {scheduledLabel}
                     </span>
                   )}
                 </div>

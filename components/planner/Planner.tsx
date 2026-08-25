@@ -1,208 +1,315 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { addDays, differenceInMinutes, format, isAfter, startOfDay } from 'date-fns';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  AlertTriangle,
-  Archive,
-  CalendarClock,
-  CheckCircle2,
+  addDays,
+  addMinutes,
+  format,
+  isSameDay,
+  startOfDay,
+  startOfWeek,
+} from 'date-fns';
+import {
+  CalendarDays,
+  Check,
+  ChevronLeft,
   ChevronRight,
-  Clock3,
-  RefreshCw,
+  RotateCcw,
+  Send,
   Sparkles,
-  ThumbsDown,
-  ThumbsUp,
-  WandSparkles,
+  Undo2,
+  X,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAppStore } from '@/lib/store';
+import { readStoredCalendarEvents, plannerTaskDeadline, type StoredCalendarEvent } from '@/lib/planner/adapters';
 import { usePlannerStore } from '@/lib/planner/store';
+import { getDefaultPlannerSettings, type PlannerSettings, type RecurringCommitmentInput } from '@/lib/planner/types';
 import {
-  buildDeterministicPlannerInterpretation,
-  sanitizePlannerInterpretInput,
-  type PlannerInterpretResult,
-} from '@/lib/planner/intent';
+  interpretScheduleCommand,
+  type ScheduleCommandBusyInterval,
+  type ScheduleCommandContext,
+  type ScheduleCommandPreview,
+} from '@/lib/schedule/commands';
 import {
-  estimatePlannerTask,
-  getPlannerStaleness,
-} from '@/lib/planner/engine';
-import {
-  examsToPlannerInputs,
-  readStoredCalendarEvents,
-  requestedActivitiesToPlannerInputs,
-  storedEventsToCommitments,
-  tasksToPlannerInputs,
-  type StoredCalendarEvent,
-} from '@/lib/planner/adapters';
-import {
-  PLANNER_PROMPT_COMMITMENT_PREFIX,
-  PLANNER_PROMPT_TASK_SOURCE,
-} from '@/lib/planner/types';
-import type {
-  PlannerBlock,
-  PlannerChatMessage,
-  PlannerEstimateCacheEntry,
-  PlannerFeedbackRecord,
-  PlannerPlan,
-  PlannerSettings,
-  PlannerTaskInput,
-  RecurringCommitmentInput,
-  TimingRating,
-} from '@/lib/planner/types';
-import { Card, CardContent } from '@/components/ui/Card';
-import { Badge } from '@/components/ui/Badge';
+  addLocalDays,
+  buildScheduleOccurrences,
+  localDateTimeToIso,
+  localTimeFromIso,
+  selectScheduleEntriesForUser,
+} from '@/lib/schedule/selectors';
+import { useScheduleStore } from '@/lib/schedule/store';
+import type { LocalDate, ScheduleEntry, ScheduleOccurrence } from '@/lib/schedule/types';
+import type { Task } from '@/lib/supabase/types';
 import { Button } from '@/components/ui/Button';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import { ConfirmDialog } from '@/components/ui/confirm-dialog';
-import { TaskDetailViewer } from '@/components/tasks/TaskDetailViewer';
-import {
-  DailyTaskPanel,
-  PlanBlockEditor,
-  PlannerFullscreen,
-  PlannerPrompt,
-  WeekTimeGrid,
-  type PlannerBlockView,
-  type PlannerDayTaskView,
-} from '@/components/planner';
-import {
-  isVirtualPlannerOccurrence,
-  plannerBlockMatchesTaskCompletion,
-  plannerBlockViews,
-  plannerDayTasks,
-  plannerFeedbackEntityKey,
-} from './adapters';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
+import { Textarea } from '@/components/ui/textarea';
+import { cn } from '@/lib/utils';
+import { WeekTimeGrid, type PlannerBlockView } from '@/components/planner';
 
-const CALENDAR_PREFIX = 'calendar-';
-
-function uniqueCommitments(commitments: readonly RecurringCommitmentInput[]) {
-  return [...new Map(commitments.map(commitment => [commitment.id, commitment])).values()]
-    .sort((left, right) => left.id.localeCompare(right.id));
+interface ConversationMessage {
+  id: string;
+  role: 'assistant' | 'user';
+  text: string;
 }
 
-function promptCommitments(
-  intent: PlannerInterpretResult['intent'],
-  settings: PlannerSettings,
-): RecurringCommitmentInput[] {
-  const allDays = [0, 1, 2, 3, 4, 5, 6];
-  const constraints: RecurringCommitmentInput[] = [];
-  const addConstraint = (
-    id: string,
-    title: string,
-    daysOfWeek: number[],
-    startTime: string,
-    endTime: string,
-  ) => {
-    if (startTime === endTime) return;
-    constraints.push({
-      id: `${PLANNER_PROMPT_COMMITMENT_PREFIX}${id}`,
-      title,
-      kind: 'personal',
-      daysOfWeek,
-      startTime,
-      endTime,
-      enabled: true,
-      timeZone: settings.timeZone,
-      color: '#8b5cf6',
-    });
-  };
-
-  intent.avoidDays.forEach(day => addConstraint(
-    `avoid-${day}`,
-    'Kept free by your Planner request',
-    [day],
-    '00:00',
-    '23:59',
-  ));
-  intent.lighterDays.forEach(day => addConstraint(
-    `lighter-${day}`,
-    'Lighter evening requested',
-    [day],
-    '19:00',
-    '23:59',
-  ));
-  if (intent.preferredStart) {
-    addConstraint('preferred-start', 'No planned work before this time', allDays, '00:00', intent.preferredStart);
-  }
-  if (intent.preferredEnd) {
-    addConstraint('preferred-end', 'Evening kept free', allDays, intent.preferredEnd, '23:59');
-  }
-  return constraints;
+interface UndoState {
+  entries: ScheduleEntry[];
+  createdTaskIds: string[];
+  label: string;
 }
 
-function effectiveSettings(
-  settings: PlannerSettings,
-  intent: PlannerInterpretResult['intent'],
-): PlannerSettings {
-  if (!intent.sessionMinutes) return settings;
+interface CalendarRenderData {
+  blocks: PlannerBlockView[];
+  busy: ScheduleCommandBusyInterval[];
+}
+
+const EXAMPLES = [
+  'Schedule chemistry tomorrow at 4 pm for 45 minutes',
+  'Study for SAT for 2 hours every day for a week',
+  'Move chemistry to next next Saturday at 10 am',
+  'Find the best time for chemistry tomorrow for 45 minutes',
+];
+
+function localDate(value: Date): LocalDate {
+  return format(value, 'yyyy-MM-dd');
+}
+
+function dateFromLocal(value: LocalDate): Date {
+  return new Date(`${value}T12:00:00`);
+}
+
+function formatDuration(seconds: number | null | undefined): string {
+  if (!seconds) return 'No duration';
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const remainder = minutes % 60;
+  return remainder ? `${hours}h ${remainder}m` : `${hours}h`;
+}
+
+function timeLabel(value: string | null, timeZone: string): string {
+  if (!value) return 'Untimed';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return 'Untimed';
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(parsed);
+}
+
+function cloneEntries(entries: readonly ScheduleEntry[]): ScheduleEntry[] {
+  return entries.map(entry => ({
+    ...entry,
+    recurrenceDays: entry.recurrenceDays ? [...entry.recurrenceDays] : null,
+    occurrenceOverrides: Object.fromEntries(Object.entries(entry.occurrenceOverrides).map(([date, override]) => [
+      date,
+      { ...override },
+    ])),
+  }));
+}
+
+function eventDates(event: StoredCalendarEvent, startDate: LocalDate, endDate: LocalDate): LocalDate[] {
+  const dates: LocalDate[] = [];
+  for (let date = startDate; date <= endDate; date = addLocalDays(date, 1)) {
+    if (date < event.date) continue;
+    const day = dateFromLocal(date).getDay();
+    const anchorDay = dateFromLocal(event.date).getDay();
+    const occurs = !event.recurrence || event.recurrence === 'none'
+      ? date === event.date
+      : event.recurrence === 'daily'
+        ? true
+        : event.recurrence === 'weekdays'
+          ? day >= 1 && day <= 5
+          : day === anchorDay;
+    if (occurs) dates.push(date);
+  }
+  return dates;
+}
+
+function calendarRenderData(
+  events: readonly StoredCalendarEvent[],
+  startDate: LocalDate,
+  endDate: LocalDate,
+  timeZone: string,
+): CalendarRenderData {
+  const blocks: PlannerBlockView[] = [];
+  const busy: ScheduleCommandBusyInterval[] = [];
+  for (const event of events) {
+    if (!event.id || !event.title || !/^\d{4}-\d{2}-\d{2}$/.test(event.date)) continue;
+    const startTime = /^\d{2}:\d{2}$/.test(event.time || '') ? event.time! : '09:00';
+    const defaultEnd = format(addMinutes(new Date(`2000-01-01T${startTime}:00`), 60), 'HH:mm');
+    const endTime = /^\d{2}:\d{2}$/.test(event.endTime || '') && event.endTime !== startTime
+      ? event.endTime!
+      : defaultEnd;
+    for (const date of eventDates(event, startDate, endDate)) {
+      const startAt = localDateTimeToIso(date, `${startTime}:00`, timeZone);
+      let endAt = localDateTimeToIso(date, `${endTime}:00`, timeZone);
+      if (!startAt || !endAt) continue;
+      if (new Date(endAt) <= new Date(startAt)) {
+        endAt = localDateTimeToIso(addLocalDays(date, 1), `${endTime}:00`, timeZone);
+      }
+      if (!endAt) continue;
+      const id = `calendar:${event.id}@${date}`;
+      busy.push({ id, title: event.title, startAt, endAt });
+      blocks.push({
+        id,
+        title: event.title,
+        description: event.description || null,
+        startAt,
+        endAt,
+        color: event.color || '#0ea5e9',
+        kind: 'event',
+        fixed: true,
+        locked: true,
+        source: 'Calendar',
+      });
+    }
+  }
+  return { blocks, busy };
+}
+
+function commitmentRenderData(
+  commitments: readonly RecurringCommitmentInput[],
+  startDate: LocalDate,
+  endDate: LocalDate,
+  timeZone: string,
+): CalendarRenderData {
+  const blocks: PlannerBlockView[] = [];
+  const busy: ScheduleCommandBusyInterval[] = [];
+  for (const commitment of commitments) {
+    if (commitment.enabled === false) continue;
+    for (let date = startDate; date <= endDate; date = addLocalDays(date, 1)) {
+      const day = dateFromLocal(date).getDay();
+      if (!commitment.daysOfWeek.includes(day)) continue;
+      if (commitment.startDate && date < commitment.startDate) continue;
+      if (commitment.endDate && date > commitment.endDate) continue;
+      const startAt = localDateTimeToIso(date, `${commitment.startTime}:00`, timeZone);
+      const endDateForInterval = commitment.endTime > commitment.startTime ? date : addLocalDays(date, 1);
+      const endAt = localDateTimeToIso(endDateForInterval, `${commitment.endTime}:00`, timeZone);
+      if (!startAt || !endAt) continue;
+      const id = `commitment:${commitment.id}@${date}`;
+      busy.push({ id, title: commitment.title, startAt, endAt });
+      blocks.push({
+        id,
+        title: commitment.title,
+        startAt,
+        endAt,
+        color: commitment.color || '#64748b',
+        kind: commitment.kind === 'school' ? 'school' : 'commitment',
+        fixed: true,
+        locked: true,
+        source: commitment.kind === 'school' ? 'School availability' : 'Commitment',
+      });
+    }
+  }
+  return { blocks, busy };
+}
+
+function schoolCommitment(settings: PlannerSettings): RecurringCommitmentInput {
   return {
-    ...settings,
-    maxBlockMinutes: Math.max(15, Math.min(90, Math.round(intent.sessionMinutes / 15) * 15)),
+    id: 'assistant-school-day',
+    title: `School day (starts ${settings.schoolStartTime})`,
+    kind: 'school',
+    daysOfWeek: settings.schoolDays,
+    startTime: settings.wakeTime,
+    endTime: settings.schoolHomeTime,
+    timeZone: settings.timeZone,
+    enabled: true,
+    color: '#64748b',
   };
 }
 
-function planSummary(result: PlannerInterpretResult, plan: PlannerPlan) {
-  const scheduled = `${plan.blocks.length} time block${plan.blocks.length === 1 ? '' : 's'}`;
-  const promptTaskIds = new Set((plan.promptTasks || []).map(task => task.id));
-  const promptBlocks = plan.blocks.filter(block =>
-    block.kind === 'requested_activity'
-    || promptTaskIds.has(block.sourceId)
-    || block.sourceId.startsWith(`${PLANNER_PROMPT_TASK_SOURCE}:`)
-  );
-  const requestedActivityNote = result.intent.requestedActivities.length === 0
-    ? ''
-    : (plan.promptTasks || []).length === 0
-      ? ' I could not generate valid plan-only work from that activity request.'
-      : promptBlocks.length > 0
-        ? ` Scheduled ${promptBlocks.length} requested-activity block${promptBlocks.length === 1 ? '' : 's'} across ${new Set(promptBlocks.map(block => block.sourceId)).size} daily occurrence${new Set(promptBlocks.map(block => block.sourceId)).size === 1 ? '' : 's'}.`
-        : ` Generated ${(plan.promptTasks || []).length} requested work item${(plan.promptTasks || []).length === 1 ? '' : 's'}, but none fit within the available daily windows.`;
-  const warning = plan.totalUnscheduledMinutes > 0
-    ? ` I still need ${plan.totalUnscheduledMinutes} unscheduled minute${plan.totalUnscheduledMinutes === 1 ? '' : 's'} reviewed because the week is too full.`
-    : '';
-  return `${result.summary} I built ${scheduled} around exact deadlines and your busy times.${requestedActivityNote}${warning}`;
+function occurrenceBlocks(occurrences: readonly ScheduleOccurrence[]): PlannerBlockView[] {
+  return occurrences.flatMap(occurrence => {
+    if (!occurrence.startAt || !occurrence.endAt) return [];
+    return [{
+      id: occurrence.id,
+      title: occurrence.title,
+      description: occurrence.description,
+      startAt: occurrence.startAt,
+      endAt: occurrence.endAt,
+      subjectName: occurrence.subject?.name || occurrence.task.course_name || null,
+      subjectColor: occurrence.color || '#6366f1',
+      source: occurrence.task.source || 'manual',
+      kind: 'task' as const,
+      taskId: occurrence.taskId,
+      completed: occurrence.task.status === 'completed',
+      reason: occurrence.recurrence === 'none' ? 'Scheduled task' : `Repeats ${occurrence.recurrence}`,
+    }];
+  });
+}
+
+function conflictingBlock(
+  blocks: readonly PlannerBlockView[],
+  movingBlockId: string,
+  start: Date,
+  end: Date,
+): PlannerBlockView | null {
+  return blocks.find(candidate => {
+    if (candidate.id === movingBlockId) return false;
+    const candidateStart = new Date(candidate.startAt);
+    const candidateEnd = new Date(candidate.endAt);
+    if (Number.isNaN(candidateStart.getTime()) || Number.isNaN(candidateEnd.getTime())) return false;
+    return start.getTime() < candidateEnd.getTime() && end.getTime() > candidateStart.getTime();
+  }) || null;
+}
+
+function taskSubtitle(task: Task, timeZone: string): string {
+  const deadline = plannerTaskDeadline(task, timeZone);
+  if (!deadline) return task.course_name || 'No due date';
+  return `Due ${new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(new Date(deadline))}`;
+}
+
+function occurrenceDeadline(occurrence: ScheduleOccurrence, timeZone: string): string | null {
+  if (occurrence.recurrence === 'none') return plannerTaskDeadline(occurrence.task, timeZone);
+  let dueTime = occurrence.task.due_time || '23:59';
+  if (!occurrence.task.due_time && occurrence.task.due_date && occurrence.task.source && occurrence.task.source !== 'manual') {
+    dueTime = localTimeFromIso(occurrence.task.due_date, timeZone) || dueTime;
+  }
+  return localDateTimeToIso(occurrence.recurrenceSourceDate, `${dueTime}:00`, timeZone);
 }
 
 export function Planner() {
-  const { user, tasks, exams, subjects, completeTask, updateTask } = useAppStore();
+  const { user, tasks, subjects, addTask, deleteTask } = useAppStore();
   const plannerUsers = usePlannerStore(state => state.users);
-  const setActiveUser = usePlannerStore(state => state.setActiveUser);
-  const generatePlan = usePlannerStore(state => state.generatePlan);
-  const archiveCurrentPlan = usePlannerStore(state => state.archiveCurrentPlan);
-  const moveBlock = usePlannerStore(state => state.moveBlock);
-  const resizeBlock = usePlannerStore(state => state.resizeBlock);
-  const updateBlock = usePlannerStore(state => state.updateBlock);
-  const deleteBlock = usePlannerStore(state => state.deleteBlock);
-  const addMessage = usePlannerStore(state => state.addMessage);
-  const cacheEstimate = usePlannerStore(state => state.cacheEstimate);
-  const recordFeedback = usePlannerStore(state => state.recordFeedback);
+  const entriesByUser = useScheduleStore(state => state.entriesByUser);
+  const applyScheduleBatch = useScheduleStore(state => state.applyScheduleBatch);
+  const replaceUserSchedules = useScheduleStore(state => state.replaceUserSchedules);
+  const moveOccurrence = useScheduleStore(state => state.moveOccurrence);
+  const resizeOccurrence = useScheduleStore(state => state.resizeOccurrence);
 
   const userId = user?.id || null;
-  const record = userId ? plannerUsers[userId] : null;
-  const plan = record?.currentPlan || null;
+  const timeZone = useMemo(
+    () => Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+    [],
+  );
+  const plannerRecord = userId ? plannerUsers[userId] : null;
+  const plannerSettings = plannerRecord?.settings || getDefaultPlannerSettings(timeZone);
+  const commitments = useMemo(
+    () => [schoolCommitment(plannerSettings), ...(plannerRecord?.commitments || [])],
+    [plannerRecord?.commitments, plannerSettings],
+  );
+  const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date(), { weekStartsOn: 1 }));
   const [selectedDate, setSelectedDate] = useState(() => startOfDay(new Date()));
   const [storedEvents, setStoredEvents] = useState<StoredCalendarEvent[]>([]);
-  const [generating, setGenerating] = useState(false);
-  const [fullscreen, setFullscreen] = useState(false);
-  const [selectedBlock, setSelectedBlock] = useState<PlannerBlockView | null>(null);
-  const [detailTaskId, setDetailTaskId] = useState<string | null>(null);
-  const [archiveOpen, setArchiveOpen] = useState(false);
-  const [feedbackBlockId, setFeedbackBlockId] = useState<string | null>(null);
-  const [feedbackTiming, setFeedbackTiming] = useState<TimingRating | null>(null);
-  const [feedbackHappy, setFeedbackHappy] = useState<boolean | null>(null);
-  const [feedbackNow, setFeedbackNow] = useState(() => Date.now());
-  const [skippedFeedbackKeys, setSkippedFeedbackKeys] = useState<Set<string>>(new Set());
-  const handledFeedbackQuery = useRef<string | null>(null);
-
-  useEffect(() => {
-    if (!userId) return;
-    setActiveUser(userId, Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
-  }, [setActiveUser, userId]);
+  const [command, setCommand] = useState('');
+  const [preview, setPreview] = useState<ScheduleCommandPreview | null>(null);
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [applying, setApplying] = useState(false);
+  const [undoState, setUndoState] = useState<UndoState | null>(null);
+  const [messages, setMessages] = useState<ConversationMessage[]>([{
+    id: 'welcome',
+    role: 'assistant',
+    text: 'Tell me what to add, move, repeat, resize, unschedule, or when you need a free gap. I will always show a preview before changing your calendar.',
+  }]);
 
   useEffect(() => {
     const refresh = () => setStoredEvents(readStoredCalendarEvents());
@@ -215,705 +322,499 @@ export function Planner() {
     };
   }, []);
 
-  useEffect(() => {
-    if (plan) setSelectedDate(startOfDay(new Date(plan.horizonStart)));
-    setFeedbackBlockId(null);
-    setFeedbackTiming(null);
-    setFeedbackHappy(null);
-    setSkippedFeedbackKeys(new Set());
-    handledFeedbackQuery.current = null;
-  }, [plan?.id]);
-
-  useEffect(() => {
-    setFeedbackNow(Date.now());
-    if (!plan) return;
-    const interval = window.setInterval(() => setFeedbackNow(Date.now()), 60_000);
-    return () => window.clearInterval(interval);
-  }, [plan?.id]);
-
-  const plannerTimeZone = record?.settings.timeZone
-    || Intl.DateTimeFormat().resolvedOptions().timeZone
-    || 'UTC';
-  const taskInputs = useMemo(
-    () => tasksToPlannerInputs(
-      tasks.filter(task => task.status !== 'completed'),
-      {
-        // Keep the virtual occurrence set stable while an existing plan crosses
-        // midnight; a newly generated week falls back to the current instant.
-        horizonStart: plan?.horizonStart || new Date(),
-        horizonDays: plan?.settings.horizonDays || record?.settings.horizonDays || 7,
-        timeZone: plannerTimeZone,
-      },
-    ),
-    [plan?.horizonStart, plan?.settings.horizonDays, plannerTimeZone, record?.settings.horizonDays, tasks],
+  const entries = useMemo(
+    () => selectScheduleEntriesForUser(entriesByUser, userId),
+    [entriesByUser, userId],
   );
-  const examInputs = useMemo(
-    () => examsToPlannerInputs(exams
-      .filter(exam => {
-        const timestamp = new Date(exam.exam_date).getTime();
-        const horizonBoundary = plan
-          ? new Date(plan.horizonStart).getTime()
-          : startOfDay(new Date()).getTime();
-        return Number.isFinite(timestamp)
-          && Number.isFinite(horizonBoundary)
-          && timestamp >= horizonBoundary;
-      }), taskInputs),
-    [exams, plan, taskInputs],
+  const pendingTasks = useMemo(() => tasks.filter(task => task.status !== 'completed'), [tasks]);
+  const weekStartDate = localDate(weekStart);
+  const weekEndDate = localDate(addDays(weekStart, 6));
+  const occurrences = useMemo(() => buildScheduleOccurrences({
+    tasks,
+    entries,
+    subjects,
+    startDate: weekStartDate,
+    endDate: weekEndDate,
+    timeZone,
+  }), [entries, subjects, tasks, timeZone, weekEndDate, weekStartDate]);
+  const commandStartDate = localDate(addDays(startOfDay(new Date()), -7));
+  const commandEndDate = localDate(addDays(startOfDay(new Date()), 60));
+  const commandOccurrences = useMemo(() => buildScheduleOccurrences({
+    tasks,
+    entries,
+    subjects,
+    startDate: commandStartDate,
+    endDate: commandEndDate,
+    timeZone,
+  }), [commandEndDate, commandStartDate, entries, subjects, tasks, timeZone]);
+  const visibleEvents = useMemo(
+    () => calendarRenderData(storedEvents, weekStartDate, weekEndDate, timeZone),
+    [storedEvents, timeZone, weekEndDate, weekStartDate],
   );
-  const calendarCommitments = useMemo(
-    () => storedEventsToCommitments(
-      storedEvents,
-      plannerTimeZone,
-    ),
-    [plannerTimeZone, storedEvents],
+  const commandEvents = useMemo(
+    () => calendarRenderData(storedEvents, commandStartDate, commandEndDate, timeZone),
+    [commandEndDate, commandStartDate, storedEvents, timeZone],
   );
-  const liveCommitments = useMemo(() => uniqueCommitments([
-    ...(record?.commitments || []).filter(commitment => !commitment.id.startsWith(CALENDAR_PREFIX)),
-    ...calendarCommitments,
-  ]), [calendarCommitments, record?.commitments]);
-
-  const generationRequest = useMemo(() => ({
-    tasks: [...new Map([
-      ...taskInputs,
-      ...(plan?.promptTasks || []),
-    ].map(task => [task.id, task])).values()],
-    exams: examInputs,
-    commitments: uniqueCommitments([
-      ...liveCommitments,
-      ...(plan?.promptCommitments || []),
-    ]),
-    settings: record?.settings,
-    prompt: plan?.prompt || null,
-    focusSubjects: plan?.focusSubjects || [],
-    requestedActivities: plan?.requestedActivities || [],
-  }), [examInputs, liveCommitments, plan?.focusSubjects, plan?.prompt, plan?.promptCommitments, plan?.promptTasks, plan?.requestedActivities, record?.settings, taskInputs]);
-
-  const staleness = useMemo(() => {
-    if (!plan || !record || !userId) return null;
-    return getPlannerStaleness(plan, {
-      userId,
-      tasks: generationRequest.tasks,
-      exams: generationRequest.exams,
-      commitments: generationRequest.commitments,
-      settings: record.settings,
-      estimateCache: record.estimateCache,
-      feedbackMultipliers: record.feedbackMultipliers,
-      prompt: plan.prompt,
-      focusSubjects: plan.focusSubjects || [],
-      requestedActivities: plan.requestedActivities || [],
-    });
-  }, [generationRequest, plan, record, userId]);
-
-  const blockViews = useMemo(() => plannerBlockViews(plan, subjects, tasks), [plan, subjects, tasks]);
-  const dayTasks = useMemo(
-    () => plannerDayTasks(plan, selectedDate, tasks, subjects),
-    [plan, selectedDate, subjects, tasks],
+  const visibleCommitments = useMemo(
+    () => commitmentRenderData(commitments, weekStartDate, weekEndDate, timeZone),
+    [commitments, timeZone, weekEndDate, weekStartDate],
   );
-  const detailTask = detailTaskId ? tasks.find(task => task.id === detailTaskId) || null : null;
-  const planExpired = plan ? isAfter(new Date(), new Date(plan.horizonEnd)) : false;
-  const reviewedFeedbackKeys = useMemo(() => {
-    const keys = new Set<string>();
-    (record?.feedback || []).forEach(item => {
-      const referencedBlock = item.blockId
-        ? plan?.blocks.find(block => block.id === item.blockId)
-        : null;
-      if (referencedBlock) keys.add(plannerFeedbackEntityKey(referencedBlock));
-      else if (item.taskId) keys.add(`task:${item.taskId}`);
-      else if (item.examId) keys.add(`exam:${item.examId}`);
-      else if (item.blockId) keys.add(`block:${item.blockId}`);
-    });
-    return keys;
-  }, [plan, record?.feedback]);
-  const completedTaskById = useMemo(
-    () => new Map(tasks.filter(task => task.status === 'completed').map(task => [task.id, task])),
-    [tasks],
+  const commandCommitments = useMemo(
+    () => commitmentRenderData(commitments, commandStartDate, commandEndDate, timeZone),
+    [commandEndDate, commandStartDate, commitments, timeZone],
   );
-  const isFeedbackEligible = useCallback((block: PlannerBlock) => {
-    const entityKey = plannerFeedbackEntityKey(block);
-    if (reviewedFeedbackKeys.has(entityKey) || skippedFeedbackKeys.has(entityKey)) return false;
-    const completedTask = block.taskId ? completedTaskById.get(block.taskId) : null;
-    const sourceHasEnded = Boolean(plan?.blocks
-      .filter(item => item.sourceId === block.sourceId)
-      .every(item => new Date(item.endAt).getTime() <= feedbackNow));
-    return block.status === 'completed'
-      || plannerBlockMatchesTaskCompletion(block, completedTask, plan?.settings.timeZone || 'UTC')
-      || sourceHasEnded;
-  }, [completedTaskById, feedbackNow, plan, reviewedFeedbackKeys, skippedFeedbackKeys]);
-  const feedbackCandidate = useMemo(() => {
-    if (!plan) return null;
-    return plan.blocks
-      .filter(isFeedbackEligible)
-      .sort((left, right) => {
-        const leftTask = left.taskId ? completedTaskById.get(left.taskId) : null;
-        const rightTask = right.taskId ? completedTaskById.get(right.taskId) : null;
-        const leftCompletedAt = plannerBlockMatchesTaskCompletion(left, leftTask, plan.settings.timeZone)
-          ? leftTask?.completed_at
-          : null;
-        const rightCompletedAt = plannerBlockMatchesTaskCompletion(right, rightTask, plan.settings.timeZone)
-          ? rightTask?.completed_at
-          : null;
-        const completionDifference = new Date(rightCompletedAt || right.endAt).getTime()
-          - new Date(leftCompletedAt || left.endAt).getTime();
-        return completionDifference || right.segmentIndex - left.segmentIndex || right.id.localeCompare(left.id);
-      })[0] || null;
-  }, [completedTaskById, isFeedbackEligible, plan]);
+  const blocks = useMemo(
+    () => [...visibleCommitments.blocks, ...visibleEvents.blocks, ...occurrenceBlocks(occurrences.timed)],
+    [occurrences.timed, visibleCommitments.blocks, visibleEvents.blocks],
+  );
+  const untimedItems = useMemo(() => occurrences.untimed.map(occurrence => ({
+    id: occurrence.id,
+    taskId: occurrence.taskId,
+    title: occurrence.title,
+    date: occurrence.date,
+    durationSeconds: occurrence.durationSeconds,
+    color: occurrence.color || '#6366f1',
+    completed: occurrence.task.status === 'completed',
+  })), [occurrences.untimed]);
 
-  useEffect(() => {
-    if (!plan) return;
-    const requestedBlockId = new URLSearchParams(window.location.search).get('feedback');
-    if (!requestedBlockId) return;
-    const queryKey = `${plan.id}:${requestedBlockId}`;
-    if (handledFeedbackQuery.current === queryKey) return;
-    handledFeedbackQuery.current = queryKey;
-    const requestedBlock = plan.blocks.find(block => block.id === requestedBlockId);
-    if (requestedBlock && isFeedbackEligible(requestedBlock)) {
-      setFeedbackBlockId(requestedBlock.id);
-    }
-  }, [isFeedbackEligible, plan]);
+  const context = useMemo<ScheduleCommandContext>(() => ({
+    now: new Date().toISOString(),
+    timeZone,
+    tasks: pendingTasks,
+    entries,
+    occurrences: [...commandOccurrences.timed, ...commandOccurrences.untimed],
+    busy: [...commandCommitments.busy, ...commandEvents.busy],
+    selectedTaskId,
+    selectedDate: localDate(selectedDate),
+    availableStartTime: plannerSettings.weekendAvailableStart,
+    availableEndTime: plannerSettings.bedtime,
+  }), [commandCommitments.busy, commandEvents.busy, commandOccurrences.timed, commandOccurrences.untimed, entries, pendingTasks, plannerSettings.bedtime, plannerSettings.weekendAvailableStart, selectedDate, selectedTaskId, timeZone]);
 
-  const cacheAIResults = useCallback((result: PlannerInterpretResult, inputs: readonly PlannerTaskInput[]) => {
-    if (!userId || !result.aiUsed) return;
-    const now = new Date().toISOString();
-    const cachedTaskIds = new Set<string>();
-    inputs.forEach(task => {
-      const originalTaskId = task.taskId || task.id;
-      if (cachedTaskIds.has(originalTaskId)) return;
-      cachedTaskIds.add(originalTaskId);
-      const estimate = result.estimates[originalTaskId] || result.estimates[task.id];
-      if (!estimate) return;
-      const fingerprint = estimatePlannerTask(task).contentFingerprint;
-      const entry: PlannerEstimateCacheEntry = {
-        entityId: `task:${originalTaskId}`,
-        contentFingerprint: fingerprint,
-        minutes: estimate.minutes,
-        source: 'ai',
-        model: 'deepseek-v4-flash',
-        promptVersion: 'planner-interpret-v1',
-        explanation: estimate.reason,
-        createdAt: now,
-      };
-      cacheEstimate(userId, entry);
-    });
-  }, [cacheEstimate, userId]);
+  const selectedDayOccurrences = useMemo(
+    () => [...occurrences.timed, ...occurrences.untimed]
+      .filter(occurrence => occurrence.date === localDate(selectedDate))
+      .sort((left, right) => (left.startAt || '').localeCompare(right.startAt || '') || left.title.localeCompare(right.title)),
+    [occurrences.timed, occurrences.untimed, selectedDate],
+  );
+  const unscheduledTasks = useMemo(() => {
+    const scheduled = new Set(entries.map(entry => entry.taskId));
+    return pendingTasks.filter(task => !scheduled.has(task.id)).slice(0, 10);
+  }, [entries, pendingTasks]);
 
-  const interpret = useCallback(async (prompt: string): Promise<PlannerInterpretResult> => {
-    const body = {
-      prompt,
-      // A repeating task only needs one AI interpretation. Its virtual dated
-      // occurrences reuse this estimate through their original task ID.
-      tasks: [...new Map(taskInputs.map(task => {
-        const id = task.taskId || task.id;
-        return [id, {
-          id,
-          title: task.title,
-          description: task.description || '',
-          priority: task.priority,
-          assignmentType: task.assignmentType || null,
-          courseName: task.courseName || null,
-          dueAt: task.dueAt || null,
-        }] as const;
-      })).values()],
-      exams: examInputs.map(exam => ({
-        id: exam.id,
-        title: exam.title,
-        description: exam.description || '',
-        subject: subjects.find(subject => subject.id === exam.subjectId)?.name || null,
-        examAt: exam.examAt,
-      })),
-      currentSettings: record?.settings || {},
-    };
+  const selectDay = useCallback((next: Date) => {
+    const normalized = startOfDay(next);
+    setSelectedDate(normalized);
+    const start = startOfWeek(normalized, { weekStartsOn: 1 });
+    if (!isSameDay(start, weekStart)) setWeekStart(start);
+  }, [weekStart]);
+
+  const submitCommand = useCallback((value = command, taskId = selectedTaskId) => {
+    const normalized = value.trim();
+    if (!normalized) return;
+    const nextPreview = interpretScheduleCommand(normalized, { ...context, selectedTaskId: taskId });
+    setPreview(nextPreview);
+    setCommand(normalized);
+    setMessages(previous => [
+      ...previous,
+      { id: `user-${Date.now()}`, role: 'user', text: normalized },
+      { id: `assistant-${Date.now() + 1}`, role: 'assistant', text: nextPreview.summary },
+    ].slice(-8) as ConversationMessage[]);
+  }, [command, context, selectedTaskId]);
+
+  const applyPreview = useCallback(async () => {
+    if (!userId || !preview || preview.status !== 'ready' || preview.actions.length === 0) return;
+    const before = cloneEntries(entries);
+    const createdTaskIds: string[] = [];
+    setApplying(true);
     try {
-      const response = await fetch('/api/planner/interpret', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      if (!response.ok) throw new Error('Interpretation failed');
-      return await response.json() as PlannerInterpretResult;
-    } catch {
-      return buildDeterministicPlannerInterpretation(sanitizePlannerInterpretInput(body));
-    }
-  }, [examInputs, record?.settings, subjects, taskInputs]);
-
-  const createPlan = useCallback(async (
-    prompt: string,
-    retainedActivities: PlannerInterpretResult['intent']['requestedActivities'] = [],
-  ) => {
-    if (!userId || !record || generating) return;
-    setGenerating(true);
-    addMessage(userId, { role: 'user', content: prompt });
-    try {
-      const result = await interpret(prompt);
-      const requestedActivities = result.intent.requestedActivities.length > 0
-        ? result.intent.requestedActivities
-        : retainedActivities;
-      const interpretedResult: PlannerInterpretResult = requestedActivities === result.intent.requestedActivities
-        ? result
-        : { ...result, intent: { ...result.intent, requestedActivities } };
-      const baseCommitments = liveCommitments.filter(commitment => !commitment.id.startsWith(PLANNER_PROMPT_COMMITMENT_PREFIX));
-      const settings = effectiveSettings(record.settings, result.intent);
-      const commitments = uniqueCommitments([
-        ...baseCommitments,
-        ...promptCommitments(result.intent, settings),
-      ]);
-      const planningNow = new Date();
-      // The engine rounds its horizon start up to the next slot. Build every
-      // input against that same boundary so an exam in the few minutes before
-      // the rounded start cannot enter the snapshot and immediately disappear
-      // when the staleness monitor reconstructs it.
-      const slotMs = settings.slotMinutes * 60_000;
-      const planningHorizonStart = new Date(
-        Math.ceil(planningNow.getTime() / slotMs) * slotMs,
-      );
-      const generationTaskInputs = tasksToPlannerInputs(
-        tasks.filter(task => task.status !== 'completed'),
-        {
-          horizonStart: planningHorizonStart,
-          horizonDays: settings.horizonDays,
-          timeZone: settings.timeZone,
-        },
-      );
-      const promptTaskInputs = requestedActivitiesToPlannerInputs(requestedActivities, {
-        horizonStart: planningHorizonStart,
-        settings,
-        preferredEnd: result.intent.preferredEnd,
-      });
-      const generationExamInputs = examsToPlannerInputs(
-        exams.filter(exam => {
-          const timestamp = new Date(exam.exam_date).getTime();
-          return Number.isFinite(timestamp) && timestamp >= planningHorizonStart.getTime();
-        }),
-        generationTaskInputs,
-      );
-      cacheAIResults(result, generationTaskInputs);
-      const nextPlan = generatePlan(userId, {
-        tasks: [...generationTaskInputs, ...promptTaskInputs],
-        exams: generationExamInputs,
-        commitments,
-        settings,
-        now: planningHorizonStart.toISOString(),
-        prompt,
-        focusSubjects: result.intent.focusSubjects,
-        requestedActivities,
-      });
-      addMessage(userId, {
+      for (const action of preview.actions) {
+        if (action.type === 'schedule_batch') {
+          applyScheduleBatch(userId, action.operations);
+          continue;
+        }
+        const created = await addTask({
+          user_id: userId,
+          subject_id: null,
+          title: action.title,
+          description: action.description,
+          priority: 'medium',
+          status: 'pending',
+          due_date: null,
+          due_time: null,
+          recurrence: action.schedule.recurrence || 'none',
+          recurrence_days: action.schedule.recurrence === 'weekly'
+            ? action.schedule.recurrenceDays || null
+            : null,
+          completed_at: null,
+          source: 'manual',
+        });
+        if (!created) throw new Error('The task could not be created.');
+        createdTaskIds.push(created.id);
+        applyScheduleBatch(userId, [{ type: 'upsert', taskId: created.id, input: action.schedule }]);
+      }
+      setUndoState({ entries: before, createdTaskIds, label: preview.summary });
+      setMessages(previous => [...previous, {
+        id: `applied-${Date.now()}`,
         role: 'assistant',
-        content: planSummary(interpretedResult, nextPlan),
-      });
-      setSelectedDate(startOfDay(new Date(nextPlan.horizonStart)));
-      toast.success('Your one-week plan is ready', {
-        description: `${nextPlan.blocks.length} blocks scheduled${result.aiUsed ? ' with DeepSeek estimates' : ' with deterministic estimates'}.`,
-      });
+        text: `Applied: ${preview.summary}`,
+      }].slice(-8) as ConversationMessage[]);
+      toast.success('Schedule updated');
+      setPreview(null);
+      setCommand('');
+      setSelectedTaskId(null);
     } catch (error) {
-      toast.error('Orderly could not build the plan', {
-        description: error instanceof Error ? error.message : 'Please try again.',
-      });
+      for (const id of createdTaskIds) await deleteTask(id);
+      replaceUserSchedules(userId, before);
+      toast.error(error instanceof Error ? error.message : 'Could not update the schedule');
     } finally {
-      setGenerating(false);
+      setApplying(false);
     }
-  }, [addMessage, cacheAIResults, exams, generatePlan, generating, interpret, liveCommitments, record, tasks, userId]);
+  }, [addTask, applyScheduleBatch, deleteTask, entries, preview, replaceUserSchedules, userId]);
 
-  const updateStalePlan = () => void createPlan(
-    plan?.prompt || 'Update my week with the new assignments',
-    plan?.requestedActivities || [],
-  );
+  const undo = useCallback(async () => {
+    if (!userId || !undoState) return;
+    for (const taskId of undoState.createdTaskIds) await deleteTask(taskId);
+    replaceUserSchedules(userId, cloneEntries(undoState.entries));
+    setMessages(previous => [...previous, {
+      id: `undo-${Date.now()}`,
+      role: 'assistant',
+      text: `Undid: ${undoState.label}`,
+    }].slice(-8) as ConversationMessage[]);
+    setUndoState(null);
+    toast.success('Last schedule change undone');
+  }, [deleteTask, replaceUserSchedules, undoState, userId]);
 
-  const handleMove = (view: PlannerBlockView, nextStart: Date) => {
-    if (!userId) return;
-    const result = moveBlock(userId, view.id, nextStart.toISOString());
-    if (!result.ok) toast.error(result.error || 'That block could not be moved.');
-  };
-
-  const handleResize = (view: PlannerBlockView, nextStart: Date, nextEnd: Date) => {
-    if (!userId) return;
-    const result = resizeBlock(userId, view.id, differenceInMinutes(nextEnd, nextStart));
-    if (!result.ok) toast.error(result.error || 'That block could not be resized.');
-  };
-
-  const handleEditorSave = async (view: PlannerBlockView, nextStart: Date, nextEnd: Date) => {
-    if (!userId) return;
-    const result = updateBlock(userId, view.id, {
-      startAt: nextStart.toISOString(),
-      endAt: nextEnd.toISOString(),
-    });
-    if (!result.ok) {
-      toast.error(result.error || 'That block could not be updated.');
-      throw new Error(result.error);
+  const handleMove = useCallback((block: PlannerBlockView, nextStart: Date, nextEnd: Date) => {
+    if (!userId || !block.taskId) return;
+    const occurrence = occurrences.timed.find(item => item.id === block.id);
+    const task = tasks.find(item => item.id === block.taskId);
+    if (!occurrence || !task) return;
+    const deadline = occurrenceDeadline(occurrence, timeZone);
+    if (deadline && nextEnd.getTime() > new Date(deadline).getTime()) {
+      toast.error(`That would put “${task.title}” after its deadline.`);
+      return;
     }
-  };
-
-  const handleDeleteBlock = async (view: PlannerBlockView) => {
-    if (!userId) return;
-    const result = deleteBlock(userId, view.id);
-    if (!result.ok) {
-      toast.error(result.error || 'That block could not be removed.');
-      throw new Error(result.error);
+    const conflict = conflictingBlock(blocks, block.id, nextStart, nextEnd);
+    if (conflict) {
+      toast.error(`That time overlaps “${conflict.title}”.`);
+      return;
     }
-    toast.success('Block removed');
-  };
+    setUndoState({ entries: cloneEntries(entries), createdTaskIds: [], label: `Move “${task.title}”` });
+    moveOccurrence(userId, task.id, occurrence.recurrenceSourceDate, localDate(nextStart), nextStart.toISOString());
+  }, [blocks, entries, moveOccurrence, occurrences.timed, tasks, timeZone, userId]);
 
-  const openTaskFromBlock = (view: PlannerBlockView | PlannerDayTaskView) => {
-    if (!plan) return;
-    const block = plan.blocks.find(item => item.id === view.id);
-    if (block?.taskId) setDetailTaskId(block.taskId);
-  };
-
-  const toggleDayTask = async (view: PlannerDayTaskView) => {
-    if (!plan || !userId) return;
-    const block = plan.blocks.find(item => item.id === view.id);
-    if (!block) return;
-    if (block.taskId) {
-      const task = tasks.find(item => item.id === block.taskId);
-      const taskCompletionApplies = plannerBlockMatchesTaskCompletion(
-        block,
-        task,
-        plan.settings.timeZone,
-      );
-      if (block.status === 'completed' || taskCompletionApplies) {
-        if (taskCompletionApplies && isVirtualPlannerOccurrence(block)) {
-          toast.info('This recurring occurrence already advanced', {
-            description: 'Update the stale plan to use the newly created recurring task.',
-          });
-          return;
-        }
-        if (taskCompletionApplies && task) {
-          await updateTask(task.id, { status: 'pending', completed_at: null });
-        }
-        plan.blocks.filter(item => item.sourceId === block.sourceId).forEach(item => {
-          updateBlock(userId, item.id, { status: 'planned' });
-        });
-      } else {
-        // Completing a recurring row creates its next durable occurrence. If
-        // this stale plan still contains later virtual occurrences from the old
-        // row, keep their completion local until the user refreshes the plan
-        // instead of creating the same next task twice.
-        if (!(isVirtualPlannerOccurrence(block) && task?.status === 'completed')) {
-          await completeTask(block.taskId);
-        }
-        plan.blocks.filter(item => item.sourceId === block.sourceId).forEach(item => {
-          updateBlock(userId, item.id, { status: 'completed' });
-        });
-        setFeedbackBlockId(block.id);
-      }
-    } else {
-      const nextStatus = block.status === 'completed' ? 'planned' : 'completed';
-      plan.blocks.filter(item => item.sourceId === block.sourceId).forEach(item => {
-        updateBlock(userId, item.id, { status: nextStatus });
-      });
-      if (nextStatus === 'completed') setFeedbackBlockId(block.id);
+  const handleResize = useCallback((block: PlannerBlockView, nextStart: Date, nextEnd: Date) => {
+    if (!userId || !block.taskId) return;
+    const occurrence = occurrences.timed.find(item => item.id === block.id);
+    const task = tasks.find(item => item.id === block.taskId);
+    if (!occurrence || !task) return;
+    const deadline = occurrenceDeadline(occurrence, timeZone);
+    if (deadline && nextEnd.getTime() > new Date(deadline).getTime()) {
+      toast.error(`That duration would run past “${task.title}”’s deadline.`);
+      return;
     }
-  };
-
-  const dismissFeedback = (rememberForSession: boolean) => {
-    if (rememberForSession && feedbackBlockId && plan) {
-      const block = plan.blocks.find(item => item.id === feedbackBlockId);
-      if (block) {
-        setSkippedFeedbackKeys(current => new Set(current).add(plannerFeedbackEntityKey(block)));
-      }
+    const conflict = conflictingBlock(blocks, block.id, nextStart, nextEnd);
+    if (conflict) {
+      toast.error(`That duration overlaps “${conflict.title}”.`);
+      return;
     }
-    setFeedbackBlockId(null);
-    setFeedbackTiming(null);
-    setFeedbackHappy(null);
-  };
+    const durationSeconds = Math.max(15 * 60, Math.round((nextEnd.getTime() - nextStart.getTime()) / 1000));
+    setUndoState({ entries: cloneEntries(entries), createdTaskIds: [], label: `Resize “${task.title}”` });
+    resizeOccurrence(userId, task.id, occurrence.recurrenceSourceDate, durationSeconds);
+  }, [blocks, entries, occurrences.timed, resizeOccurrence, tasks, timeZone, userId]);
 
-  const saveFeedback = () => {
-    if (!userId || !plan || !feedbackBlockId || !feedbackTiming) return;
-    const block = plan.blocks.find(item => item.id === feedbackBlockId);
-    if (!block) return;
-    const predictedMinutes = plan.blocks
-      .filter(item => item.sourceId === block.sourceId)
-      .reduce((total, item) => total + item.estimatedMinutes, 0);
-    const feedback: PlannerFeedbackRecord = {
-      id: '',
-      planId: plan.id,
-      blockId: block.id,
-      taskId: block.taskId,
-      examId: block.examId,
-      activityId: block.activityId,
-      subjectId: block.subjectId,
-      assignmentType: block.assignmentType,
-      predictedMinutes,
-      actualMinutes: null,
-      timingRating: feedbackTiming,
-      scheduleRating: feedbackHappy === null ? null : feedbackHappy ? 5 : 2,
-      createdAt: '',
-    };
-    const result = recordFeedback(userId, feedback);
-    if (result.ok) {
-      toast.success('Thanks — future estimates will learn from this.');
-      dismissFeedback(false);
-    } else {
-      toast.error(result.error || 'Feedback could not be saved.');
-    }
-  };
-
-  const archivePlan = () => {
-    if (!userId) return;
-    const result = archiveCurrentPlan(userId);
-    if (result.ok) toast.success('Plan archived', { description: 'You can create a fresh week without losing this one.' });
-  };
-
-  if (!userId || !record) {
-    return <div className="py-20 text-center text-sm text-muted-foreground">Loading your Planner…</div>;
+  if (!userId) {
+    return (
+      <Card className="mx-auto mt-16 max-w-xl">
+        <CardContent className="p-8 text-center text-sm text-muted-foreground">
+          Sign in to use the Schedule Assistant.
+        </CardContent>
+      </Card>
+    );
   }
 
-  const editorBlock = selectedBlock && blockViews.some(block => block.id === selectedBlock.id)
-    ? blockViews.find(block => block.id === selectedBlock.id) || null
-    : null;
-  const feedbackBlock = feedbackBlockId ? plan?.blocks.find(block => block.id === feedbackBlockId) || null : null;
-  const feedbackPlannedMinutes = feedbackBlock && plan
-    ? plan.blocks
-      .filter(block => block.sourceId === feedbackBlock.sourceId)
-      .reduce((total, block) => total + block.estimatedMinutes, 0)
-    : 0;
-
   return (
-    <div className="space-y-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+    <div className="mx-auto w-full max-w-[1800px] space-y-5 px-4 py-5 sm:px-6 lg:px-8">
+      <header className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
-            <div className="rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 p-2 shadow-lg shadow-indigo-500/20">
-              <CalendarClock className="h-5 w-5 text-white" />
-            </div>
+            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/15 text-primary">
+              <Sparkles className="h-5 w-5" />
+            </span>
             <div>
-              <h1 className="text-xl font-bold font-display sm:text-2xl">Weekly Planner</h1>
-              <p className="text-xs text-muted-foreground sm:text-sm">
-                One realistic week, fitted around everything already on your calendar.
-              </p>
+              <h1 className="text-2xl font-bold tracking-tight">Schedule Assistant</h1>
+              <p className="text-sm text-muted-foreground">Deterministic commands. Every change is previewed first.</p>
             </div>
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {plan && (
-            <Button variant="ghost" size="sm" className="gap-1.5 text-muted-foreground" onClick={() => setArchiveOpen(true)}>
-              <Archive className="h-3.5 w-3.5" /> Archive
+          {undoState && (
+            <Button type="button" variant="outline" size="sm" onClick={() => void undo()}>
+              <Undo2 className="h-4 w-4" /> Undo last change
             </Button>
           )}
-          <Button size="sm" className="gap-1.5 bg-gradient-to-r from-indigo-500 to-purple-600 text-white" onClick={() => void createPlan(
-            plan?.prompt || 'Plan my week',
-            plan?.requestedActivities || [],
-          )} disabled={generating}>
-            {generating ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <WandSparkles className="h-3.5 w-3.5" />}
-            {plan ? 'Replan week' : 'Plan my week'}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              const today = startOfDay(new Date());
+              setWeekStart(startOfWeek(today, { weekStartsOn: 1 }));
+              setSelectedDate(today);
+            }}
+          >
+            Today
           </Button>
         </div>
-      </div>
+      </header>
 
-      {staleness?.isStale && (
-        <Card className="border-amber-500/30 bg-amber-500/8">
-          <CardContent className="flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:justify-between sm:p-4">
-            <div className="flex items-start gap-2.5">
-              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
+      <div className="grid min-w-0 gap-5 xl:grid-cols-[330px_minmax(0,1fr)]">
+        <aside className="min-w-0 space-y-4">
+          <Card>
+            <CardHeader className="flex-row items-center justify-between px-4 pb-3 pt-4">
               <div>
-                <p className="text-sm font-semibold">Your plan does not include the latest changes</p>
-                <p className="text-xs text-muted-foreground">
-                  {staleness.summary.join(', ') || 'Tasks or availability changed'} — review it before Orderly moves anything.
-                </p>
+                <CardTitle>{format(selectedDate, 'EEEE, MMM d')}</CardTitle>
+                <p className="mt-1 text-xs text-muted-foreground">{selectedDayOccurrences.length} scheduled item{selectedDayOccurrences.length === 1 ? '' : 's'}</p>
               </div>
-            </div>
-            <Button size="sm" className="shrink-0 gap-1.5" onClick={updateStalePlan} disabled={generating}>
-              <RefreshCw className="h-3.5 w-3.5" /> Update plan
-            </Button>
-          </CardContent>
-        </Card>
-      )}
-
-      {plan && planExpired && (
-        <Card className="border-indigo-500/25 bg-indigo-500/8">
-          <CardContent className="flex items-center justify-between gap-3 p-3 sm:p-4">
-            <div>
-              <p className="text-sm font-semibold">This planned week has ended</p>
-              <p className="text-xs text-muted-foreground">It stays in history. Start a fresh plan when you are ready.</p>
-            </div>
-            <Button size="sm" variant="outline" onClick={() => void createPlan(
-              plan.prompt || 'Plan my next week',
-              plan.requestedActivities || [],
-            )}>Plan next week</Button>
-          </CardContent>
-        </Card>
-      )}
-
-      {feedbackCandidate && !feedbackBlockId && (
-        <button
-          type="button"
-          onClick={() => setFeedbackBlockId(feedbackCandidate.id)}
-          className="flex w-full items-center justify-between gap-3 rounded-xl border border-emerald-500/20 bg-emerald-500/7 px-3 py-2.5 text-left transition-colors hover:bg-emerald-500/10"
-        >
-          <span className="flex items-center gap-2 text-xs">
-            <CheckCircle2 className="h-4 w-4 text-emerald-400" />
-            How did “{feedbackCandidate.title}” go? Your answer improves future timing.
-          </span>
-          <ChevronRight className="h-4 w-4 text-muted-foreground" />
-        </button>
-      )}
-
-      {plan ? (
-        <div className="grid gap-4 xl:grid-cols-[minmax(300px,.75fr)_minmax(0,1.6fr)]">
-          <DailyTaskPanel
-            planStart={plan.horizonStart}
-            selectedDate={selectedDate}
-            tasks={dayTasks}
-            onSelectedDateChange={setSelectedDate}
-            onTaskClick={openTaskFromBlock}
-            onTaskToggle={toggleDayTask}
-          />
-          <div className="min-w-0 space-y-4">
-            <Card className="overflow-hidden border-border/50">
-              <CardContent className="p-2 sm:p-3">
-                <div className="mb-2 flex flex-wrap items-center justify-between gap-2 px-1">
-                  <div>
-                    <p className="text-sm font-semibold font-display">
-                      {format(new Date(plan.horizonStart), 'MMM d')} – {format(addDays(startOfDay(new Date(plan.horizonStart)), 6), 'MMM d')}
-                    </p>
-                    <p className="text-[11px] text-muted-foreground">Drag to move · pull the bottom edge to resize · click for exact times</p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Badge variant="outline" className="gap-1 text-[10px]"><Clock3 className="h-3 w-3" /> {Math.round(plan.totalScheduledMinutes / 60 * 10) / 10}h planned</Badge>
-                    {plan.warnings.length > 0 && <Badge className="bg-amber-500/15 text-amber-400">{plan.warnings.length} warning{plan.warnings.length === 1 ? '' : 's'}</Badge>}
-                  </div>
-                </div>
-                <WeekTimeGrid
-                  weekStart={plan.horizonStart}
-                  blocks={blockViews}
-                  editable={!planExpired}
-                  timeZoneLabel={plan.settings.timeZone}
-                  onBlockMove={handleMove}
-                  onBlockResize={handleResize}
-                  onBlockClick={setSelectedBlock}
-                  onRequestFullscreen={() => setFullscreen(true)}
-                />
-              </CardContent>
-            </Card>
-            <PlannerPrompt
-              messages={record.messages}
-              onSubmit={createPlan}
-              isSubmitting={generating}
-              suggestions={[
-                'Plan my week',
-                'Make Tuesday lighter',
-                'Do not schedule anything after 9 pm',
-                'Use 45 minute blocks and focus on Calculus',
-              ]}
-            />
-          </div>
-        </div>
-      ) : (
-        <div className="grid gap-4 xl:grid-cols-[minmax(300px,.75fr)_minmax(0,1.6fr)]">
-          <Card className="min-h-[430px] border-dashed border-border/70">
-            <CardContent className="flex h-full min-h-[430px] flex-col items-center justify-center p-8 text-center">
-              <div className="mb-4 rounded-2xl bg-indigo-500/10 p-4"><Sparkles className="h-8 w-8 text-indigo-400" /></div>
-              <h2 className="text-lg font-semibold font-display">Your week is ready to be solved</h2>
-              <p className="mt-2 max-w-sm text-sm text-muted-foreground">
-                Orderly will read pending task and Canvas descriptions, account for exams, school, and calendar events, then fit work before every exact deadline.
-              </p>
-              <div className="mt-5 flex flex-wrap justify-center gap-2 text-[10px] text-muted-foreground">
-                <Badge variant="outline">Maximum 7 days</Badge>
-                <Badge variant="outline">15-minute precision</Badge>
-                <Badge variant="outline">Editable blocks</Badge>
+              <div className="flex gap-1">
+                <Button type="button" variant="ghost" size="icon-sm" onClick={() => selectDay(addDays(selectedDate, -1))} aria-label="Previous day">
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <Button type="button" variant="ghost" size="icon-sm" onClick={() => selectDay(addDays(selectedDate, 1))} aria-label="Next day">
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
               </div>
+            </CardHeader>
+            <CardContent className="space-y-2 px-4 pb-4">
+              {selectedDayOccurrences.length === 0 ? (
+                <p className="rounded-lg border border-dashed p-4 text-center text-xs text-muted-foreground">Nothing scheduled for this day.</p>
+              ) : selectedDayOccurrences.map(occurrence => (
+                <button
+                  key={occurrence.id}
+                  type="button"
+                  onClick={() => {
+                    setSelectedTaskId(occurrence.taskId);
+                    setCommand(`Move ${occurrence.title} to `);
+                  }}
+                  className="w-full rounded-lg border border-border/60 bg-background/40 p-3 text-left transition-colors hover:border-primary/40 hover:bg-accent/40"
+                >
+                  <div className="flex items-start gap-2">
+                    <span className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: occurrence.color || '#6366f1' }} />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold">{occurrence.title}</p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        {timeLabel(occurrence.startAt, timeZone)} · {formatDuration(occurrence.durationSeconds)}
+                      </p>
+                      {occurrence.description && <p className="mt-1 line-clamp-2 text-xs text-muted-foreground/80">{occurrence.description.replace(/<[^>]*>/g, ' ')}</p>}
+                    </div>
+                  </div>
+                </button>
+              ))}
             </CardContent>
           </Card>
-          <div className="space-y-4">
-            <Card className="overflow-hidden border-border/50">
-              <CardContent className="relative flex min-h-[360px] items-center justify-center p-8">
-                <div className="absolute inset-0 opacity-35" style={{ backgroundImage: 'linear-gradient(to right, var(--border) 1px, transparent 1px), linear-gradient(to bottom, var(--border) 1px, transparent 1px)', backgroundSize: '14.285% 60px' }} />
-                <div className="relative z-10 rounded-2xl border border-border/60 bg-card/90 p-5 text-center shadow-xl backdrop-blur">
-                  <CalendarClock className="mx-auto h-7 w-7 text-indigo-400" />
-                  <p className="mt-2 text-sm font-semibold">No active plan yet</p>
-                  <p className="mt-1 text-xs text-muted-foreground">Type below or click “Plan my week.”</p>
+
+          <Card>
+            <CardHeader className="px-4 pb-3 pt-4">
+              <CardTitle>Tasks to schedule</CardTitle>
+              <p className="text-xs text-muted-foreground">Canvas and Orderly tasks without a saved schedule</p>
+            </CardHeader>
+            <CardContent className="max-h-[420px] space-y-2 overflow-y-auto px-4 pb-4">
+              {unscheduledTasks.length === 0 ? (
+                <p className="rounded-lg border border-dashed p-4 text-center text-xs text-muted-foreground">Every pending task has schedule details.</p>
+              ) : unscheduledTasks.map(task => (
+                <button
+                  key={task.id}
+                  type="button"
+                  onClick={() => {
+                    setSelectedTaskId(task.id);
+                    setCommand(`Schedule ${task.title} `);
+                  }}
+                  className={cn(
+                    'w-full rounded-lg border p-3 text-left transition-colors hover:border-primary/40 hover:bg-accent/40',
+                    selectedTaskId === task.id ? 'border-primary/60 bg-primary/5' : 'border-border/60 bg-background/30',
+                  )}
+                >
+                  <p className="truncate text-sm font-medium">{task.title}</p>
+                  <p className="mt-1 truncate text-[11px] text-muted-foreground">{taskSubtitle(task, timeZone)}</p>
+                </button>
+              ))}
+            </CardContent>
+          </Card>
+        </aside>
+
+        <main className="min-w-0 space-y-4">
+          <Card>
+            <CardHeader className="flex-row items-center justify-between px-4 pb-3 pt-4">
+              <div className="flex items-center gap-2">
+                <CalendarDays className="h-4 w-4 text-primary" />
+                <div>
+                  <CardTitle>{format(weekStart, 'MMM d')}–{format(addDays(weekStart, 6), 'MMM d, yyyy')}</CardTitle>
+                  <p className="mt-1 text-xs text-muted-foreground">Drag a task to move it. Drag its bottom edge to change duration.</p>
                 </div>
-              </CardContent>
-            </Card>
-            <PlannerPrompt messages={record.messages} onSubmit={createPlan} isSubmitting={generating} />
-          </div>
-        </div>
-      )}
-
-      {plan?.warnings.length ? (
-        <Card className="border-amber-500/20">
-          <CardContent className="space-y-2 p-4">
-            <p className="flex items-center gap-2 text-sm font-semibold"><AlertTriangle className="h-4 w-4 text-amber-400" /> Plan checks</p>
-            {plan.warnings.slice(0, 6).map(warning => (
-              <div key={warning.id} className="flex items-start justify-between gap-3 rounded-lg bg-muted/35 px-3 py-2 text-xs">
-                <div><p className="font-medium">{warning.title}</p><p className="text-muted-foreground">{warning.message}</p></div>
-                {warning.deadlineAt && <span className="shrink-0 text-[10px] text-muted-foreground">{format(new Date(warning.deadlineAt), 'MMM d, h:mm a')}</span>}
               </div>
-            ))}
-          </CardContent>
-        </Card>
-      ) : null}
+              <div className="flex gap-1">
+                <Button type="button" variant="ghost" size="icon-sm" onClick={() => setWeekStart(previous => addDays(previous, -7))} aria-label="Previous week">
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <Button type="button" variant="ghost" size="icon-sm" onClick={() => setWeekStart(previous => addDays(previous, 7))} aria-label="Next week">
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="px-4 pb-4">
+              <WeekTimeGrid
+                weekStart={weekStart}
+                blocks={blocks}
+                editable
+                viewportClassName="h-[620px]"
+                showSummaryHeader={false}
+                timeZoneLabel={timeZone.split('/').pop()?.replace('_', ' ') || 'Local'}
+                selectedDate={selectedDate}
+                onSelectedDateChange={selectDay}
+                onBlockMove={handleMove}
+                onBlockResize={handleResize}
+                untimedItems={untimedItems}
+                showUntimedShelf
+                onUntimedItemClick={item => {
+                  if (item.taskId) setSelectedTaskId(item.taskId);
+                  setCommand(`Schedule ${item.title} `);
+                }}
+              />
+            </CardContent>
+          </Card>
 
-      {plan && (
-        <PlannerFullscreen
-          open={fullscreen}
-          onOpenChange={setFullscreen}
-          weekStart={plan.horizonStart}
-          blocks={blockViews}
-          editable={!planExpired}
-          timeZoneLabel={plan.settings.timeZone}
-          onBlockMove={handleMove}
-          onBlockResize={handleResize}
-          onBlockClick={setSelectedBlock}
-        />
-      )}
-
-      <PlanBlockEditor
-        block={editorBlock}
-        open={Boolean(editorBlock)}
-        onOpenChange={open => !open && setSelectedBlock(null)}
-        onSave={handleEditorSave}
-        onRemove={handleDeleteBlock}
-        onViewTask={openTaskFromBlock}
-        readOnly={planExpired}
-      />
-
-      <TaskDetailViewer task={detailTask} open={Boolean(detailTask)} onOpenChange={open => !open && setDetailTaskId(null)} />
-
-      <ConfirmDialog
-        open={archiveOpen}
-        onOpenChange={setArchiveOpen}
-        title="Archive this weekly plan?"
-        description="It will leave your active Planner but remain in history, and repeating the same request can restore the same plan."
-        confirmLabel="Archive plan"
-        variant="warning"
-        onConfirm={archivePlan}
-      />
-
-      <Dialog open={Boolean(feedbackBlock)} onOpenChange={open => {
-        if (!open) dismissFeedback(true);
-      }}>
-        <DialogContent className="sm:max-w-[440px]">
-          <DialogHeader>
-            <DialogTitle>How did this timing feel?</DialogTitle>
-            <DialogDescription>{feedbackBlock?.title} · {feedbackPlannedMinutes} minutes planned</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-5 pt-2">
-            <div>
-              <p className="mb-2 text-sm font-medium">Was the time estimate accurate?</p>
-              <div className="grid grid-cols-3 gap-2">
-                {([
-                  ['too_short', 'Needed more'],
-                  ['accurate', 'About right'],
-                  ['too_long', 'Needed less'],
-                ] as const).map(([value, label]) => (
-                  <button key={value} type="button" onClick={() => setFeedbackTiming(value)} className={`rounded-xl border px-2 py-3 text-xs font-medium transition-colors ${feedbackTiming === value ? 'border-primary bg-primary/10 text-primary' : 'border-border hover:bg-muted/50'}`}>{label}</button>
+          <Card>
+            <CardHeader className="px-4 pb-3 pt-4">
+              <div className="flex items-center gap-2">
+                <Sparkles className="h-4 w-4 text-primary" />
+                <CardTitle>Tell Orderly what to change</CardTitle>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4 px-4 pb-4">
+              <div className="max-h-52 space-y-2 overflow-y-auto rounded-xl border border-border/50 bg-background/30 p-3">
+                {messages.map(message => (
+                  <div key={message.id} className={cn('flex', message.role === 'user' ? 'justify-end' : 'justify-start')}>
+                    <p className={cn(
+                      'max-w-[88%] rounded-xl px-3 py-2 text-xs leading-relaxed',
+                      message.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted text-foreground',
+                    )}>
+                      {message.text}
+                    </p>
+                  </div>
                 ))}
               </div>
-            </div>
-            <div>
-              <p className="mb-2 text-sm font-medium">Were you happy with when it was scheduled?</p>
-              <div className="flex gap-2">
-                <Button type="button" variant={feedbackHappy === true ? 'default' : 'outline'} className="flex-1 gap-2" onClick={() => setFeedbackHappy(true)}><ThumbsUp className="h-4 w-4" /> Yes</Button>
-                <Button type="button" variant={feedbackHappy === false ? 'default' : 'outline'} className="flex-1 gap-2" onClick={() => setFeedbackHappy(false)}><ThumbsDown className="h-4 w-4" /> Not really</Button>
+
+              <div className="flex flex-wrap gap-1.5">
+                {EXAMPLES.map(example => (
+                  <button
+                    key={example}
+                    type="button"
+                    onClick={() => setCommand(example)}
+                    className="rounded-full border border-border/60 bg-background/40 px-2.5 py-1 text-[10px] text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
+                  >
+                    {example}
+                  </button>
+                ))}
               </div>
-            </div>
-            <div className="flex justify-end gap-2">
-              <Button variant="ghost" onClick={() => dismissFeedback(true)}>Skip</Button>
-              <Button onClick={saveFeedback} disabled={!feedbackTiming}>Save feedback</Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
+
+              <div className="flex items-end gap-2">
+                <Textarea
+                  value={command}
+                  onChange={event => setCommand(event.target.value)}
+                  onKeyDown={event => {
+                    if (event.key === 'Enter' && !event.shiftKey) {
+                      event.preventDefault();
+                      submitCommand();
+                    }
+                  }}
+                  placeholder="Try: Study for SAT for 2 hours every day for a week"
+                  className="min-h-20 resize-none"
+                />
+                <Button type="button" size="icon" onClick={() => submitCommand()} disabled={!command.trim()} aria-label="Preview command">
+                  <Send className="h-4 w-4" />
+                </Button>
+              </div>
+
+              {preview && (
+                <div className={cn(
+                  'rounded-xl border p-4',
+                  preview.status === 'ready' ? 'border-primary/40 bg-primary/5' : 'border-amber-500/30 bg-amber-500/5',
+                )}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Preview · {preview.kind || 'command'}</p>
+                      <p className="mt-1 text-sm font-medium">{preview.summary}</p>
+                    </div>
+                    <Button type="button" variant="ghost" size="icon-sm" onClick={() => setPreview(null)} aria-label="Close preview">
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+
+                  {preview.assumptions.length > 0 && (
+                    <ul className="mt-3 space-y-1 text-xs text-muted-foreground">
+                      {preview.assumptions.map(assumption => <li key={assumption}>• {assumption}</li>)}
+                    </ul>
+                  )}
+
+                  {preview.candidates.length > 0 && (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {preview.candidates.map(candidate => (
+                        <Button
+                          key={candidate.taskId}
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setSelectedTaskId(candidate.taskId);
+                            submitCommand(preview.command, candidate.taskId);
+                          }}
+                        >
+                          {candidate.title}
+                        </Button>
+                      ))}
+                    </div>
+                  )}
+
+                  {preview.gaps.length > 0 && (
+                    <div className="mt-3 flex flex-wrap gap-2 text-xs">
+                      {preview.gaps.map(gap => (
+                        <span key={gap.startAt} className="rounded-lg border border-border/60 bg-background/50 px-2.5 py-1.5">
+                          {gap.date} · {gap.label}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  {preview.occurrences.length > 0 && (
+                    <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                      {preview.occurrences.map((occurrence, index) => (
+                        <div key={`${occurrence.date}-${index}`} className="rounded-lg border border-border/50 bg-background/50 p-2.5 text-xs">
+                          <p className="truncate font-medium">{occurrence.title}</p>
+                          <p className="mt-1 text-muted-foreground">
+                            {occurrence.date} · {timeLabel(occurrence.startAt, timeZone)} · {formatDuration(occurrence.durationSeconds)}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="mt-4 flex justify-end gap-2">
+                    <Button type="button" variant="ghost" size="sm" onClick={() => setPreview(null)}>
+                      <X className="h-4 w-4" /> Cancel
+                    </Button>
+                    {preview.status === 'ready' && preview.actions.length > 0 && (
+                      <Button type="button" size="sm" onClick={() => void applyPreview()} disabled={applying}>
+                        {applying ? <RotateCcw className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                        Apply
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </main>
+      </div>
     </div>
   );
 }

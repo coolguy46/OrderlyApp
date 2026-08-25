@@ -14,6 +14,7 @@ import {
 } from '@/components/ui';
 import { SubjectBadge } from '@/components/ui';
 import { TaskCard, TaskForm } from '@/components/tasks';
+import { DashboardSchedule } from './DashboardSchedule';
 import { formatDuration, getDaysUntil, cn, isExamType } from '@/lib/utils';
 import { format, isToday, startOfDay, startOfMonth, endOfMonth, startOfWeek, endOfWeek, addDays } from 'date-fns';
 import Link from 'next/link';
@@ -31,6 +32,8 @@ import {
   Plus,
   X,
   Sparkles,
+  ListTodo,
+  CalendarClock,
 } from 'lucide-react';
 
 // Animated counter hook
@@ -95,6 +98,7 @@ export function Dashboard() {
   const [mounted, setMounted] = useState(false);
   const [currentDate, setCurrentDate] = useState(new Date());
   const [showTaskForm, setShowTaskForm] = useState(false);
+  const [mainView, setMainView] = useState<'tasks' | 'schedule'>('tasks');
   // Store selected date as a stable string to avoid Date reference / timezone issues
   const [selectedDateStr, setSelectedDateStr] = useState<string | null>(null);
 
@@ -302,8 +306,47 @@ export function Dashboard() {
         ))}
       </motion.div>
 
-      {/* Main Content - Tasks on left, Calendar on right */}
-      <motion.div variants={itemVariants} className="grid gap-4 lg:grid-cols-3">
+      <motion.div variants={itemVariants} className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h2 className="text-sm font-semibold font-display">Your day</h2>
+          <p className="text-[11px] text-muted-foreground">Switch between what is due and when you plan to do it.</p>
+        </div>
+        <div className="grid grid-cols-2 rounded-lg border border-border/50 bg-muted/35 p-0.5" role="tablist" aria-label="Dashboard task or schedule view">
+          {([
+            { id: 'tasks' as const, label: 'Tasks', icon: ListTodo },
+            { id: 'schedule' as const, label: 'Schedule', icon: CalendarClock },
+          ]).map(item => {
+            const selected = mainView === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                role="tab"
+                aria-selected={selected}
+                onClick={() => setMainView(item.id)}
+                className={cn(
+                  'flex h-8 items-center justify-center gap-1.5 rounded-md px-3 text-xs font-medium transition-colors',
+                  selected ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
+                )}
+              >
+                <item.icon className={cn('h-3.5 w-3.5', selected && item.id === 'schedule' && 'text-indigo-400')} />
+                {item.label}
+              </button>
+            );
+          })}
+        </div>
+      </motion.div>
+
+      {/* Main Content - deadline tasks or the selected day's schedule */}
+      <AnimatePresence mode="wait">
+      {mainView === 'tasks' ? (
+      <motion.div
+        key="dashboard-tasks"
+        initial={{ opacity: 0, y: 6 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: -6 }}
+        className="grid gap-4 lg:grid-cols-3"
+      >
         {/* Upcoming Tasks - shown first on mobile for priority */}
         <div className="lg:col-span-2 order-2 lg:order-1">
           <Card className="border-border/50 interactive-card">
@@ -488,6 +531,17 @@ export function Dashboard() {
           </Card>
         </div>
       </motion.div>
+      ) : (
+        <motion.div
+          key="dashboard-schedule"
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -6 }}
+        >
+          <DashboardSchedule />
+        </motion.div>
+      )}
+      </AnimatePresence>
 
       {/* Bottom Section - Goals and Exams side by side */}
       <motion.div variants={itemVariants} className="grid gap-4 lg:grid-cols-2">

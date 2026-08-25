@@ -24,7 +24,7 @@ const navItems = [
   { href: '/', icon: LayoutDashboard, label: 'Dashboard' },
   { href: '/tasks', icon: CheckSquare, label: 'Tasks' },
   { href: '/calendar', icon: Calendar, label: 'Calendar' },
-  { href: '/planner', icon: CalendarClock, label: 'Planner' },
+  { href: '/planner', icon: CalendarClock, label: 'Assistant' },
   { href: '/goals', icon: Target, label: 'Goals' },
   { href: '/study', icon: Timer, label: 'Study' },
   { href: '/exams', icon: GraduationCap, label: 'Exams' },

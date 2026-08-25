@@ -23,9 +23,19 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Save, X, Plus, AlertCircle, Sparkles, Calendar, Tag, Flag, BookOpen, FileText, Zap, Repeat, Clock, Trash2 } from 'lucide-react';
+import { Save, Plus, Sparkles, Calendar, Tag, Flag, BookOpen, FileText, Zap, Repeat, Clock, Trash2, Timer } from 'lucide-react';
 import { calculateSuggestedPriority } from '@/lib/utils';
 import { cn } from '@/lib/utils';
+import { useScheduleStore } from '@/lib/schedule/store';
+import {
+  DEFAULT_SCHEDULE_DURATION_SECONDS,
+  formatDurationInput,
+  localDateFromIso,
+  localDateTimeToIso,
+  localTimeFromIso,
+  parseDurationInput,
+  scheduledEndAt,
+} from '@/lib/schedule/selectors';
 
 interface TaskFormProps {
   isOpen: boolean;
@@ -40,6 +50,20 @@ const SUBJECT_COLORS = [
 
 export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
   const { addTask, updateTask, subjects, addSubject, deleteSubject, user } = useAppStore();
+  const importedDeadlineLocked = Boolean(
+    task && (task.source === 'canvas' || task.source === 'google_classroom'),
+  );
+  const importedDeadlineTime = importedDeadlineLocked && task?.due_date
+    ? localTimeFromIso(
+        task.due_date,
+        Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+      ) || ''
+    : '';
+  const upsertTaskSchedule = useScheduleStore(state => state.upsertTaskSchedule);
+  const removeTaskSchedule = useScheduleStore(state => state.removeTaskSchedule);
+  const scheduleEntry = useScheduleStore(state => (
+    user?.id && task?.id ? state.entriesByUser[user.id]?.[task.id] || null : null
+  ));
   
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -49,6 +73,10 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
   const [subjectId, setSubjectId] = useState('none');
   const [dueDate, setDueDate] = useState('');
   const [dueTime, setDueTime] = useState('');
+  const [scheduleDate, setScheduleDate] = useState('');
+  const [scheduleStartTime, setScheduleStartTime] = useState('');
+  const [durationInput, setDurationInput] = useState('');
+  const [scheduleError, setScheduleError] = useState('');
   const [recurrence, setRecurrence] = useState<'none' | 'daily' | 'weekly' | 'monthly'>('none');
   const [recurrenceDays, setRecurrenceDays] = useState<number[]>([]);
   
@@ -77,14 +105,25 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
       setPriority(task.priority);
       setStatus(task.status);
       setSubjectId(task.subject_id || 'none');
-      setDueDate(task.due_date ? new Date(task.due_date).toISOString().split('T')[0] : '');
+      setDueDate(task.due_date
+        ? localDateFromIso(
+            task.due_date,
+            Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+          ) || ''
+        : '');
       setDueTime(task.due_time || '');
+      setScheduleDate(scheduleEntry?.scheduledDate || '');
+      setScheduleStartTime(scheduleEntry?.startAt
+        ? localTimeFromIso(scheduleEntry.startAt, Intl.DateTimeFormat().resolvedOptions().timeZone) || ''
+        : '');
+      setDurationInput(formatDurationInput(scheduleEntry?.durationSeconds));
+      setScheduleError('');
       setRecurrence(task.recurrence || 'none');
       setRecurrenceDays(task.recurrence_days || []);
     } else {
       resetForm();
     }
-  }, [task, isOpen]);
+  }, [task, isOpen, scheduleEntry]);
 
   const handleCreateSubject = async () => {
     if (!newSubjectName.trim()) return;
@@ -124,6 +163,63 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
     
     if (!title.trim()) return;
 
+    let durationSeconds: number | null = null;
+    if (durationInput.trim()) {
+      durationSeconds = parseDurationInput(durationInput);
+      if (durationSeconds === null) {
+        setScheduleError('Enter duration as HH:MM:SS (up to 24:00:00).');
+        return;
+      }
+    }
+    if (scheduleStartTime && !scheduleDate) {
+      setScheduleError('Choose a schedule date before adding a start time.');
+      return;
+    }
+
+    const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+    const startAt = scheduleStartTime
+      ? localDateTimeToIso(scheduleDate, `${scheduleStartTime}:00`, timeZone)
+      : null;
+    if (scheduleStartTime && !startAt) {
+      setScheduleError('That start time is not valid on the selected date.');
+      return;
+    }
+    if (startAt && durationSeconds === null) {
+      durationSeconds = DEFAULT_SCHEDULE_DURATION_SECONDS;
+    }
+
+    const originalDueDate = task?.due_date
+      ? localDateFromIso(task.due_date, timeZone)
+      : null;
+    const hasUnchangedExternalDeadline = Boolean(
+      task?.due_date
+      && (task.source === 'canvas' || task.source === 'google_classroom')
+      && dueDate === originalDueDate
+      && dueTime === (task.due_time || ''),
+    );
+    const deadlineAt = hasUnchangedExternalDeadline
+      ? task?.due_date || null
+      : dueDate
+        ? localDateTimeToIso(dueDate, `${dueTime || '23:59'}:00`, timeZone)
+        : null;
+    if (dueDate && !deadlineAt) {
+      setScheduleError('That due time is not valid on the selected due date.');
+      return;
+    }
+    const endAt = scheduledEndAt(startAt, durationSeconds);
+    if (endAt && deadlineAt && new Date(endAt).getTime() > new Date(deadlineAt).getTime()) {
+      const formattedDeadline = new Intl.DateTimeFormat('en-US', {
+        timeZone,
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+      }).format(new Date(deadlineAt));
+      setScheduleError(`This block ends after the task deadline (${formattedDeadline}). Choose an earlier time or shorter duration.`);
+      return;
+    }
+    setScheduleError('');
+
     try {
       const taskData = {
         user_id: user?.id || '',
@@ -132,17 +228,39 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
         priority,
         status,
         subject_id: subjectId === 'none' ? null : subjectId,
-        due_date: dueDate ? new Date(dueDate + 'T00:00:00').toISOString() : null,
+        // Preserve exact Canvas/Classroom deadline instants when the user only
+        // edits schedule metadata. Due fields and work schedule are independent.
+        due_date: task?.due_date && dueDate === originalDueDate
+          ? task.due_date
+          : dueDate ? new Date(dueDate + 'T00:00:00').toISOString() : null,
         due_time: dueTime || null,
         recurrence,
         recurrence_days: recurrence === 'weekly' && recurrenceDays.length > 0 ? recurrenceDays : null,
-        completed_at: status === 'completed' ? new Date().toISOString() : null,
+        completed_at: status === 'completed' ? task?.completed_at || new Date().toISOString() : null,
       };
 
+      let savedTask: Task | null = task || null;
       if (task) {
         await updateTask(task.id, taskData);
       } else {
-        await addTask(taskData);
+        savedTask = await addTask(taskData);
+        if (!savedTask) return;
+      }
+
+      if (savedTask && user?.id) {
+        const hasScheduleMetadata = Boolean(scheduleDate || startAt || durationSeconds);
+        if (hasScheduleMetadata) {
+          upsertTaskSchedule(user.id, savedTask.id, {
+            scheduledDate: scheduleDate || null,
+            startAt,
+            durationSeconds,
+            recurrence,
+            recurrenceDays: recurrence === 'weekly' ? recurrenceDays : null,
+            recurrenceEndDate: scheduleEntry?.recurrenceEndDate || null,
+          });
+        } else {
+          removeTaskSchedule(user.id, savedTask.id);
+        }
       }
     } catch (error) {
       console.error('Task submit error:', error);
@@ -161,6 +279,10 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
     setSubjectId('none');
     setDueDate('');
     setDueTime('');
+    setScheduleDate('');
+    setScheduleStartTime('');
+    setDurationInput('');
+    setScheduleError('');
     setRecurrence('none');
     setRecurrenceDays([]);
     setShowNewSubject(false);
@@ -172,7 +294,7 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
   return (
     <>
       <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-        <DialogContent className="sm:max-w-[500px] p-0 overflow-hidden">
+        <DialogContent className="max-h-[92vh] overflow-y-auto p-0 sm:max-w-[540px]">
         {/* Header */}
         <div className="px-6 pt-6 pb-4 bg-gradient-to-b from-indigo-500/5 to-transparent">
           <DialogHeader>
@@ -419,24 +541,26 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
                 type="date"
                 value={dueDate}
                 onChange={(e) => setDueDate(e.target.value)}
+                disabled={importedDeadlineLocked}
                 className="h-9 bg-muted/30 border-border/50"
               />
             </div>
           </div>
 
-          {/* Time & Recurrence row */}
+          {/* Deadline time & recurrence row */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label htmlFor="dueTime" className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
                 <Clock className="w-3 h-3" />
-                Time
+                Due Time
                 <span className="text-muted-foreground/50 normal-case tracking-normal font-normal">(optional)</span>
               </Label>
               <Input
                 id="dueTime"
                 type="time"
-                value={dueTime}
+                value={importedDeadlineLocked ? importedDeadlineTime : dueTime}
                 onChange={(e) => setDueTime(e.target.value)}
+                disabled={importedDeadlineLocked}
                 className="h-9 bg-muted/30 border-border/50"
               />
             </div>
@@ -459,6 +583,12 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
               </Select>
             </div>
           </div>
+
+          {importedDeadlineLocked && (
+            <p className="-mt-1 text-[11px] text-muted-foreground">
+              This deadline is kept in sync with {task?.source === 'canvas' ? 'Canvas' : 'Google Classroom'}. You can schedule the work separately below.
+            </p>
+          )}
 
           {/* Weekday picker for weekly recurrence */}
           {recurrence === 'weekly' && (
@@ -487,6 +617,114 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
               </div>
             </div>
           )}
+
+          {/* Scheduling is intentionally separate from the deadline above. */}
+          <div className="space-y-3 rounded-xl border border-border/40 bg-muted/15 p-3">
+            <div>
+              <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                <Calendar className="h-3 w-3" />
+                Schedule
+                <span className="font-normal normal-case tracking-normal text-muted-foreground/50">(optional)</span>
+              </div>
+              <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground/70">
+                Leave the start time blank to keep this task in the untimed shelf. Its deadline does not change.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="scheduleDate" className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  <Calendar className="h-3 w-3" /> Schedule Date
+                </Label>
+                <Input
+                  id="scheduleDate"
+                  type="date"
+                  value={scheduleDate}
+                  onChange={event => {
+                    setScheduleDate(event.target.value);
+                    setScheduleError('');
+                  }}
+                  className="h-9 border-border/50 bg-muted/30"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="scheduleStartTime" className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  <Clock className="h-3 w-3" /> Start Time
+                </Label>
+                <Input
+                  id="scheduleStartTime"
+                  type="time"
+                  value={scheduleStartTime}
+                  onChange={event => {
+                    const value = event.target.value;
+                    setScheduleStartTime(value);
+                    if (value && !scheduleDate && dueDate) setScheduleDate(dueDate);
+                    setScheduleError('');
+                  }}
+                  className="h-9 border-border/50 bg-muted/30"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="duration" className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  <Timer className="h-3 w-3" /> Duration
+                </Label>
+                <Input
+                  id="duration"
+                  type="text"
+                  inputMode="numeric"
+                  placeholder="01:00:00"
+                  value={durationInput}
+                  aria-invalid={Boolean(scheduleError && durationInput)}
+                  onChange={event => {
+                    setDurationInput(event.target.value.replace(/[^\d:]/g, ''));
+                    setScheduleError('');
+                  }}
+                  onBlur={() => {
+                    const parsed = durationInput.trim() ? parseDurationInput(durationInput) : null;
+                    if (parsed) setDurationInput(formatDurationInput(parsed));
+                  }}
+                  className="h-9 border-border/50 bg-muted/30 font-mono"
+                />
+              </div>
+            </div>
+
+            {scheduleStartTime && !durationInput && (
+              <p className="text-[11px] text-muted-foreground">
+                No duration entered—this will use 00:30:00.
+              </p>
+            )}
+            {(() => {
+              const previewDuration = durationInput.trim()
+                ? parseDurationInput(durationInput)
+                : scheduleStartTime ? DEFAULT_SCHEDULE_DURATION_SECONDS : null;
+              const previewStart = scheduleDate && scheduleStartTime
+                ? localDateTimeToIso(
+                    scheduleDate,
+                    `${scheduleStartTime}:00`,
+                    Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+                  )
+                : null;
+              const previewEnd = scheduledEndAt(previewStart, previewDuration);
+              const endTime = previewEnd
+                ? localTimeFromIso(previewEnd, Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC')
+                : null;
+              if (!previewStart || !endTime) return null;
+              const formatClock = (value: string) => {
+                const [hours, minutes] = value.split(':').map(Number);
+                return `${hours % 12 || 12}:${String(minutes).padStart(2, '0')} ${hours >= 12 ? 'PM' : 'AM'}`;
+              };
+              return (
+                <p className="rounded-md bg-indigo-500/10 px-2.5 py-2 text-[11px] text-indigo-300">
+                  Scheduled {formatClock(scheduleStartTime)}–{formatClock(endTime)} on {scheduleDate}
+                </p>
+              );
+            })()}
+            {scheduleError && (
+              <p role="alert" className="text-xs text-red-400">{scheduleError}</p>
+            )}
+          </div>
 
           {/* Actions */}
           <div className="flex gap-2 pt-3 border-t border-border/30">

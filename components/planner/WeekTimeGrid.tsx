@@ -35,6 +35,10 @@ import {
 } from 'date-fns';
 import { Clock3, Expand, GripVertical, LockKeyhole } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
+import {
+  UntimedTaskShelf,
+  type UntimedScheduleItem,
+} from '@/components/schedule/UntimedTaskShelf';
 import { cn } from '@/lib/utils';
 import type { PlannerBlockView } from './types';
 
@@ -70,6 +74,10 @@ export interface WeekTimeGridProps {
   ) => void | Promise<void>;
   onBlockClick?: (block: PlannerBlockView) => void;
   onRequestFullscreen?: () => void;
+  /** Optional Akiflow-style shelf shown below the date headers. */
+  untimedItems?: UntimedScheduleItem[];
+  showUntimedShelf?: boolean;
+  onUntimedItemClick?: (item: UntimedScheduleItem) => void;
 }
 
 function asDate(value: string | Date): Date {
@@ -292,6 +300,9 @@ export function WeekTimeGrid({
   onBlockResize,
   onBlockClick,
   onRequestFullscreen,
+  untimedItems = [],
+  showUntimedShelf = false,
+  onUntimedItemClick,
 }: WeekTimeGridProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const resizeCleanupRef = useRef<(() => void) | null>(null);
@@ -449,7 +460,7 @@ export function WeekTimeGrid({
   const contentMinWidth = variant === 'fullscreen' ? 'min-w-[980px] lg:min-w-0' : 'min-w-[990px]';
 
   return (
-    <section className={cn('min-w-0', className)} aria-label="Planned week calendar">
+    <section className={cn('min-w-0', className)} aria-label="Weekly schedule">
       {showSummaryHeader && (
         <div className="mb-2 flex min-h-8 items-center justify-between gap-3">
           <div className="min-w-0">
@@ -457,7 +468,7 @@ export function WeekTimeGrid({
               {format(days[0], 'MMM d')}–{format(days[6], 'MMM d, yyyy')}
             </p>
             <p className="text-[10px] text-muted-foreground">
-              {editable ? 'Drag blocks to move them. Drag the bottom edge to resize.' : 'Read-only planned schedule'}
+              {editable ? 'Drag blocks to move them. Drag the bottom edge to resize.' : 'Read-only schedule'}
             </p>
           </div>
           {variant === 'preview' && onRequestFullscreen && (
@@ -492,44 +503,56 @@ export function WeekTimeGrid({
           )}
         >
           <div className={cn('relative', contentMinWidth)}>
-            <div
-              className="sticky top-0 z-40 grid h-14 border-b border-border/70 bg-card/95 shadow-sm backdrop-blur-xl"
-              style={{ gridTemplateColumns: columns }}
-            >
-              <div className="sticky left-0 z-50 flex items-center justify-center border-r border-border/60 bg-card/95 px-1 text-[9px] font-medium text-muted-foreground">
-                {timeZoneLabel || 'Local'}
-              </div>
-              {days.map((day) => (
-                <div
-                  key={day.toISOString()}
-                  className={cn(
-                    'flex items-stretch justify-stretch border-r border-border/50 last:border-r-0',
-                    isSameDay(day, now) && 'bg-primary/5',
-                    selectedDay && isSameDay(day, selectedDay) && 'bg-indigo-500/10',
-                  )}
-                >
-                  <button
-                    type="button"
-                    onClick={() => onSelectedDateChange?.(startOfDay(day))}
-                    disabled={!onSelectedDateChange}
-                    aria-pressed={Boolean(selectedDay && isSameDay(day, selectedDay))}
-                    className="flex w-full flex-col items-center justify-center px-2 disabled:cursor-default"
-                  >
-                    <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                      {format(day, 'EEE')}
-                    </span>
-                    <span
-                      className={cn(
-                        'mt-0.5 flex h-6 min-w-6 items-center justify-center rounded-full px-1.5 text-xs font-semibold',
-                        isSameDay(day, now) && 'bg-primary text-primary-foreground shadow-sm',
-                        selectedDay && isSameDay(day, selectedDay) && !isSameDay(day, now) && 'bg-indigo-500 text-white shadow-sm',
-                      )}
-                    >
-                      {format(day, 'd')}
-                    </span>
-                  </button>
+            <div className="sticky top-0 z-40 bg-card/95 shadow-sm backdrop-blur-xl" data-time-grid-header>
+              <div
+                className="grid h-14 border-b border-border/70 bg-card/95"
+                style={{ gridTemplateColumns: columns }}
+              >
+                <div className="sticky left-0 z-50 flex items-center justify-center border-r border-border/60 bg-card/95 px-1 text-[9px] font-medium text-muted-foreground">
+                  {timeZoneLabel || 'Local'}
                 </div>
-              ))}
+                {days.map((day) => (
+                  <div
+                    key={day.toISOString()}
+                    className={cn(
+                      'flex items-stretch justify-stretch border-r border-border/50 last:border-r-0',
+                      isSameDay(day, now) && 'bg-primary/5',
+                      selectedDay && isSameDay(day, selectedDay) && 'bg-indigo-500/10',
+                    )}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => onSelectedDateChange?.(startOfDay(day))}
+                      disabled={!onSelectedDateChange}
+                      aria-pressed={Boolean(selectedDay && isSameDay(day, selectedDay))}
+                      className="flex w-full flex-col items-center justify-center px-2 disabled:cursor-default"
+                    >
+                      <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                        {format(day, 'EEE')}
+                      </span>
+                      <span
+                        className={cn(
+                          'mt-0.5 flex h-6 min-w-6 items-center justify-center rounded-full px-1.5 text-xs font-semibold',
+                          isSameDay(day, now) && 'bg-primary text-primary-foreground shadow-sm',
+                          selectedDay && isSameDay(day, selectedDay) && !isSameDay(day, now) && 'bg-indigo-500 text-white shadow-sm',
+                        )}
+                      >
+                        {format(day, 'd')}
+                      </span>
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              {showUntimedShelf && (
+                <UntimedTaskShelf
+                  days={days}
+                  columns={columns}
+                  items={untimedItems}
+                  selectedDate={selectedDay}
+                  onItemClick={onUntimedItemClick}
+                />
+              )}
             </div>
 
             <div className="grid" style={{ gridTemplateColumns: columns }}>

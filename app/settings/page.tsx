@@ -178,7 +178,7 @@ export default function SettingsPage() {
       horizonDays: 7,
       slotMinutes: 15,
     });
-    toast.success('Planner availability saved');
+    toast.success('Schedule availability saved');
   };
   
   const handleSaveProfile = async () => {
@@ -424,7 +424,7 @@ export default function SettingsPage() {
           </Card>
         </motion.div>
 
-        {/* Planner Availability Section */}
+        {/* Schedule Availability Section */}
         <motion.div variants={sectionVariants}>
           <Card>
             <CardHeader>
@@ -433,8 +433,8 @@ export default function SettingsPage() {
                   <CalendarClock className="w-5 h-5 text-indigo-500" />
                 </div>
                 <div>
-                  <CardTitle className="text-lg">Planning Availability</CardTitle>
-                  <CardDescription>Tell Orderly when school and sleep make planning impossible</CardDescription>
+                  <CardTitle className="text-lg">Schedule Availability</CardTitle>
+                  <CardDescription>Tell Orderly when school and sleep make you unavailable</CardDescription>
                 </div>
               </div>
             </CardHeader>
@@ -445,7 +445,6 @@ export default function SettingsPage() {
                     <p className="text-sm font-medium">School days</p>
                     <p className="text-xs text-muted-foreground">Orderly blocks the whole span from wake-up until you get home.</p>
                   </div>
-                  <span className="text-[10px] rounded-full bg-indigo-500/10 px-2 py-1 text-indigo-400">7-day plans only</span>
                 </div>
                 <div className="grid grid-cols-7 gap-1.5">
                   {[
@@ -495,8 +494,8 @@ export default function SettingsPage() {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 border-t pt-5">
                 <div className="rounded-xl border border-border/60 p-3">
-                  <p className="text-sm font-medium">Weekend planning window</p>
-                  <p className="text-xs text-muted-foreground mb-3">The available range on days without school.</p>
+                  <p className="text-sm font-medium">Weekend availability</p>
+                  <p className="text-xs text-muted-foreground mb-3">The range Orderly can suggest on days without school.</p>
                   <div className="grid grid-cols-2 gap-2">
                     <div><label className="text-[10px] text-muted-foreground">Start</label><Input type="time" value={plannerDraft.weekendAvailableStart} onChange={event => setPlannerDraft(current => ({ ...current, weekendAvailableStart: event.target.value }))} className="h-9" /></div>
                     <div><label className="text-[10px] text-muted-foreground">End</label><Input type="time" value={plannerDraft.weekendAvailableEnd} onChange={event => setPlannerDraft(current => ({ ...current, weekendAvailableEnd: event.target.value }))} className="h-9" /></div>
@@ -504,13 +503,13 @@ export default function SettingsPage() {
                 </div>
                 <div className="rounded-xl border border-border/60 p-3 space-y-3">
                   <div className="flex items-center justify-between gap-3">
-                    <div><p className="text-sm font-medium">Maximum planned work</p><p className="text-xs text-muted-foreground">Per day, outside school.</p></div>
+                    <div><p className="text-sm font-medium">Daily workload limit</p><p className="text-xs text-muted-foreground">Used when finding an open time.</p></div>
                     <span className="text-sm font-bold">{Math.round(plannerDraft.maxDailyMinutes / 60 * 10) / 10}h</span>
                   </div>
                   <input type="range" min="60" max="480" step="15" value={plannerDraft.maxDailyMinutes} onChange={event => setPlannerDraft(current => ({ ...current, maxDailyMinutes: Number(event.target.value) }))} className="w-full accent-indigo-500" />
                   <div className="grid grid-cols-2 gap-2">
-                    <div><label className="text-[10px] text-muted-foreground">Longest block</label><select value={plannerDraft.maxBlockMinutes} onChange={event => setPlannerDraft(current => ({ ...current, maxBlockMinutes: Number(event.target.value) }))} className="mt-1 h-9 w-full rounded-md border border-border bg-background px-2 text-xs"><option value="30">30 min</option><option value="45">45 min</option><option value="60">60 min</option><option value="75">75 min</option><option value="90">90 min</option></select></div>
-                    <div><label className="text-[10px] text-muted-foreground">Break between blocks</label><select value={plannerDraft.minBreakMinutes} onChange={event => setPlannerDraft(current => ({ ...current, minBreakMinutes: Number(event.target.value) }))} className="mt-1 h-9 w-full rounded-md border border-border bg-background px-2 text-xs"><option value="0">No buffer</option><option value="15">15 min</option><option value="30">30 min</option><option value="45">45 min</option><option value="60">60 min</option></select></div>
+                    <div><label className="text-[10px] text-muted-foreground">Preferred block length</label><select value={plannerDraft.maxBlockMinutes} onChange={event => setPlannerDraft(current => ({ ...current, maxBlockMinutes: Number(event.target.value) }))} className="mt-1 h-9 w-full rounded-md border border-border bg-background px-2 text-xs"><option value="30">30 min</option><option value="45">45 min</option><option value="60">60 min</option><option value="75">75 min</option><option value="90">90 min</option></select></div>
+                    <div><label className="text-[10px] text-muted-foreground">Buffer between items</label><select value={plannerDraft.minBreakMinutes} onChange={event => setPlannerDraft(current => ({ ...current, minBreakMinutes: Number(event.target.value) }))} className="mt-1 h-9 w-full rounded-md border border-border bg-background px-2 text-xs"><option value="0">No buffer</option><option value="15">15 min</option><option value="30">30 min</option><option value="45">45 min</option><option value="60">60 min</option></select></div>
                   </div>
                 </div>
               </div>
