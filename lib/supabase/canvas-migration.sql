@@ -24,9 +24,23 @@ CREATE TABLE IF NOT EXISTS canvas_settings (
   last_sync_at TIMESTAMP WITH TIME ZONE,
   sync_enabled BOOLEAN DEFAULT true,
   auto_import_assignments BOOLEAN DEFAULT true,
+  auto_sync_interval INTEGER NOT NULL DEFAULT 15 CHECK (auto_sync_interval IN (5, 15, 30, 60)),
+  time_zone TEXT NOT NULL DEFAULT 'UTC',
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+
+-- Persist each user's interval so browser and background sync use the same value.
+ALTER TABLE canvas_settings
+ADD COLUMN IF NOT EXISTS auto_sync_interval INTEGER NOT NULL DEFAULT 15,
+ADD COLUMN IF NOT EXISTS time_zone TEXT NOT NULL DEFAULT 'UTC';
+
+ALTER TABLE canvas_settings
+DROP CONSTRAINT IF EXISTS canvas_settings_auto_sync_interval_check;
+
+ALTER TABLE canvas_settings
+ADD CONSTRAINT canvas_settings_auto_sync_interval_check
+CHECK (auto_sync_interval IN (5, 15, 30, 60));
 
 -- Enable RLS for canvas_settings
 ALTER TABLE canvas_settings ENABLE ROW LEVEL SECURITY;

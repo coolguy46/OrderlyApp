@@ -471,6 +471,8 @@ export interface CanvasSettings {
   last_sync_at: string | null;
   sync_enabled: boolean;
   auto_import_assignments: boolean;
+  auto_sync_interval?: number;
+  time_zone?: string;
   created_at: string;
   updated_at: string;
 }
@@ -495,6 +497,8 @@ export async function upsertCanvasSettings(userId: string, settings: {
   last_sync_at?: string | null;
   sync_enabled?: boolean;
   auto_import_assignments?: boolean;
+  auto_sync_interval?: number;
+  time_zone?: string;
 }): Promise<CanvasSettings | null> {
   
   

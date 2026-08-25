@@ -189,6 +189,33 @@ function zonedDateTimeToUtc(
   return new Date(result);
 }
 
+/**
+ * Rebuild a parsed Canvas due date in the user's timezone. Canvas often sends
+ * all-day assignments as a date without a time; those are due at 11:59 PM,
+ * not at noon or midnight on the server.
+ */
+export function hydrateCanvasDueDate(
+  assignment: Pick<CanvasAssignment, 'dueDate' | 'dueDateOnly'>,
+  timeZone?: string
+): Date | undefined {
+  if (!assignment.dueDateOnly) {
+    return assignment.dueDate ? new Date(assignment.dueDate) : undefined;
+  }
+
+  const [year, month, day] = assignment.dueDateOnly.split('-').map(Number);
+  if (![year, month, day].every(Number.isFinite)) return undefined;
+
+  if (timeZone) {
+    try {
+      return zonedDateTimeToUtc(year, month - 1, day, 23, 59, 0, timeZone);
+    } catch {
+      // Fall through to the runtime's local timezone for unsupported TZIDs.
+    }
+  }
+
+  return new Date(`${assignment.dueDateOnly}T23:59:00`);
+}
+
 /** Parse an iCal DATE or DATE-TIME without depending on the server's timezone. */
 function parseICalDate(
   dateString?: string,

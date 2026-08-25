@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { CanvasAssignment } from './canvas';
+import { CanvasAssignment, hydrateCanvasDueDate } from './canvas';
 import * as db from '@/lib/supabase/services';
 
 interface CanvasSettings {
@@ -60,8 +60,11 @@ export function useCanvasSyncSupabase(options: UseCanvasSyncOptions): UseCanvasS
   const [nextSyncAt, setNextSyncAt] = useState<Date | null>(null);
 
   // Refs for interval management
-  const syncIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const countdownIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const syncNowRef = useRef<() => Promise<void>>(async () => {});
+  const icalUrlRef = useRef('');
+  const lastAttemptAtRef = useRef<number | null>(null);
+  const [schedulerVersion, setSchedulerVersion] = useState(0);
 
   // Load settings from Supabase on mount
   useEffect(() => {
@@ -74,12 +77,30 @@ export function useCanvasSyncSupabase(options: UseCanvasSyncOptions): UseCanvasS
       try {
         const canvasSettings = await db.getCanvasSettings(userId);
         if (canvasSettings) {
+          const savedInterval = Number(localStorage.getItem(`canvas_sync_interval_${userId}`));
+          const databaseInterval = Number(canvasSettings.auto_sync_interval);
+          const autoSyncInterval = [5, 15, 30, 60].includes(savedInterval)
+            ? savedInterval
+            : [5, 15, 30, 60].includes(databaseInterval) ? databaseInterval : defaultInterval;
+          icalUrlRef.current = canvasSettings.ical_url;
           setSettings({
             icalUrl: canvasSettings.ical_url,
             lastSyncAt: canvasSettings.last_sync_at ? new Date(canvasSettings.last_sync_at) : null,
             syncEnabled: canvasSettings.sync_enabled,
-            autoSyncInterval: defaultInterval,
+            autoSyncInterval,
           });
+
+          // Once the database migration is present, carry forward an existing
+          // browser preference and record the timezone used by background sync.
+          if (canvasSettings.auto_sync_interval !== undefined) {
+            const browserTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+            if (databaseInterval !== autoSyncInterval || canvasSettings.time_zone !== browserTimeZone) {
+              void db.upsertCanvasSettings(userId, {
+                auto_sync_interval: autoSyncInterval,
+                time_zone: browserTimeZone,
+              });
+            }
+          }
         }
       } catch (err) {
         console.error('Error loading Canvas settings:', err);
@@ -107,7 +128,8 @@ export function useCanvasSyncSupabase(options: UseCanvasSyncOptions): UseCanvasS
 
   // Sync function
   const syncNow = useCallback(async () => {
-    if (!settings.icalUrl || isSyncing || !userId) return;
+    const currentIcalUrl = icalUrlRef.current || settings.icalUrl;
+    if (!currentIcalUrl || isSyncing || !userId) return;
 
     setIsSyncing(true);
     setError(null);
@@ -116,7 +138,7 @@ export function useCanvasSyncSupabase(options: UseCanvasSyncOptions): UseCanvasS
       const response = await fetch('/api/canvas/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ icalUrl: settings.icalUrl }),
+        body: JSON.stringify({ icalUrl: currentIcalUrl }),
       });
 
       const data = await response.json();
@@ -125,12 +147,11 @@ export function useCanvasSyncSupabase(options: UseCanvasSyncOptions): UseCanvasS
         throw new Error(data.error || 'Failed to sync Canvas calendar');
       }
 
-      // Convert date strings to Date objects
+      // Convert date strings to Date objects in the user's timezone.
+      const browserTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
       const hydratedAssignments: CanvasAssignment[] = data.assignments.map((a: CanvasAssignment) => ({
         ...a,
-        dueDate: a.dueDateOnly
-          ? new Date(`${a.dueDateOnly}T23:59:00`)
-          : a.dueDate ? new Date(a.dueDate) : undefined,
+        dueDate: hydrateCanvasDueDate(a, browserTimeZone),
         startDate: a.startDate ? new Date(a.startDate) : undefined,
         endDate: a.endDate ? new Date(a.endDate) : undefined,
       }));
@@ -168,74 +189,53 @@ export function useCanvasSyncSupabase(options: UseCanvasSyncOptions): UseCanvasS
       onSyncError?.(err instanceof Error ? err : new Error(errorMessage));
     } finally {
       setIsSyncing(false);
+      lastAttemptAtRef.current = Date.now();
+      setSchedulerVersion(version => version + 1);
     }
   }, [settings, isSyncing, userId, saveSettings, onSyncComplete, onSyncError]);
 
-  // Set up auto-sync interval
+  // Keep the scheduler independent from syncNow's changing React closure.
+  // Otherwise toggling isSyncing recreates syncNow and restarts the timer.
   useEffect(() => {
-    // Clear existing intervals
-    if (syncIntervalRef.current) {
-      clearInterval(syncIntervalRef.current);
-      syncIntervalRef.current = null;
+    syncNowRef.current = syncNow;
+  }, [syncNow]);
+
+  // Schedule the next sync for the exact remaining delay. A fixed setInterval
+  // caused the countdown to reach zero before the interval actually fired.
+  useEffect(() => {
+    if (syncTimeoutRef.current) {
+      clearTimeout(syncTimeoutRef.current);
+      syncTimeoutRef.current = null;
     }
 
-    // Set up new interval if auto-sync is enabled and we have a URL
     if (settings.syncEnabled && settings.icalUrl && !isLoading && userId) {
       const intervalMs = settings.autoSyncInterval * 60 * 1000;
-      
-      // Calculate next sync time
       const now = new Date();
-      if (settings.lastSyncAt) {
-        const timeSinceLastSync = now.getTime() - new Date(settings.lastSyncAt).getTime();
-        const timeUntilNextSync = Math.max(0, intervalMs - timeSinceLastSync);
-        
-        if (timeUntilNextSync === 0) {
-          syncNow();
-        } else {
-          setNextSyncAt(new Date(now.getTime() + timeUntilNextSync));
-        }
-      } else if (settings.icalUrl) {
-        syncNow();
-      }
+      const lastSuccessfulSync = settings.lastSyncAt
+        ? new Date(settings.lastSyncAt).getTime()
+        : 0;
+      const scheduleFrom = Math.max(lastSuccessfulSync, lastAttemptAtRef.current || 0);
+      const nextTimestamp = scheduleFrom > 0 ? scheduleFrom + intervalMs : now.getTime();
+      const delay = Math.max(0, nextTimestamp - now.getTime());
 
-      syncIntervalRef.current = setInterval(() => {
-        syncNow();
-      }, intervalMs);
+      setNextSyncAt(new Date(now.getTime() + delay));
+      syncTimeoutRef.current = setTimeout(() => {
+        void syncNowRef.current();
+      }, delay);
     } else {
       setNextSyncAt(null);
     }
 
     return () => {
-      if (syncIntervalRef.current) {
-        clearInterval(syncIntervalRef.current);
+      if (syncTimeoutRef.current) {
+        clearTimeout(syncTimeoutRef.current);
       }
     };
-  }, [settings.syncEnabled, settings.icalUrl, settings.autoSyncInterval, isLoading, userId]);
-
-  // Update countdown timer
-  useEffect(() => {
-    if (countdownIntervalRef.current) {
-      clearInterval(countdownIntervalRef.current);
-    }
-
-    if (settings.syncEnabled && nextSyncAt) {
-      countdownIntervalRef.current = setInterval(() => {
-        const now = new Date();
-        if (nextSyncAt && now >= nextSyncAt) {
-          setNextSyncAt(new Date(now.getTime() + settings.autoSyncInterval * 60 * 1000));
-        }
-      }, 1000);
-    }
-
-    return () => {
-      if (countdownIntervalRef.current) {
-        clearInterval(countdownIntervalRef.current);
-      }
-    };
-  }, [nextSyncAt, settings.syncEnabled, settings.autoSyncInterval]);
+  }, [settings.syncEnabled, settings.icalUrl, settings.autoSyncInterval, settings.lastSyncAt, isLoading, userId, schedulerVersion]);
 
   // Action functions
   const setIcalUrl = useCallback(async (url: string) => {
+    icalUrlRef.current = url;
     setSettings(prev => ({ ...prev, icalUrl: url }));
     setError(null);
     
@@ -259,11 +259,22 @@ export function useCanvasSyncSupabase(options: UseCanvasSyncOptions): UseCanvasS
   }, [userId, settings.syncEnabled]);
 
   const setSyncInterval = useCallback((minutes: number) => {
-    setSettings(prev => ({ ...prev, autoSyncInterval: Math.max(1, minutes) }));
-  }, []);
+    const normalizedMinutes = [5, 15, 30, 60].includes(minutes) ? minutes : defaultInterval;
+    setSettings(prev => ({ ...prev, autoSyncInterval: normalizedMinutes }));
+    if (userId) {
+      localStorage.setItem(`canvas_sync_interval_${userId}`, String(normalizedMinutes));
+      void db.upsertCanvasSettings(userId, {
+        auto_sync_interval: normalizedMinutes,
+        time_zone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+      });
+    }
+    lastAttemptAtRef.current = Date.now();
+    setSchedulerVersion(version => version + 1);
+  }, [defaultInterval, userId]);
 
   const clearData = useCallback(async () => {
     setAssignments([]);
+    icalUrlRef.current = '';
     setSettings({
       icalUrl: '',
       lastSyncAt: null,
@@ -277,6 +288,7 @@ export function useCanvasSyncSupabase(options: UseCanvasSyncOptions): UseCanvasS
     
     if (userId) {
       await db.deleteCanvasSettings(userId);
+      localStorage.removeItem(`canvas_sync_interval_${userId}`);
     }
   }, [userId, defaultInterval]);
 

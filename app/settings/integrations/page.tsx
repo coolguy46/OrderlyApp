@@ -434,8 +434,8 @@ export default function IntegrationsPage() {
   });
 
   // Live countdown display
-  const [countdown, setCountdown] = useState('');
-  const [lastSyncDisplay, setLastSyncDisplay] = useState('');
+  const [countdown, setCountdown] = useState('Calculating next sync…');
+  const [lastSyncDisplay, setLastSyncDisplay] = useState('Checking last sync…');
 
   // Update countdown every second
   useEffect(() => {
