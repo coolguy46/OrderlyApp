@@ -17,7 +17,7 @@ const PUBLIC_ROUTES = [
 ];
 
 // Routes that are accessible when authenticated but exempt from setup redirect
-const SETUP_EXEMPT_ROUTES = ['/setup', '/paywall'];
+const SETUP_EXEMPT_ROUTES = ['/setup'];
 
 interface AuthGuardProps {
   children: React.ReactNode;

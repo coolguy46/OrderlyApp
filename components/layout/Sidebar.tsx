@@ -15,7 +15,6 @@ import {
   ChevronRight,
   Sparkles,
   Settings,
-  Crown,
 } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
@@ -136,31 +135,6 @@ export function Sidebar({ mobile, onNavigate }: SidebarProps = {}) {
 
       {/* Footer */}
       <div className="p-3 border-t space-y-2">
-        {/* Upgrade to Pro button */}
-        <Link href="/paywall" onClick={onNavigate}>
-          <motion.div
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
-            className={cn(
-              'flex items-center gap-2 px-3 py-2 rounded-xl bg-gradient-to-r from-amber-500/20 to-orange-500/20 border border-amber-500/30 hover:from-amber-500/30 hover:to-orange-500/30 transition-all cursor-pointer',
-              !effectiveOpen && 'justify-center'
-            )}
-          >
-            <Crown className="w-4 h-4 text-amber-400 flex-shrink-0" />
-            <AnimatePresence>
-              {effectiveOpen && (
-                <motion.span
-                  initial={{ opacity: 0, x: -8 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: -8 }}
-                  className="text-xs font-semibold text-amber-400 whitespace-nowrap"
-                >
-                  Upgrade to Pro
-                </motion.span>
-              )}
-            </AnimatePresence>
-          </motion.div>
-        </Link>
         {/* Collapse button - hidden on mobile */}
         {!mobile && (
           <Button

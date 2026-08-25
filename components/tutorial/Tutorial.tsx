@@ -6,7 +6,7 @@ import { cn } from '@/lib/utils';
 import {
   X, ChevronRight, ChevronLeft, CheckCircle2,
   LayoutDashboard, CheckSquare, Calendar, Target,
-  Timer, GraduationCap, Crown, Sparkles,
+  Timer, GraduationCap, Sparkles,
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 
@@ -82,15 +82,6 @@ const TUTORIAL_STEPS: TutorialStep[] = [
     color: 'violet',
     page: '/exams',
     tip: 'Update preparation progress as the exam gets closer',
-  },
-  {
-    id: 'pro',
-    title: 'Upgrade to Pro 🚀',
-    description: 'Unlock unlimited goals, AI scheduling, desktop notifications, and more with Orderly Pro.',
-    icon: Crown,
-    color: 'amber',
-    page: '/paywall',
-    tip: 'Get 40% off with the yearly plan',
   },
 ];
 
