@@ -343,7 +343,9 @@ export default function IntegrationsPage() {
           ? courseNameToSubjectId[resolvedCourseName] || existingTask?.subject_id || null
           : existingTask?.subject_id || null;
         const description = assignment.description || `Course: ${resolvedCourseName || 'Canvas'}`;
-        const dueTime = assignment.hasDueTime ? formatCanvasDueTime(dueDate) : null;
+        const dueTime = assignment.dueDateOnly
+          ? '23:59'
+          : assignment.hasDueTime ? formatCanvasDueTime(dueDate) : null;
 
         if (existingTask) {
           const existingDueTime = existingTask.due_time || null;

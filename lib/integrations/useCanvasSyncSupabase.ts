@@ -129,7 +129,7 @@ export function useCanvasSyncSupabase(options: UseCanvasSyncOptions): UseCanvasS
       const hydratedAssignments: CanvasAssignment[] = data.assignments.map((a: CanvasAssignment) => ({
         ...a,
         dueDate: a.dueDateOnly
-          ? new Date(`${a.dueDateOnly}T12:00:00`)
+          ? new Date(`${a.dueDateOnly}T23:59:00`)
           : a.dueDate ? new Date(a.dueDate) : undefined,
         startDate: a.startDate ? new Date(a.startDate) : undefined,
         endDate: a.endDate ? new Date(a.endDate) : undefined,
