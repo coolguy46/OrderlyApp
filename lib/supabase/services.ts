@@ -8,7 +8,6 @@ import type {
   StudySession, 
   Exam,
   Friendship,
-  Achievement,
 } from './types';
 
 // Use the supabase client with any to bypass strict typing issues
@@ -698,73 +697,6 @@ export async function searchUsersByEmail(query: string, currentUserId: string): 
     return [];
   }
   return (data || []) as Profile[];
-}
-
-// ============== ACHIEVEMENT SERVICES ==============
-
-interface AchievementDef {
-  type: string;
-  title: string;
-  description: string;
-  check: (profile: Profile, stats: { totalStudyMinutes: number; completedTasks: number; totalSessions: number }) => boolean;
-}
-
-export const ACHIEVEMENT_DEFINITIONS: AchievementDef[] = [
-  { type: 'first_session', title: 'First Steps', description: 'Complete your first study session', check: (_, s) => s.totalSessions >= 1 },
-  { type: 'tasks_5', title: 'Getting Things Done', description: 'Complete 5 tasks', check: (p) => p.tasks_completed >= 5 },
-  { type: 'tasks_25', title: 'Task Master', description: 'Complete 25 tasks', check: (p) => p.tasks_completed >= 25 },
-  { type: 'tasks_100', title: 'Centurion', description: 'Complete 100 tasks', check: (p) => p.tasks_completed >= 100 },
-  { type: 'streak_7', title: 'Week Warrior', description: 'Maintain a 7-day streak', check: (p) => p.longest_streak >= 7 },
-  { type: 'streak_30', title: 'Monthly Champion', description: 'Maintain a 30-day streak', check: (p) => p.longest_streak >= 30 },
-  { type: 'hours_10', title: 'Dedicated Learner', description: 'Study for 10 hours total', check: (_, s) => s.totalStudyMinutes >= 600 },
-  { type: 'hours_50', title: 'Scholar', description: 'Study for 50 hours total', check: (_, s) => s.totalStudyMinutes >= 3000 },
-  { type: 'hours_100', title: 'Century Scholar', description: 'Study for 100 hours total', check: (_, s) => s.totalStudyMinutes >= 6000 },
-  { type: 'sessions_50', title: 'Focused Mind', description: 'Complete 50 study sessions', check: (_, s) => s.totalSessions >= 50 },
-];
-
-export async function getAchievements(userId: string): Promise<Achievement[]> {
-  const { data, error } = await db
-    .from('achievements')
-    .select('*')
-    .eq('user_id', userId)
-    .order('unlocked_at', { ascending: false });
-
-  if (error) {
-    console.error('Error fetching achievements:', error);
-    return [];
-  }
-  return (data || []) as Achievement[];
-}
-
-export async function checkAndUnlockAchievements(
-  userId: string,
-  profile: Profile,
-  stats: { totalStudyMinutes: number; completedTasks: number; totalSessions: number }
-): Promise<Achievement[]> {
-  const existing = await getAchievements(userId);
-  const existingTypes = new Set(existing.map((a) => a.achievement_type));
-  const newlyUnlocked: Achievement[] = [];
-
-  for (const def of ACHIEVEMENT_DEFINITIONS) {
-    if (!existingTypes.has(def.type) && def.check(profile, stats)) {
-      const { data, error } = await db
-        .from('achievements')
-        .insert({
-          user_id: userId,
-          achievement_type: def.type,
-          title: def.title,
-          description: def.description,
-        })
-        .select()
-        .single();
-
-      if (!error && data) {
-        newlyUnlocked.push(data as Achievement);
-      }
-    }
-  }
-
-  return newlyUnlocked;
 }
 
 // ============== AUTH HELPERS ==============

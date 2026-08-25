@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
-import type { Task, Goal, StudySession, Exam, Subject, Profile, Achievement } from '@/lib/supabase/types';
+import type { Task, Goal, StudySession, Exam, Subject, Profile } from '@/lib/supabase/types';
 import { supabase } from '@/lib/supabase/client';
 import * as db from '@/lib/supabase/services';
 import type { FriendWithProfile } from '@/lib/supabase/services';
@@ -33,7 +33,6 @@ interface AppState {
   studySessions: StudySession[];
   exams: Exam[];
   friends: FriendWithProfile[];
-  achievements: Achievement[];
   
   // Pomodoro state
   pomodoroSettings: {
@@ -111,8 +110,6 @@ interface AppState {
   sendFriendRequest: (friendId: string) => Promise<boolean>;
   respondToFriendRequest: (friendshipId: string, accept: boolean) => Promise<void>;
   removeFriend: (friendshipId: string) => Promise<void>;
-  loadAchievements: () => Promise<void>;
-  checkAchievements: () => Promise<void>;
   updateUserProfile: (updates: Partial<Profile>) => Promise<void>;
 }
 
@@ -130,7 +127,6 @@ export const useAppStore = create<AppState>()(
       studySessions: [],
       exams: [],
       friends: [],
-      achievements: [],
       dataLoaded: false,
       
       pomodoroSettings: {
@@ -220,7 +216,6 @@ export const useAppStore = create<AppState>()(
               exams: [],
               subjects: [],
               friends: [],
-              achievements: [],
               dataLoaded: false,
               isLoading: false,
             });
@@ -235,16 +230,15 @@ export const useAppStore = create<AppState>()(
         if (isLoadingData) return;
         isLoadingData = true;
         try {
-          const [tasks, goals, studySessions, exams, subjects, friends, achievements] = await Promise.all([
+          const [tasks, goals, studySessions, exams, subjects, friends] = await Promise.all([
             db.getTasks(userId),
             db.getGoals(userId),
             db.getStudySessions(userId),
             db.getExams(userId),
             db.getSubjects(userId),
             db.getFriends(userId),
-            db.getAchievements(userId),
           ]);
-          set({ tasks, goals, studySessions, exams, subjects, friends, achievements, dataLoaded: true });
+          set({ tasks, goals, studySessions, exams, subjects, friends, dataLoaded: true });
         } catch (error: any) {
           if (error?.name === 'AbortError' || error?.message?.includes('signal')) {
             console.warn('Data load aborted (retrying next interaction):', error.message);
@@ -312,7 +306,6 @@ export const useAppStore = create<AppState>()(
             exams: [],
             subjects: [],
             friends: [],
-            achievements: [],
             dataLoaded: false,
           });
         } catch (error) {
@@ -727,29 +720,6 @@ export const useAppStore = create<AppState>()(
           }
         } catch (error) {
           toast.error('Failed to remove friend');
-        }
-      },
-
-      loadAchievements: async () => {
-        const user = get().user;
-        if (!user) return;
-        const achievements = await db.getAchievements(user.id);
-        set({ achievements });
-      },
-
-      checkAchievements: async () => {
-        const user = get().user;
-        if (!user) return;
-        const { studySessions, tasks } = get();
-        const stats = {
-          totalStudyMinutes: studySessions.reduce((acc, s) => acc + s.duration_minutes, 0),
-          completedTasks: tasks.filter((t) => t.status === 'completed').length,
-          totalSessions: studySessions.length,
-        };
-        const newlyUnlocked = await db.checkAndUnlockAchievements(user.id, user, stats);
-        if (newlyUnlocked.length > 0) {
-          newlyUnlocked.forEach((a) => toast.success(`🏆 Achievement unlocked: ${a.title}`));
-          await get().loadAchievements();
         }
       },
 

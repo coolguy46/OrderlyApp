@@ -6,7 +6,6 @@ import {
   Card,
   CardHeader,
   CardTitle,
-  CardDescription,
   CardContent,
   Button,
   Input,
@@ -18,47 +17,24 @@ import {
   DialogDescription,
 } from '@/components/ui';
 import { ProgressBar, CircularProgress } from '@/components/ui/custom-progress';
-import { ACHIEVEMENT_DEFINITIONS } from '@/lib/supabase/services';
 import { motion } from 'framer-motion';
-import { formatDuration, cn } from '@/lib/utils';
+import { formatDuration } from '@/lib/utils';
 import {
   User,
-  Award,
   Flame,
   Clock,
   Target,
-  Trophy,
-  Star,
-  BookOpen,
   Calendar,
   TrendingUp,
-  Zap,
   Edit3,
-  CheckCircle2,
-  Lock,
 } from 'lucide-react';
 
-// Map achievement types to icons
-const achievementIcons: Record<string, typeof Star> = {
-  first_session: Star,
-  tasks_5: Target,
-  tasks_25: Target,
-  tasks_100: Trophy,
-  streak_7: Flame,
-  streak_30: Flame,
-  hours_10: Clock,
-  hours_50: BookOpen,
-  hours_100: BookOpen,
-  sessions_50: Zap,
-};
-
 // XP calculation from real stats
-function calculateXP(profile: { tasks_completed: number; total_study_time: number; current_streak: number }, achievementCount: number): number {
+function calculateXP(profile: { tasks_completed: number; total_study_time: number; current_streak: number }): number {
   return (
     profile.tasks_completed * 10 +
     Math.floor(profile.total_study_time / 10) * 5 +
-    profile.current_streak * 15 +
-    achievementCount * 50
+    profile.current_streak * 15
   );
 }
 
@@ -89,15 +65,13 @@ const itemVariants = {
 };
 
 export function Profile() {
-  const { user, tasks, studySessions, goals, exams, achievements, checkAchievements, updateUserProfile } = useAppStore();
+  const { user, tasks, studySessions, goals, exams, updateUserProfile } = useAppStore();
   const [mounted, setMounted] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [editName, setEditName] = useState('');
 
   useEffect(() => {
     setMounted(true);
-    // Check for new achievements when profile loads
-    checkAchievements();
   }, []);
 
   useEffect(() => {
@@ -129,22 +103,10 @@ export function Profile() {
   // Real XP & level
   const xp = useMemo(() => {
     if (!user) return 0;
-    return calculateXP(user, achievements.length);
-  }, [user, achievements]);
+    return calculateXP(user);
+  }, [user]);
 
   const levelInfo = useMemo(() => getLevel(xp), [xp]);
-
-  // Merge achievement definitions with unlocked data
-  const allAchievements = useMemo(() => {
-    const unlockedTypes = new Set(achievements.map((a) => a.achievement_type));
-    return ACHIEVEMENT_DEFINITIONS.map((def) => ({
-      ...def,
-      unlocked: unlockedTypes.has(def.type),
-      unlockedAt: achievements.find((a) => a.achievement_type === def.type)?.unlocked_at,
-    }));
-  }, [achievements]);
-
-  const unlockedCount = allAchievements.filter((a) => a.unlocked).length;
 
   const handleSaveProfile = async () => {
     if (editName.trim()) {
@@ -201,11 +163,6 @@ export function Profile() {
                   <Flame className="w-4 h-4 text-orange-500" />
                   <span className="text-foreground font-medium">{user?.current_streak || 0}</span>
                   <span className="text-muted-foreground">day streak</span>
-                </div>
-                <div className="flex items-center gap-1.5 text-sm">
-                  <Trophy className="w-4 h-4 text-yellow-500" />
-                  <span className="text-foreground font-medium">{unlockedCount}</span>
-                  <span className="text-muted-foreground">achievements</span>
                 </div>
               </div>
             </div>
@@ -276,61 +233,6 @@ export function Profile() {
             </motion.div>
           </motion.div>
 
-          {/* Achievements */}
-          <Card>
-            <CardHeader className="pb-2">
-              <div className="flex items-center gap-2">
-                <Award className="w-4 h-4 text-yellow-500" />
-                <CardTitle className="text-base">Achievements</CardTitle>
-              </div>
-              <CardDescription className="text-xs">
-                {unlockedCount} of {allAchievements.length} unlocked
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                {allAchievements.map((achievement) => {
-                  const Icon = achievementIcons[achievement.type] || Star;
-                  return (
-                    <motion.div
-                      key={achievement.type}
-                      whileHover={{ scale: 1.03, y: -2 }}
-                      initial={{ opacity: 0, scale: 0.9 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      transition={{ type: 'spring', stiffness: 300, damping: 24 }}
-                      className={cn(
-                        'p-3 rounded-xl border transition-all relative overflow-hidden',
-                        achievement.unlocked
-                          ? 'bg-gradient-to-br from-yellow-500/10 to-orange-500/10 border-yellow-500/30 shadow-sm'
-                          : 'bg-muted/50 border-border opacity-60'
-                      )}
-                    >
-                      {/* Shimmer on unlocked achievements */}
-                      {achievement.unlocked && <div className="absolute inset-0 shimmer pointer-events-none" />}
-                      <div className="flex items-center gap-3">
-                        <div className={cn('p-1.5 rounded-lg', achievement.unlocked ? 'bg-yellow-500/20' : 'bg-muted')}>
-                          {achievement.unlocked ? (
-                            <Icon className="w-4 h-4 text-yellow-500" />
-                          ) : (
-                            <Lock className="w-4 h-4 text-muted-foreground" />
-                          )}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className={cn('text-sm font-medium truncate', achievement.unlocked ? 'text-foreground' : 'text-muted-foreground')}>
-                            {achievement.title}
-                          </p>
-                          <p className="text-xs text-muted-foreground truncate">{achievement.description}</p>
-                        </div>
-                        {achievement.unlocked && (
-                          <CheckCircle2 className="w-4 h-4 text-yellow-500 shrink-0" />
-                        )}
-                      </div>
-                    </motion.div>
-                  );
-                })}
-              </div>
-            </CardContent>
-          </Card>
         </div>
 
         {/* Right Column */}

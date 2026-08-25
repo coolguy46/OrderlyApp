@@ -11,7 +11,6 @@ import {
   Lock,
   Palette,
   User,
-  Globe,
   Plug,
   Save,
   Download,
@@ -87,17 +86,6 @@ const defaultNotificationPrefs: NotificationPreferences = {
   soundEnabled: true,
 };
 
-const languages = [
-  { code: 'en', label: 'English', native: 'English' },
-  { code: 'es', label: 'Spanish', native: 'Español' },
-  { code: 'fr', label: 'French', native: 'Français' },
-  { code: 'de', label: 'German', native: 'Deutsch' },
-  { code: 'pt', label: 'Portuguese', native: 'Português' },
-  { code: 'zh', label: 'Chinese', native: '中文' },
-  { code: 'ja', label: 'Japanese', native: '日本語' },
-  { code: 'ko', label: 'Korean', native: '한국어' },
-];
-
 // Toggle switch component
 function ToggleSwitch({ checked, onChange, disabled }: { checked: boolean; onChange: (val: boolean) => void; disabled?: boolean }) {
   return (
@@ -144,9 +132,6 @@ export default function SettingsPage() {
   // Notification preferences  
   const [notifPrefs, setNotifPrefs] = useState<NotificationPreferences>(defaultNotificationPrefs);
   
-  // Language
-  const [language, setLanguage] = useState('en');
-  
   // Data export
   const [isExporting, setIsExporting] = useState(false);
   const [plannerDraft, setPlannerDraft] = useState<PlannerSettings>(() => getDefaultPlannerSettings());
@@ -160,9 +145,6 @@ export default function SettingsPage() {
       try { setNotifPrefs(JSON.parse(savedNotifPrefs)); } catch {}
     }
     
-    // Load language
-    const savedLang = localStorage.getItem('orderly-language');
-    if (savedLang) setLanguage(savedLang);
   }, []);
 
   useEffect(() => {
@@ -241,12 +223,6 @@ export default function SettingsPage() {
     setNotifPrefs(updated);
     localStorage.setItem('orderly-notification-prefs', JSON.stringify(updated));
     toast.success('Notification preference updated');
-  };
-  
-  const handleLanguageChange = (code: string) => {
-    setLanguage(code);
-    localStorage.setItem('orderly-language', code);
-    toast.success('Language preference saved');
   };
   
   const handleExportData = async () => {
@@ -745,49 +721,6 @@ export default function SettingsPage() {
               </CardContent>
             </Card>
           </Link>
-        </motion.div>
-
-        {/* Language Section */}
-        <motion.div variants={sectionVariants}>
-          <Card>
-            <CardHeader>
-              <div className="flex items-center gap-3">
-                <div className="p-2 rounded-lg bg-indigo-500/10">
-                  <Globe className="w-5 h-5 text-indigo-500" />
-                </div>
-                <div>
-                  <CardTitle className="text-lg">Language</CardTitle>
-                  <CardDescription>Change language and regional settings</CardDescription>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                {languages.map((lang) => (
-                  <button
-                    key={lang.code}
-                    onClick={() => handleLanguageChange(lang.code)}
-                    className={`
-                      p-3 rounded-lg border-2 text-center transition-all
-                      ${language === lang.code
-                        ? 'border-primary bg-primary/5'
-                        : 'border-border hover:border-primary/50 hover:bg-muted/50'
-                      }
-                    `}
-                  >
-                    <p className="text-sm font-medium">{lang.native}</p>
-                    <p className="text-xs text-muted-foreground">{lang.label}</p>
-                    {language === lang.code && (
-                      <Check className="w-3.5 h-3.5 text-primary mx-auto mt-1" />
-                    )}
-                  </button>
-                ))}
-              </div>
-              <p className="text-xs text-muted-foreground mt-3">
-                Language preference is saved locally. Full translations are coming in a future update.
-              </p>
-            </CardContent>
-          </Card>
         </motion.div>
 
         {/* Spacer for bottom padding */}

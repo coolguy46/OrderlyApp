@@ -377,7 +377,7 @@ export default function LandingPage() {
                 <span className="bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent"> Fun & Rewarding</span>
               </h2>
               <p className="text-lg text-muted-foreground mb-8">
-                Earn XP for completing tasks, maintain study streaks, unlock achievements, 
+                Earn XP for completing tasks, maintain study streaks, review your progress,
                 and compete with friends on leaderboards. Learning has never been this engaging!
               </p>
               
@@ -385,7 +385,7 @@ export default function LandingPage() {
                 {[
                   { icon: Trophy, text: 'Earn XP and level up as you study' },
                   { icon: Zap, text: 'Maintain daily streaks for bonus rewards' },
-                  { icon: Star, text: 'Unlock achievements and badges' },
+                  { icon: BookOpen, text: 'Review your progress and build better habits' },
                   { icon: Users, text: 'Compete with friends on leaderboards' },
                 ].map((item, i) => (
                   <div key={i} className="flex items-center gap-3">
