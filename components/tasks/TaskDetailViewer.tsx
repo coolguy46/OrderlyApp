@@ -150,7 +150,13 @@ export function TaskDetailViewer({ task, open, onOpenChange, onEdit }: TaskDetai
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90dvh] overflow-hidden p-0 sm:max-h-[85dvh] sm:max-w-2xl sm:overflow-hidden flex flex-col">
+      <DialogContent
+        className="overflow-hidden p-0 sm:max-w-2xl sm:overflow-hidden flex flex-col"
+        // The shared dialog adds `sm:max-h-none`, whose generated CSS can win
+        // over an arbitrary Tailwind max-height class. An inline cap guarantees
+        // that long Canvas descriptions stay inside the viewport and scroll.
+        style={{ maxHeight: 'min(90dvh, 900px)' }}
+      >
         {/* Header with gradient accent */}
         <div className={cn(
           'relative shrink-0 px-6 pt-6 pb-4',
