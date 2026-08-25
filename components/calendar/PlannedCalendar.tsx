@@ -2,29 +2,30 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { format } from 'date-fns';
+import { format, startOfDay } from 'date-fns';
 import {
   Archive,
   CalendarClock,
   ChevronLeft,
   ChevronRight,
   CircleAlert,
+  Clock3,
+  Expand,
   PencilLine,
   Sparkles,
 } from 'lucide-react';
+import { TaskDetailViewer } from '@/components/tasks/TaskDetailViewer';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
+import { Card, CardContent } from '@/components/ui/Card';
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/Card';
-import {
+  DailyTaskPanel,
   PlannerFullscreen,
   WeekTimeGrid,
   plannerBlockViews,
+  plannerDayTasks,
+  type PlannerBlockView,
+  type PlannerDayTaskView,
 } from '@/components/planner';
 import { usePlannerStore } from '@/lib/planner/store';
 import type { PlannerPlan } from '@/lib/planner/types';
@@ -38,21 +39,29 @@ function planTimestamp(plan: PlannerPlan): number {
 
 function planDateRange(plan: PlannerPlan): string {
   const start = new Date(plan.horizonStart);
-  const end = new Date(plan.horizonEnd);
-  const visibleEnd = new Date(end.getTime() - 1);
+  const end = new Date(new Date(plan.horizonEnd).getTime() - 1);
 
-  if (start.getFullYear() === visibleEnd.getFullYear()) {
-    if (start.getMonth() === visibleEnd.getMonth()) {
-      return `${format(start, 'MMM d')}–${format(visibleEnd, 'd, yyyy')}`;
+  if (start.getFullYear() === end.getFullYear()) {
+    if (start.getMonth() === end.getMonth()) {
+      return `${format(start, 'MMM d')}–${format(end, 'd, yyyy')}`;
     }
-    return `${format(start, 'MMM d')}–${format(visibleEnd, 'MMM d, yyyy')}`;
+    return `${format(start, 'MMM d')}–${format(end, 'MMM d, yyyy')}`;
   }
-  return `${format(start, 'MMM d, yyyy')}–${format(visibleEnd, 'MMM d, yyyy')}`;
+  return `${format(start, 'MMM d, yyyy')}–${format(end, 'MMM d, yyyy')}`;
 }
 
 function scheduledTimeLabel(minutes: number): string {
   const rounded = Math.round((minutes / 60) * 10) / 10;
   return `${rounded} ${rounded === 1 ? 'hr' : 'hrs'}`;
+}
+
+function preferredDateForPlan(plan: PlannerPlan): Date {
+  const start = startOfDay(new Date(plan.horizonStart));
+  const end = new Date(plan.horizonEnd);
+  const today = startOfDay(new Date());
+  return today.getTime() >= start.getTime() && today.getTime() < end.getTime()
+    ? today
+    : start;
 }
 
 export function PlannedCalendar() {
@@ -63,7 +72,9 @@ export function PlannedCalendar() {
   const record = userId ? plannerUsers[userId] : null;
   const activePlan = record?.currentPlan || null;
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
+  const [selectedDate, setSelectedDate] = useState(() => startOfDay(new Date()));
   const [fullscreen, setFullscreen] = useState(false);
+  const [detailTaskId, setDetailTaskId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!userId) return;
@@ -99,6 +110,13 @@ export function PlannedCalendar() {
       || null,
     [activePlan, plans, selectedPlanId],
   );
+
+  useEffect(() => {
+    if (!selectedPlan) return;
+    setSelectedDate(preferredDateForPlan(selectedPlan));
+    setDetailTaskId(null);
+  }, [selectedPlan?.id]);
+
   const selectedIndex = selectedPlan
     ? plans.findIndex(plan => plan.id === selectedPlan.id)
     : -1;
@@ -109,25 +127,59 @@ export function PlannedCalendar() {
     () => plannerBlockViews(selectedPlan, subjects, tasks),
     [selectedPlan, subjects, tasks],
   );
+  const dayTasks = useMemo(
+    () => plannerDayTasks(selectedPlan, selectedDate, tasks, subjects),
+    [selectedDate, selectedPlan, subjects, tasks],
+  );
+  const realTasksById = useMemo(
+    () => new Map(tasks.map(task => [task.id, task])),
+    [tasks],
+  );
+  const taskIdByBlockId = useMemo(
+    () => new Map(
+      (selectedPlan?.blocks || [])
+        .filter(block => Boolean(block.taskId))
+        .map(block => [block.id, block.taskId as string]),
+    ),
+    [selectedPlan],
+  );
+  const detailTask = detailTaskId ? realTasksById.get(detailTaskId) || null : null;
 
   const choosePlan = (index: number) => {
     const plan = plans[index];
     if (!plan) return;
     setSelectedPlanId(plan.id);
+    setSelectedDate(preferredDateForPlan(plan));
     setFullscreen(false);
+  };
+
+  const isRealTask = (view: PlannerDayTaskView): boolean => {
+    const taskId = taskIdByBlockId.get(view.id);
+    return Boolean(taskId && realTasksById.has(taskId));
+  };
+
+  const openDayTask = (view: PlannerDayTaskView) => {
+    const taskId = taskIdByBlockId.get(view.id);
+    if (taskId && realTasksById.has(taskId)) setDetailTaskId(taskId);
+  };
+
+  const handleBlockClick = (view: PlannerBlockView) => {
+    const start = new Date(view.startAt);
+    if (!Number.isNaN(start.getTime())) setSelectedDate(startOfDay(start));
+    if (view.taskId && realTasksById.has(view.taskId)) setDetailTaskId(view.taskId);
   };
 
   if (!selectedPlan) {
     return (
       <Card className="overflow-hidden border-indigo-500/15 bg-gradient-to-br from-card/80 via-card/60 to-indigo-500/[0.06]">
-        <CardContent className="flex min-h-[420px] flex-col items-center justify-center px-6 py-14 text-center">
+        <CardContent className="flex min-h-[calc(100dvh-15rem)] flex-col items-center justify-center px-6 py-14 text-center">
           <div className="mb-5 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 p-4 shadow-lg shadow-indigo-500/20">
             <CalendarClock className="h-7 w-7 text-white" />
           </div>
           <h2 className="font-display text-xl font-semibold">No planned week yet</h2>
           <p className="mt-2 max-w-md text-sm leading-relaxed text-muted-foreground">
-            Ask Orderly to plan your week first. Your saved schedule will then
-            appear here automatically, including older weeks you archive.
+            Ask Orderly to plan your week first. The result and any archived
+            weeks will appear here automatically.
           </p>
           <Button asChild className="mt-6 bg-gradient-to-r from-indigo-500 to-purple-600 text-white">
             <Link href="/planner">
@@ -141,99 +193,134 @@ export function PlannedCalendar() {
   }
 
   return (
-    <div className="space-y-4">
-      <Card className="overflow-hidden border-indigo-500/15">
-        <CardHeader className="gap-4 border-b border-border/40 bg-gradient-to-r from-indigo-500/[0.07] via-transparent to-purple-500/[0.06] sm:flex sm:flex-row sm:items-center sm:justify-between">
-          <div className="min-w-0">
-            <div className="mb-2 flex flex-wrap items-center gap-2">
-              <CardTitle className="font-display text-lg">Planned calendar</CardTitle>
-              <Badge
-                variant={isActive ? 'default' : 'outline'}
-                className={cn(
-                  isActive
-                    ? 'border-transparent bg-indigo-500 text-white'
-                    : 'border-border/60 bg-background/50 text-muted-foreground',
-                )}
-              >
-                {isActive ? <Sparkles className="h-3 w-3" /> : <Archive className="h-3 w-3" />}
-                {isActive
-                  ? selectedPlan.status === 'stale' ? 'Needs update' : 'Active plan'
-                  : 'Archived'}
-              </Badge>
-              {selectedPlan.warnings.length > 0 && (
-                <Badge variant="outline" className="border-amber-500/25 bg-amber-500/10 text-amber-500">
-                  <CircleAlert className="h-3 w-3" />
-                  {selectedPlan.warnings.length} warning{selectedPlan.warnings.length === 1 ? '' : 's'}
-                </Badge>
-              )}
-            </div>
-            <CardDescription>
-              {planDateRange(selectedPlan)} · {scheduledTimeLabel(selectedPlan.totalScheduledMinutes)} scheduled
-              {' · '}Read-only here—make changes in Planner.
-            </CardDescription>
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border/45 bg-card/55 px-2.5 py-2 shadow-sm backdrop-blur-sm sm:px-3">
+        <div className="flex min-w-0 items-center gap-1.5">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            disabled={selectedIndex <= 0}
+            onClick={() => choosePlan(selectedIndex - 1)}
+            aria-label="Show previous planned week"
+            className="h-8 w-8"
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
+          <div className="min-w-0 px-1">
+            <p className="truncate text-xs font-semibold sm:text-sm">{planDateRange(selectedPlan)}</p>
+            <p className="truncate text-[10px] text-muted-foreground">
+              Plan {selectedIndex + 1} of {plans.length}
+              {record?.history.length ? ` · ${record.history.length} archived` : ''}
+              {' · '}View only
+            </p>
           </div>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            disabled={selectedIndex < 0 || selectedIndex >= plans.length - 1}
+            onClick={() => choosePlan(selectedIndex + 1)}
+            aria-label="Show next planned week"
+            className="h-8 w-8"
+          >
+            <ChevronRight className="h-4 w-4" />
+          </Button>
+        </div>
 
-          <div className="flex shrink-0 flex-wrap items-center gap-2">
-            {activePlan && !isActive && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => setSelectedPlanId(activePlan.id)}
-              >
-                Current week
-              </Button>
+        <div className="flex flex-wrap items-center justify-end gap-1.5">
+          <Badge
+            variant="outline"
+            className={cn(
+              'h-6 gap-1 text-[9px] sm:text-[10px]',
+              isActive
+                ? 'border-indigo-500/25 bg-indigo-500/10 text-indigo-400'
+                : 'text-muted-foreground',
             )}
-            <Button asChild variant="outline" size="sm">
-              <Link href="/planner">
-                <PencilLine className="h-4 w-4" />
-                Edit in Planner
-              </Link>
-            </Button>
-          </div>
-        </CardHeader>
-
-        <CardContent className="p-0">
-          <div className="flex items-center justify-between gap-3 border-b border-border/40 px-3 py-2.5 sm:px-5">
+          >
+            {isActive ? <Sparkles className="h-2.5 w-2.5" /> : <Archive className="h-2.5 w-2.5" />}
+            {isActive
+              ? selectedPlan.status === 'stale' ? 'Needs update' : 'Current'
+              : 'Archived'}
+          </Badge>
+          <Badge variant="outline" className="hidden h-6 gap-1 text-[10px] sm:inline-flex">
+            <Clock3 className="h-2.5 w-2.5" />
+            {scheduledTimeLabel(selectedPlan.totalScheduledMinutes)}
+          </Badge>
+          {selectedPlan.warnings.length > 0 && (
+            <Badge
+              variant="outline"
+              className="h-6 gap-1 border-amber-500/25 bg-amber-500/10 text-[10px] text-amber-500"
+              title={selectedPlan.warnings.map(warning => warning.message).join('\n')}
+            >
+              <CircleAlert className="h-2.5 w-2.5" />
+              {selectedPlan.warnings.length}
+            </Badge>
+          )}
+          {activePlan && !isActive && (
             <Button
               type="button"
               variant="ghost"
-              size="icon-sm"
-              disabled={selectedIndex <= 0}
-              onClick={() => choosePlan(selectedIndex - 1)}
-              aria-label="Show previous planned week"
+              size="sm"
+              className="h-8 px-2.5 text-xs"
+              onClick={() => choosePlan(plans.findIndex(plan => plan.id === activePlan.id))}
             >
-              <ChevronLeft className="h-4 w-4" />
+              Current week
             </Button>
-            <div className="min-w-0 text-center">
-              <p className="truncate text-sm font-medium">{planDateRange(selectedPlan)}</p>
-              <p className="text-[11px] text-muted-foreground">
-                Plan {selectedIndex + 1} of {plans.length}
-                {record?.history.length ? ` · ${record.history.length} archived` : ''}
-              </p>
-            </div>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              disabled={selectedIndex < 0 || selectedIndex >= plans.length - 1}
-              onClick={() => choosePlan(selectedIndex + 1)}
-              aria-label="Show next planned week"
-            >
-              <ChevronRight className="h-4 w-4" />
-            </Button>
-          </div>
+          )}
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            className="h-8 w-8"
+            onClick={() => setFullscreen(true)}
+            aria-label="Open planned calendar full screen"
+            title="Open full screen"
+          >
+            <Expand className="h-4 w-4" />
+          </Button>
+          <Button asChild variant="outline" size="sm" className="h-8 px-2.5 text-xs">
+            <Link href="/planner">
+              <PencilLine className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Edit in Planner</span>
+              <span className="sm:hidden">Edit</span>
+            </Link>
+          </Button>
+        </div>
+      </div>
 
-          <WeekTimeGrid
-            weekStart={selectedPlan.horizonStart}
-            blocks={blocks}
-            editable={false}
-            timeZoneLabel={selectedPlan.settings.timeZone}
-            onRequestFullscreen={() => setFullscreen(true)}
-            className="rounded-none border-0"
+      <div className="grid gap-3 xl:h-[calc(100dvh-13.5rem)] xl:min-h-[620px] xl:grid-cols-[minmax(290px,350px)_minmax(0,1fr)]">
+        <div className="h-[520px] min-w-0 xl:h-full">
+          <DailyTaskPanel
+            planStart={selectedPlan.horizonStart}
+            selectedDate={selectedDate}
+            tasks={dayTasks}
+            fillHeight
+            readOnly
+            showCompletionControl={false}
+            onSelectedDateChange={setSelectedDate}
+            onTaskClick={openDayTask}
+            isTaskClickable={isRealTask}
           />
-        </CardContent>
-      </Card>
+        </div>
+
+        <Card className="h-[650px] min-w-0 overflow-hidden border-indigo-500/15 xl:h-full">
+          <CardContent className="h-full p-2 sm:p-3">
+            <WeekTimeGrid
+              weekStart={selectedPlan.horizonStart}
+              blocks={blocks}
+              editable={false}
+              selectedDate={selectedDate}
+              onSelectedDateChange={setSelectedDate}
+              onBlockClick={handleBlockClick}
+              showSummaryHeader={false}
+              viewportClassName="h-full"
+              timeZoneLabel={selectedPlan.settings.timeZone}
+              className="h-full"
+            />
+          </CardContent>
+        </Card>
+      </div>
 
       <PlannerFullscreen
         open={fullscreen}
@@ -241,7 +328,16 @@ export function PlannedCalendar() {
         weekStart={selectedPlan.horizonStart}
         blocks={blocks}
         editable={false}
+        selectedDate={selectedDate}
+        onSelectedDateChange={setSelectedDate}
+        onBlockClick={handleBlockClick}
         timeZoneLabel={selectedPlan.settings.timeZone}
+      />
+
+      <TaskDetailViewer
+        task={detailTask}
+        open={Boolean(detailTask)}
+        onOpenChange={open => !open && setDetailTaskId(null)}
       />
     </div>
   );

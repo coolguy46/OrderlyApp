@@ -32,8 +32,15 @@ export interface DailyTaskPanelProps {
   tasks: PlannerDayTaskView[];
   className?: string;
   loading?: boolean;
+  /** Lets the panel use the height supplied by a parent workspace. */
+  fillHeight?: boolean;
+  readOnly?: boolean;
+  /** Hide completion controls in read-only consumers such as Calendar. */
+  showCompletionControl?: boolean;
   onSelectedDateChange: (date: Date) => void;
   onTaskClick?: (task: PlannerDayTaskView) => void;
+  /** Prevent rows without a real backing task from looking interactive. */
+  isTaskClickable?: (task: PlannerDayTaskView) => boolean;
   onTaskToggle?: (task: PlannerDayTaskView) => void | Promise<void>;
 }
 
@@ -80,8 +87,12 @@ export function DailyTaskPanel({
   tasks,
   className,
   loading = false,
+  fillHeight = false,
+  readOnly = false,
+  showCompletionControl = true,
   onSelectedDateChange,
   onTaskClick,
+  isTaskClickable,
   onTaskToggle,
 }: DailyTaskPanelProps) {
   const firstDay = useMemo(() => startOfDay(asDate(planStart)), [planStart]);
@@ -104,7 +115,13 @@ export function DailyTaskPanel({
   };
 
   return (
-    <Card className={cn('min-h-[638px] overflow-hidden border-border/50', className)}>
+    <Card
+      className={cn(
+        'flex flex-col overflow-hidden border-border/50',
+        fillHeight ? 'h-full min-h-0' : 'min-h-[638px]',
+        className,
+      )}
+    >
       <CardHeader className="border-b border-border/40 px-4 pb-3 pt-4 sm:px-5">
         <div className="flex items-center justify-between gap-2">
           <div className="flex min-w-0 items-center gap-2.5">
@@ -170,8 +187,13 @@ export function DailyTaskPanel({
         </div>
       </CardHeader>
 
-      <CardContent className="p-0">
-        <div className="scroll-touch max-h-[536px] space-y-2 overflow-y-auto overscroll-contain p-3 sm:p-4">
+      <CardContent className={cn('p-0', fillHeight && 'min-h-0 flex-1')}>
+        <div
+          className={cn(
+            'scroll-touch space-y-2 overflow-y-auto overscroll-contain p-3 sm:p-4',
+            fillHeight ? 'h-full max-h-none' : 'max-h-[536px]',
+          )}
+        >
           {loading ? (
             Array.from({ length: 4 }, (_, index) => (
               <div key={index} className="h-24 animate-pulse rounded-xl border border-border/40 bg-muted/30" />
@@ -183,7 +205,9 @@ export function DailyTaskPanel({
               </div>
               <p className="text-sm font-semibold">No work planned for this day</p>
               <p className="mt-1 max-w-56 text-xs leading-relaxed text-muted-foreground">
-                Ask Orderly to adjust the week, or drag a task into this day on the calendar.
+                {readOnly
+                  ? 'Open Planner to add or move work into this day.'
+                  : 'Ask Orderly to adjust the week, or drag a task into this day on the calendar.'}
               </p>
             </div>
           ) : (
@@ -194,45 +218,58 @@ export function DailyTaskPanel({
               const description = plainText(task.description);
               const color = task.subjectColor || '#6366f1';
               const due = task.dueAt ? asDate(task.dueAt) : null;
+              const clickable = Boolean(
+                onTaskClick && (isTaskClickable ? isTaskClickable(task) : true),
+              );
+              const toggleable = Boolean(!readOnly && showCompletionControl && onTaskToggle);
 
               return (
                 <div
                   key={task.id}
-                  onClick={() => onTaskClick?.(task)}
+                  onClick={clickable ? () => onTaskClick?.(task) : undefined}
                   className={cn(
-                    'group cursor-pointer rounded-xl border border-border/50 bg-card/55 p-3 text-left transition-all hover:border-primary/20 hover:bg-accent/35 hover:shadow-sm',
+                    'group rounded-xl border border-border/50 bg-card/55 p-3 text-left transition-all',
+                    clickable && 'cursor-pointer hover:border-primary/20 hover:bg-accent/35 hover:shadow-sm',
                     task.completed && 'opacity-60',
                   )}
                 >
                   <div className="flex items-start gap-2.5">
-                    <button
-                      type="button"
-                      data-size="icon-sm"
-                      className="mt-0.5 shrink-0 text-muted-foreground transition-colors hover:text-emerald-500"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        if (onTaskToggle) void Promise.resolve(onTaskToggle(task));
-                      }}
-                      aria-label={task.completed ? `Mark ${task.title} incomplete` : `Mark ${task.title} complete`}
-                    >
-                      {task.completed ? (
-                        <CheckCircle2 className="h-4 w-4 text-emerald-500" />
-                      ) : (
-                        <Circle className="h-4 w-4" />
-                      )}
-                    </button>
+                    {toggleable && (
+                      <button
+                        type="button"
+                        data-size="icon-sm"
+                        className="mt-0.5 shrink-0 text-muted-foreground transition-colors hover:text-emerald-500"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void Promise.resolve(onTaskToggle?.(task));
+                        }}
+                        aria-label={task.completed ? `Mark ${task.title} incomplete` : `Mark ${task.title} complete`}
+                      >
+                        {task.completed ? (
+                          <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                        ) : (
+                          <Circle className="h-4 w-4" />
+                        )}
+                      </button>
+                    )}
 
                     <div className="min-w-0 flex-1">
                       <div className="flex items-start justify-between gap-2">
-                        <button
-                          type="button"
-                          onClick={(event) => { event.stopPropagation(); onTaskClick?.(task); }}
-                          className="min-w-0 text-left focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-                        >
+                        {clickable ? (
+                          <button
+                            type="button"
+                            onClick={(event) => { event.stopPropagation(); onTaskClick?.(task); }}
+                            className="min-w-0 text-left focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                          >
+                            <span className={cn('line-clamp-2 text-xs font-semibold leading-snug', task.completed && 'line-through')}>
+                              {task.title}
+                            </span>
+                          </button>
+                        ) : (
                           <span className={cn('line-clamp-2 text-xs font-semibold leading-snug', task.completed && 'line-through')}>
                             {task.title}
                           </span>
-                        </button>
+                        )}
                         {source && (
                           <span className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border/50 px-1.5 py-0.5 text-[9px] text-muted-foreground">
                             <ExternalLink className="h-2.5 w-2.5" />

@@ -38,6 +38,7 @@ export function isVirtualPlannerOccurrence(block: PlannerBlock): boolean {
 /** Split segments share one key; recurring occurrences keep independent keys. */
 export function plannerFeedbackEntityKey(block: PlannerBlock): string {
   if (isVirtualPlannerOccurrence(block)) return `source:${block.sourceId}`;
+  if (block.activityId) return `source:${block.sourceId}`;
   if (block.taskId) return `task:${block.taskId}`;
   if (block.examId) return `exam:${block.examId}`;
   return `block:${block.id}`;
@@ -79,12 +80,18 @@ export function plannerBlockViews(
       description: block.description,
       reason: block.kind === 'exam_prep'
         ? 'Exam preparation'
+        : block.kind === 'requested_activity'
+          ? 'Requested in Planner'
         : block.segmentCount > 1
           ? `Part ${block.segmentIndex + 1} of ${block.segmentCount}`
           : 'Planned assignment work',
       subjectName: subject?.name || null,
       subjectColor: subject?.color || PRIORITY_COLORS[block.priority],
-      source: block.kind === 'exam_prep' ? 'Exam' : block.assignmentType || 'Task',
+      source: block.kind === 'exam_prep'
+        ? 'Exam'
+        : block.kind === 'requested_activity'
+          ? 'Planner request'
+          : block.assignmentType || 'Task',
       kind: block.kind === 'exam_prep' ? 'exam' : 'task',
       taskId: block.taskId,
       examId: block.examId,
@@ -137,7 +144,9 @@ export function plannerDayTasks(
           ? 'Canvas'
           : block.kind === 'exam_prep'
             ? 'Exam prep'
-            : task?.source || 'Orderly',
+            : block.kind === 'requested_activity'
+              ? 'Planner request'
+              : task?.source || 'Orderly',
         dueAt: block.deadlineAt,
         completed: block.status === 'completed'
           || plannerBlockMatchesTaskCompletion(block, task, plan.settings.timeZone),

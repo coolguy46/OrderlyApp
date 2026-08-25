@@ -24,6 +24,7 @@ import {
   type PlannerFeedbackRecord,
   type PlannerGenerationInput,
   type PlannerPlan,
+  type PlannerRequestedActivity,
   type PlannerSettings,
   type PlannerStaleness,
   type PlannerTaskInput,
@@ -50,6 +51,7 @@ export interface PlannerGenerateRequest {
   prompt?: string | null;
   focusSubjects?: readonly string[];
   timePreferenceScores?: PlannerTimePreferenceScores;
+  requestedActivities?: readonly PlannerRequestedActivity[];
 }
 
 export interface PlannerStoreState {
@@ -305,8 +307,8 @@ export function derivePlannerAdjustmentMultipliers(
     if (!adjustment.blockId) return;
     const block = blockById.get(adjustment.blockId);
     if (!block) return;
-    const kind = block.examId ? 'exam' as const : 'task' as const;
-    const entityId = block.examId || block.taskId;
+    const kind = block.activityId ? 'activity' as const : block.examId ? 'exam' as const : 'task' as const;
+    const entityId = block.activityId || block.examId || block.taskId;
     if (!entityId) return;
     const keys = feedbackMultiplierKeys(
       kind,
@@ -346,6 +348,7 @@ function mergeGenerationInput(
     prompt: request.prompt || null,
     focusSubjects: request.focusSubjects || [],
     timePreferenceScores: request.timePreferenceScores || derivePlannerTimePreferenceScores(record),
+    requestedActivities: request.requestedActivities || [],
   };
 }
 
@@ -501,14 +504,18 @@ export const usePlannerStore = create<PlannerStoreState>()(
           current.currentPlan,
           mergeGenerationInput(userId, current, request),
         );
-        if (staleness.isStale && current.currentPlan.status === 'active') {
+        const nextStatus = staleness.isStale ? 'stale' : 'active';
+        if (
+          current.currentPlan.status !== 'archived'
+          && current.currentPlan.status !== nextStatus
+        ) {
           set(state => ({
             users: {
               ...state.users,
               [userId]: {
                 ...hydratedRecord(state.users[userId]),
                 currentPlan: state.users[userId].currentPlan
-                  ? { ...state.users[userId].currentPlan, status: 'stale' }
+                  ? { ...state.users[userId].currentPlan, status: nextStatus }
                   : null,
               },
             },
@@ -685,7 +692,11 @@ export const usePlannerStore = create<PlannerStoreState>()(
       cacheEstimate: (userId, entry, cacheKey) => {
         get().ensureUser(userId);
         const entityParts = entry.entityId.split(':');
-        const inferredKind = entityParts[0] === 'exam' ? 'exam' : 'task';
+        const inferredKind = entityParts[0] === 'exam'
+          ? 'exam'
+          : entityParts[0] === 'activity'
+            ? 'activity'
+            : 'task';
         const inferredId = entityParts.length > 1 ? entityParts.slice(1).join(':') : entry.entityId;
         const key = cacheKey || createEstimateCacheKey(inferredKind, inferredId, entry.contentFingerprint);
         // A content fingerprint is immutable planner evidence. Keeping the first
@@ -726,8 +737,8 @@ export const usePlannerStore = create<PlannerStoreState>()(
         };
         const observation = observedFeedbackRatio(normalized);
         const assignmentType = normalized.assignmentType || 'assignment';
-        const kind = normalized.examId ? 'exam' : 'task';
-        const entityId = normalized.examId || normalized.taskId;
+        const kind = normalized.activityId ? 'activity' : normalized.examId ? 'exam' : 'task';
+        const entityId = normalized.activityId || normalized.examId || normalized.taskId;
         const keys = entityId
           ? feedbackMultiplierKeys(kind, entityId, normalized.subjectId || null, assignmentType)
           : [normalized.subjectId ? `subject:${normalized.subjectId}:type:${assignmentType}` : '', `type:${assignmentType}`, 'global'].filter(Boolean);

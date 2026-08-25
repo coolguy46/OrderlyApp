@@ -51,8 +51,13 @@ export interface WeekTimeGridProps {
   editable?: boolean;
   variant?: 'preview' | 'fullscreen';
   className?: string;
+  /** Overrides the default 600px preview viewport for embedded workspaces. */
+  viewportClassName?: string;
+  showSummaryHeader?: boolean;
   timeZoneLabel?: string;
   initialScrollHour?: number;
+  selectedDate?: string | Date;
+  onSelectedDateChange?: (date: Date) => void;
   onBlockMove?: (
     block: PlannerBlockView,
     nextStart: Date,
@@ -277,8 +282,12 @@ export function WeekTimeGrid({
   editable = false,
   variant = 'preview',
   className,
+  viewportClassName,
+  showSummaryHeader = true,
   timeZoneLabel,
   initialScrollHour = 6,
+  selectedDate,
+  onSelectedDateChange,
   onBlockMove,
   onBlockResize,
   onBlockClick,
@@ -296,6 +305,11 @@ export function WeekTimeGrid({
     () => Array.from({ length: DAYS_IN_PLAN }, (_, index) => addDays(normalizedWeekStart, index)),
     [normalizedWeekStart],
   );
+  const selectedDay = useMemo(() => {
+    if (!selectedDate) return null;
+    const value = startOfDay(asDate(selectedDate));
+    return isValidDate(value) ? value : null;
+  }, [selectedDate]);
 
   const validBlocks = useMemo(
     () =>
@@ -436,29 +450,31 @@ export function WeekTimeGrid({
 
   return (
     <section className={cn('min-w-0', className)} aria-label="Planned week calendar">
-      <div className="mb-2 flex min-h-8 items-center justify-between gap-3">
-        <div className="min-w-0">
-          <p className="truncate text-xs font-medium text-foreground">
-            {format(days[0], 'MMM d')}–{format(days[6], 'MMM d, yyyy')}
-          </p>
-          <p className="text-[10px] text-muted-foreground">
-            {editable ? 'Drag blocks to move them. Drag the bottom edge to resize.' : 'Read-only planned schedule'}
-          </p>
+      {showSummaryHeader && (
+        <div className="mb-2 flex min-h-8 items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className="truncate text-xs font-medium text-foreground">
+              {format(days[0], 'MMM d')}–{format(days[6], 'MMM d, yyyy')}
+            </p>
+            <p className="text-[10px] text-muted-foreground">
+              {editable ? 'Drag blocks to move them. Drag the bottom edge to resize.' : 'Read-only planned schedule'}
+            </p>
+          </div>
+          {variant === 'preview' && onRequestFullscreen && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              onClick={onRequestFullscreen}
+              aria-label="Open full-screen calendar"
+              title="Open full-screen"
+              className="h-8 w-8 shrink-0"
+            >
+              <Expand className="h-4 w-4" />
+            </Button>
+          )}
         </div>
-        {variant === 'preview' && onRequestFullscreen && (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            onClick={onRequestFullscreen}
-            aria-label="Open full-screen calendar"
-            title="Open full-screen"
-            className="h-8 w-8 shrink-0"
-          >
-            <Expand className="h-4 w-4" />
-          </Button>
-        )}
-      </div>
+      )}
 
       <DndContext
         sensors={sensors}
@@ -471,7 +487,8 @@ export function WeekTimeGrid({
           ref={scrollRef}
           className={cn(
             'scroll-touch relative overflow-auto overscroll-contain rounded-xl border border-border/60 bg-card/35',
-            variant === 'fullscreen' ? 'h-[calc(100dvh-8.5rem)]' : 'h-[600px]',
+            !viewportClassName && (variant === 'fullscreen' ? 'h-[calc(100dvh-8.5rem)]' : 'h-[600px]'),
+            viewportClassName,
           )}
         >
           <div className={cn('relative', contentMinWidth)}>
@@ -486,21 +503,31 @@ export function WeekTimeGrid({
                 <div
                   key={day.toISOString()}
                   className={cn(
-                    'flex flex-col items-center justify-center border-r border-border/50 px-2 last:border-r-0',
+                    'flex items-stretch justify-stretch border-r border-border/50 last:border-r-0',
                     isSameDay(day, now) && 'bg-primary/5',
+                    selectedDay && isSameDay(day, selectedDay) && 'bg-indigo-500/10',
                   )}
                 >
-                  <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                    {format(day, 'EEE')}
-                  </span>
-                  <span
-                    className={cn(
-                      'mt-0.5 flex h-6 min-w-6 items-center justify-center rounded-full px-1.5 text-xs font-semibold',
-                      isSameDay(day, now) && 'bg-primary text-primary-foreground shadow-sm',
-                    )}
+                  <button
+                    type="button"
+                    onClick={() => onSelectedDateChange?.(startOfDay(day))}
+                    disabled={!onSelectedDateChange}
+                    aria-pressed={Boolean(selectedDay && isSameDay(day, selectedDay))}
+                    className="flex w-full flex-col items-center justify-center px-2 disabled:cursor-default"
                   >
-                    {format(day, 'd')}
-                  </span>
+                    <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                      {format(day, 'EEE')}
+                    </span>
+                    <span
+                      className={cn(
+                        'mt-0.5 flex h-6 min-w-6 items-center justify-center rounded-full px-1.5 text-xs font-semibold',
+                        isSameDay(day, now) && 'bg-primary text-primary-foreground shadow-sm',
+                        selectedDay && isSameDay(day, selectedDay) && !isSameDay(day, now) && 'bg-indigo-500 text-white shadow-sm',
+                      )}
+                    >
+                      {format(day, 'd')}
+                    </span>
+                  </button>
                 </div>
               ))}
             </div>
@@ -527,7 +554,14 @@ export function WeekTimeGrid({
                 const currentMinute = minutesIntoDay(now);
 
                 return (
-                  <div key={day.toISOString()} className="relative" style={{ height: GRID_HEIGHT }}>
+                  <div
+                    key={day.toISOString()}
+                    className={cn(
+                      'relative',
+                      selectedDay && isSameDay(day, selectedDay) && 'bg-indigo-500/[0.025]',
+                    )}
+                    style={{ height: GRID_HEIGHT }}
+                  >
                     <DayColumn day={day} />
 
                     {today && (

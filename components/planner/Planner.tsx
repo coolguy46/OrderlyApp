@@ -30,15 +30,21 @@ import {
 import {
   examsToPlannerInputs,
   readStoredCalendarEvents,
+  requestedActivitiesToPlannerInputs,
   storedEventsToCommitments,
   tasksToPlannerInputs,
   type StoredCalendarEvent,
 } from '@/lib/planner/adapters';
+import {
+  PLANNER_PROMPT_COMMITMENT_PREFIX,
+  PLANNER_PROMPT_TASK_SOURCE,
+} from '@/lib/planner/types';
 import type {
   PlannerBlock,
   PlannerChatMessage,
   PlannerEstimateCacheEntry,
   PlannerFeedbackRecord,
+  PlannerPlan,
   PlannerSettings,
   PlannerTaskInput,
   RecurringCommitmentInput,
@@ -73,7 +79,6 @@ import {
   plannerFeedbackEntityKey,
 } from './adapters';
 
-const PROMPT_PREFIX = 'prompt-constraint-';
 const CALENDAR_PREFIX = 'calendar-';
 
 function uniqueCommitments(commitments: readonly RecurringCommitmentInput[]) {
@@ -96,7 +101,7 @@ function promptCommitments(
   ) => {
     if (startTime === endTime) return;
     constraints.push({
-      id: `${PROMPT_PREFIX}${id}`,
+      id: `${PLANNER_PROMPT_COMMITMENT_PREFIX}${id}`,
       title,
       kind: 'personal',
       daysOfWeek,
@@ -142,12 +147,25 @@ function effectiveSettings(
   };
 }
 
-function planSummary(result: PlannerInterpretResult, blockCount: number, unscheduledMinutes: number) {
-  const scheduled = `${blockCount} time block${blockCount === 1 ? '' : 's'}`;
-  const warning = unscheduledMinutes > 0
-    ? ` I still need ${unscheduledMinutes} unscheduled minute${unscheduledMinutes === 1 ? '' : 's'} reviewed because the week is too full.`
+function planSummary(result: PlannerInterpretResult, plan: PlannerPlan) {
+  const scheduled = `${plan.blocks.length} time block${plan.blocks.length === 1 ? '' : 's'}`;
+  const promptTaskIds = new Set((plan.promptTasks || []).map(task => task.id));
+  const promptBlocks = plan.blocks.filter(block =>
+    block.kind === 'requested_activity'
+    || promptTaskIds.has(block.sourceId)
+    || block.sourceId.startsWith(`${PLANNER_PROMPT_TASK_SOURCE}:`)
+  );
+  const requestedActivityNote = result.intent.requestedActivities.length === 0
+    ? ''
+    : (plan.promptTasks || []).length === 0
+      ? ' I could not generate valid plan-only work from that activity request.'
+      : promptBlocks.length > 0
+        ? ` Scheduled ${promptBlocks.length} requested-activity block${promptBlocks.length === 1 ? '' : 's'} across ${new Set(promptBlocks.map(block => block.sourceId)).size} daily occurrence${new Set(promptBlocks.map(block => block.sourceId)).size === 1 ? '' : 's'}.`
+        : ` Generated ${(plan.promptTasks || []).length} requested work item${(plan.promptTasks || []).length === 1 ? '' : 's'}, but none fit within the available daily windows.`;
+  const warning = plan.totalUnscheduledMinutes > 0
+    ? ` I still need ${plan.totalUnscheduledMinutes} unscheduled minute${plan.totalUnscheduledMinutes === 1 ? '' : 's'} reviewed because the week is too full.`
     : '';
-  return `${result.summary} I built ${scheduled} around exact deadlines and your busy times.${warning}`;
+  return `${result.summary} I built ${scheduled} around exact deadlines and your busy times.${requestedActivityNote}${warning}`;
 }
 
 export function Planner() {
@@ -233,9 +251,14 @@ export function Planner() {
     () => examsToPlannerInputs(exams
       .filter(exam => {
         const timestamp = new Date(exam.exam_date).getTime();
-        return Number.isFinite(timestamp) && timestamp >= startOfDay(new Date()).getTime();
+        const horizonBoundary = plan
+          ? new Date(plan.horizonStart).getTime()
+          : startOfDay(new Date()).getTime();
+        return Number.isFinite(timestamp)
+          && Number.isFinite(horizonBoundary)
+          && timestamp >= horizonBoundary;
       }), taskInputs),
-    [exams, taskInputs],
+    [exams, plan, taskInputs],
   );
   const calendarCommitments = useMemo(
     () => storedEventsToCommitments(
@@ -250,13 +273,20 @@ export function Planner() {
   ]), [calendarCommitments, record?.commitments]);
 
   const generationRequest = useMemo(() => ({
-    tasks: taskInputs,
+    tasks: [...new Map([
+      ...taskInputs,
+      ...(plan?.promptTasks || []),
+    ].map(task => [task.id, task])).values()],
     exams: examInputs,
-    commitments: liveCommitments,
+    commitments: uniqueCommitments([
+      ...liveCommitments,
+      ...(plan?.promptCommitments || []),
+    ]),
     settings: record?.settings,
     prompt: plan?.prompt || null,
     focusSubjects: plan?.focusSubjects || [],
-  }), [examInputs, liveCommitments, plan?.focusSubjects, plan?.prompt, record?.settings, taskInputs]);
+    requestedActivities: plan?.requestedActivities || [],
+  }), [examInputs, liveCommitments, plan?.focusSubjects, plan?.prompt, plan?.promptCommitments, plan?.promptTasks, plan?.requestedActivities, record?.settings, taskInputs]);
 
   const staleness = useMemo(() => {
     if (!plan || !record || !userId) return null;
@@ -270,6 +300,7 @@ export function Planner() {
       feedbackMultipliers: record.feedbackMultipliers,
       prompt: plan.prompt,
       focusSubjects: plan.focusSubjects || [],
+      requestedActivities: plan.requestedActivities || [],
     });
   }, [generationRequest, plan, record, userId]);
 
@@ -404,30 +435,70 @@ export function Planner() {
     }
   }, [examInputs, record?.settings, subjects, taskInputs]);
 
-  const createPlan = useCallback(async (prompt: string) => {
+  const createPlan = useCallback(async (
+    prompt: string,
+    retainedActivities: PlannerInterpretResult['intent']['requestedActivities'] = [],
+  ) => {
     if (!userId || !record || generating) return;
     setGenerating(true);
     addMessage(userId, { role: 'user', content: prompt });
     try {
       const result = await interpret(prompt);
-      cacheAIResults(result, taskInputs);
-      const baseCommitments = liveCommitments.filter(commitment => !commitment.id.startsWith(PROMPT_PREFIX));
+      const requestedActivities = result.intent.requestedActivities.length > 0
+        ? result.intent.requestedActivities
+        : retainedActivities;
+      const interpretedResult: PlannerInterpretResult = requestedActivities === result.intent.requestedActivities
+        ? result
+        : { ...result, intent: { ...result.intent, requestedActivities } };
+      const baseCommitments = liveCommitments.filter(commitment => !commitment.id.startsWith(PLANNER_PROMPT_COMMITMENT_PREFIX));
       const settings = effectiveSettings(record.settings, result.intent);
       const commitments = uniqueCommitments([
         ...baseCommitments,
         ...promptCommitments(result.intent, settings),
       ]);
+      const planningNow = new Date();
+      // The engine rounds its horizon start up to the next slot. Build every
+      // input against that same boundary so an exam in the few minutes before
+      // the rounded start cannot enter the snapshot and immediately disappear
+      // when the staleness monitor reconstructs it.
+      const slotMs = settings.slotMinutes * 60_000;
+      const planningHorizonStart = new Date(
+        Math.ceil(planningNow.getTime() / slotMs) * slotMs,
+      );
+      const generationTaskInputs = tasksToPlannerInputs(
+        tasks.filter(task => task.status !== 'completed'),
+        {
+          horizonStart: planningHorizonStart,
+          horizonDays: settings.horizonDays,
+          timeZone: settings.timeZone,
+        },
+      );
+      const promptTaskInputs = requestedActivitiesToPlannerInputs(requestedActivities, {
+        horizonStart: planningHorizonStart,
+        settings,
+        preferredEnd: result.intent.preferredEnd,
+      });
+      const generationExamInputs = examsToPlannerInputs(
+        exams.filter(exam => {
+          const timestamp = new Date(exam.exam_date).getTime();
+          return Number.isFinite(timestamp) && timestamp >= planningHorizonStart.getTime();
+        }),
+        generationTaskInputs,
+      );
+      cacheAIResults(result, generationTaskInputs);
       const nextPlan = generatePlan(userId, {
-        tasks: taskInputs,
-        exams: examInputs,
+        tasks: [...generationTaskInputs, ...promptTaskInputs],
+        exams: generationExamInputs,
         commitments,
         settings,
+        now: planningHorizonStart.toISOString(),
         prompt,
         focusSubjects: result.intent.focusSubjects,
+        requestedActivities,
       });
       addMessage(userId, {
         role: 'assistant',
-        content: planSummary(result, nextPlan.blocks.length, nextPlan.totalUnscheduledMinutes),
+        content: planSummary(interpretedResult, nextPlan),
       });
       setSelectedDate(startOfDay(new Date(nextPlan.horizonStart)));
       toast.success('Your one-week plan is ready', {
@@ -440,9 +511,12 @@ export function Planner() {
     } finally {
       setGenerating(false);
     }
-  }, [addMessage, cacheAIResults, examInputs, generatePlan, generating, interpret, liveCommitments, record, taskInputs, userId]);
+  }, [addMessage, cacheAIResults, exams, generatePlan, generating, interpret, liveCommitments, record, tasks, userId]);
 
-  const updateStalePlan = () => void createPlan(plan?.prompt || 'Update my week with the new assignments');
+  const updateStalePlan = () => void createPlan(
+    plan?.prompt || 'Update my week with the new assignments',
+    plan?.requestedActivities || [],
+  );
 
   const handleMove = (view: PlannerBlockView, nextStart: Date) => {
     if (!userId) return;
@@ -522,8 +596,11 @@ export function Planner() {
         setFeedbackBlockId(block.id);
       }
     } else {
-      updateBlock(userId, block.id, { status: block.status === 'completed' ? 'planned' : 'completed' });
-      if (block.status !== 'completed') setFeedbackBlockId(block.id);
+      const nextStatus = block.status === 'completed' ? 'planned' : 'completed';
+      plan.blocks.filter(item => item.sourceId === block.sourceId).forEach(item => {
+        updateBlock(userId, item.id, { status: nextStatus });
+      });
+      if (nextStatus === 'completed') setFeedbackBlockId(block.id);
     }
   };
 
@@ -543,15 +620,19 @@ export function Planner() {
     if (!userId || !plan || !feedbackBlockId || !feedbackTiming) return;
     const block = plan.blocks.find(item => item.id === feedbackBlockId);
     if (!block) return;
+    const predictedMinutes = plan.blocks
+      .filter(item => item.sourceId === block.sourceId)
+      .reduce((total, item) => total + item.estimatedMinutes, 0);
     const feedback: PlannerFeedbackRecord = {
       id: '',
       planId: plan.id,
       blockId: block.id,
       taskId: block.taskId,
       examId: block.examId,
+      activityId: block.activityId,
       subjectId: block.subjectId,
       assignmentType: block.assignmentType,
-      predictedMinutes: block.estimatedMinutes,
+      predictedMinutes,
       actualMinutes: null,
       timingRating: feedbackTiming,
       scheduleRating: feedbackHappy === null ? null : feedbackHappy ? 5 : 2,
@@ -580,6 +661,11 @@ export function Planner() {
     ? blockViews.find(block => block.id === selectedBlock.id) || null
     : null;
   const feedbackBlock = feedbackBlockId ? plan?.blocks.find(block => block.id === feedbackBlockId) || null : null;
+  const feedbackPlannedMinutes = feedbackBlock && plan
+    ? plan.blocks
+      .filter(block => block.sourceId === feedbackBlock.sourceId)
+      .reduce((total, block) => total + block.estimatedMinutes, 0)
+    : 0;
 
   return (
     <div className="space-y-4">
@@ -603,7 +689,10 @@ export function Planner() {
               <Archive className="h-3.5 w-3.5" /> Archive
             </Button>
           )}
-          <Button size="sm" className="gap-1.5 bg-gradient-to-r from-indigo-500 to-purple-600 text-white" onClick={() => void createPlan(plan ? 'Replan my week' : 'Plan my week')} disabled={generating}>
+          <Button size="sm" className="gap-1.5 bg-gradient-to-r from-indigo-500 to-purple-600 text-white" onClick={() => void createPlan(
+            plan?.prompt || 'Plan my week',
+            plan?.requestedActivities || [],
+          )} disabled={generating}>
             {generating ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <WandSparkles className="h-3.5 w-3.5" />}
             {plan ? 'Replan week' : 'Plan my week'}
           </Button>
@@ -629,14 +718,17 @@ export function Planner() {
         </Card>
       )}
 
-      {planExpired && (
+      {plan && planExpired && (
         <Card className="border-indigo-500/25 bg-indigo-500/8">
           <CardContent className="flex items-center justify-between gap-3 p-3 sm:p-4">
             <div>
               <p className="text-sm font-semibold">This planned week has ended</p>
               <p className="text-xs text-muted-foreground">It stays in history. Start a fresh plan when you are ready.</p>
             </div>
-            <Button size="sm" variant="outline" onClick={() => void createPlan('Plan my next week')}>Plan next week</Button>
+            <Button size="sm" variant="outline" onClick={() => void createPlan(
+              plan.prompt || 'Plan my next week',
+              plan.requestedActivities || [],
+            )}>Plan next week</Button>
           </CardContent>
         </Card>
       )}
@@ -793,7 +885,7 @@ export function Planner() {
         <DialogContent className="sm:max-w-[440px]">
           <DialogHeader>
             <DialogTitle>How did this timing feel?</DialogTitle>
-            <DialogDescription>{feedbackBlock?.title} · {feedbackBlock?.estimatedMinutes} minutes planned</DialogDescription>
+            <DialogDescription>{feedbackBlock?.title} · {feedbackPlannedMinutes} minutes planned</DialogDescription>
           </DialogHeader>
           <div className="space-y-5 pt-2">
             <div>

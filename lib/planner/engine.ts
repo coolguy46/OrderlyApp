@@ -1,6 +1,8 @@
 import {
   PLANNER_MAX_BLOCK_MINUTES,
   PLANNER_MAX_HORIZON_DAYS,
+  PLANNER_PROMPT_COMMITMENT_PREFIX,
+  PLANNER_PROMPT_TASK_SOURCE,
   PLANNER_SCHEMA_VERSION,
   PLANNER_SLOT_MINUTES,
   type PlannerAssignmentType,
@@ -36,16 +38,18 @@ interface AvailabilityInterval extends Interval {
 
 interface WorkItem {
   key: string;
-  kind: 'task' | 'exam_prep';
+  kind: 'task' | 'exam_prep' | 'requested_activity';
   sourceId: string;
   taskId: string | null;
   examId: string | null;
+  activityId: string | null;
   title: string;
   description: string | null;
   subjectId: string | null;
   assignmentType: PlannerAssignmentType;
   priority: PlannerPriority;
   focused: boolean;
+  releaseAt: number;
   deadline: number;
   estimatedMinutes: number;
 }
@@ -59,7 +63,7 @@ interface ZonedParts {
 }
 
 interface EstimateContext {
-  kind: 'task' | 'exam';
+  kind: 'task' | 'exam' | 'activity';
   entityId: string;
   title: string;
   description: string | null;
@@ -327,7 +331,7 @@ function estimateContentFingerprint(context: EstimateContext): string {
 }
 
 export function createEstimateCacheKey(
-  kind: 'task' | 'exam',
+  kind: 'task' | 'exam' | 'activity',
   entityId: string,
   contentFingerprint: string,
 ): string {
@@ -352,7 +356,7 @@ function findEstimateOverride(
 }
 
 export function feedbackMultiplierKeys(
-  kind: 'task' | 'exam',
+  kind: 'task' | 'exam' | 'activity',
   entityId: string,
   subjectId: string | null,
   assignmentType: PlannerAssignmentType,
@@ -477,10 +481,10 @@ export function estimatePlannerTask(
   feedbackMultipliers: Readonly<Record<string, PlannerFeedbackMultiplier>> = {},
 ): PlannerEstimateBreakdown {
   return estimateWork({
-    kind: 'task',
+    kind: task.activityId ? 'activity' : 'task',
     // Virtual recurrence IDs are schedule-specific. Estimate caching and timing
     // feedback belong to the durable Orderly task so every occurrence can learn.
-    entityId: task.taskId || task.id,
+    entityId: task.activityId || task.taskId || task.id,
     title: task.title,
     description: task.description || null,
     subjectId: task.subjectId || null,
@@ -524,7 +528,9 @@ export function estimatePlannerExam(
 function taskSnapshotValue(task: PlannerTaskInput): string {
   return plannerHash({
     taskId: task.taskId || task.id,
+    activityId: task.activityId || null,
     occurrenceDate: task.occurrenceDate || null,
+    availableFrom: task.availableFrom || null,
     title: task.title.trim(),
     description: toPlainText(task.description || null),
     subjectId: task.subjectId || null,
@@ -810,6 +816,7 @@ function buildWorkItems(
   for (const task of [...input.tasks].sort((a, b) => a.id.localeCompare(b.id))) {
     if (task.status === 'completed') continue;
     const parsedDeadline = parseDeadline(task.dueAt);
+    const parsedReleaseAt = parseDeadline(task.availableFrom);
     if (Number.isNaN(parsedDeadline)) {
       warnings.push({
         id: `invalid-task-deadline-${task.id}`,
@@ -822,22 +829,39 @@ function buildWorkItems(
       });
       continue;
     }
+    if (Number.isNaN(parsedReleaseAt)) {
+      warnings.push({
+        id: `invalid-task-release-${task.id}`,
+        code: 'invalid_deadline',
+        entityKind: 'task',
+        entityId: task.activityId || task.taskId || task.id,
+        title: task.title,
+        message: 'The requested activity has an invalid start boundary and was not scheduled.',
+        deadlineAt: task.availableFrom || null,
+      });
+      continue;
+    }
     const estimate = estimatePlannerTask(task, estimateCache, feedbackMultipliers);
     const key = `task:${task.id}`;
-    const originalTaskId = task.taskId || task.id;
+    const isRequestedActivity = task.source === PLANNER_PROMPT_TASK_SOURCE || Boolean(task.activityId);
+    const originalTaskId = isRequestedActivity || task.taskId === null
+      ? null
+      : task.taskId || task.id;
     estimates[key] = estimate;
     workItems.push({
       key,
-      kind: 'task',
+      kind: isRequestedActivity ? 'requested_activity' : 'task',
       sourceId: task.id,
       taskId: originalTaskId,
       examId: null,
+      activityId: task.activityId || null,
       title: task.title,
       description: task.description || null,
       subjectId: task.subjectId || null,
       assignmentType: normalizeAssignmentType(task.assignmentType),
       priority: task.priority,
       focused: matchesFocusedSubject(focusSubjects, task.courseName, task.title),
+      releaseAt: parsedReleaseAt ?? Number.NEGATIVE_INFINITY,
       deadline: parsedDeadline ?? horizonEnd,
       estimatedMinutes: estimate.finalMinutes,
     });
@@ -867,12 +891,14 @@ function buildWorkItems(
       sourceId: exam.id,
       taskId: null,
       examId: exam.id,
+      activityId: null,
       title: `Prepare for ${exam.title}`,
       description: exam.description || null,
       subjectId: exam.subjectId || null,
       assignmentType: 'exam',
       priority: exam.priority || 'high',
       focused: matchesFocusedSubject(focusSubjects, null, exam.title),
+      releaseAt: Number.NEGATIVE_INFINITY,
       deadline: parsedDeadline,
       estimatedMinutes: estimate.finalMinutes,
     });
@@ -899,6 +925,7 @@ function findEarliestSlot(
   availability: readonly AvailabilityInterval[],
   occupied: readonly Interval[],
   deadline: number,
+  releaseAt: number,
   requestedMinutes: number,
   dailyScheduledMinutes: ReadonlyMap<string, number>,
   settings: PlannerSettings,
@@ -915,7 +942,7 @@ function findEarliestSlot(
     if (maxMinutes < settings.slotMinutes) continue;
 
     const limit = Math.min(window.end, deadline);
-    let cursor = ceilToSlot(window.start, settings.slotMinutes);
+    let cursor = ceilToSlot(Math.max(window.start, releaseAt), settings.slotMinutes);
     while (cursor + slotMs <= limit) {
       const containing = sortedOccupied.find(interval => overlaps(
         { start: cursor, end: cursor + slotMs },
@@ -956,11 +983,14 @@ export function generatePlannerPlan(rawInput: PlannerGenerationInput): PlannerPl
   const settings = normalizePlannerSettings(rawInput.settings);
   const focusSubjects = normalizedFocusSubjects(rawInput.focusSubjects);
   const timePreferenceScores = normalizeTimePreferenceScores(rawInput.timePreferenceScores);
+  const requestedActivities = [...(rawInput.requestedActivities || [])]
+    .sort((left, right) => left.id.localeCompare(right.id));
   const input: PlannerGenerationInput = {
     ...rawInput,
     settings,
     focusSubjects,
     timePreferenceScores,
+    requestedActivities,
   };
   const requestedNow = rawInput.now ? new Date(rawInput.now).getTime() : Date.now();
   const now = Number.isFinite(requestedNow) ? requestedNow : Date.now();
@@ -1013,7 +1043,7 @@ export function generatePlannerPlan(rawInput: PlannerGenerationInput): PlannerPl
       warnings.push({
         id: `deadline-passed-${item.key}`,
         code: 'deadline_passed',
-        entityKind: item.kind === 'task' ? 'task' : 'exam',
+        entityKind: item.kind === 'exam_prep' ? 'exam' : 'task',
         entityId: item.sourceId,
         title: item.title,
         message: 'The exact deadline has already passed, so Orderly did not place work after it.',
@@ -1030,6 +1060,7 @@ export function generatePlannerPlan(rawInput: PlannerGenerationInput): PlannerPl
         calendar.availability,
         occupied,
         item.deadline,
+        item.releaseAt,
         requestedMinutes,
         dailyScheduledMinutes,
         settings,
@@ -1046,6 +1077,7 @@ export function generatePlannerPlan(rawInput: PlannerGenerationInput): PlannerPl
         sourceId: item.sourceId,
         taskId: item.taskId,
         examId: item.examId,
+        activityId: item.activityId,
         title: item.title,
         description: item.description,
         subjectId: item.subjectId,
@@ -1076,7 +1108,7 @@ export function generatePlannerPlan(rawInput: PlannerGenerationInput): PlannerPl
       warnings.push({
         id: `capacity-${item.key}`,
         code: 'insufficient_capacity',
-        entityKind: item.kind === 'task' ? 'task' : 'exam',
+        entityKind: item.kind === 'exam_prep' ? 'exam' : 'task',
         entityId: item.sourceId,
         title: item.title,
         message: `Orderly could not place ${remainingMinutes} minute${remainingMinutes === 1 ? '' : 's'} before the exact deadline within this plan.`,
@@ -1105,6 +1137,15 @@ export function generatePlannerPlan(rawInput: PlannerGenerationInput): PlannerPl
     horizonEnd: new Date(horizonEnd).toISOString(),
     prompt: input.prompt || null,
     focusSubjects,
+    promptTasks: input.tasks
+      .filter(task => task.source === PLANNER_PROMPT_TASK_SOURCE || Boolean(task.activityId))
+      .map(task => ({ ...task }))
+      .sort((left, right) => left.id.localeCompare(right.id)),
+    requestedActivities,
+    promptCommitments: (input.commitments || [])
+      .filter(commitment => commitment.id.startsWith(PLANNER_PROMPT_COMMITMENT_PREFIX))
+      .map(commitment => ({ ...commitment, daysOfWeek: [...commitment.daysOfWeek] }))
+      .sort((left, right) => left.id.localeCompare(right.id)),
     inputFingerprint: snapshot.fingerprint,
     inputSnapshot: snapshot,
     settings,

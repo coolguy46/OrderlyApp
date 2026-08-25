@@ -3,9 +3,12 @@ import type { Exam, Task } from '@/lib/supabase/types';
 import type {
   PlannerAssignmentType,
   PlannerExamInput,
+  PlannerRequestedActivity,
+  PlannerSettings,
   PlannerTaskInput,
   RecurringCommitmentInput,
 } from './types';
+import { PLANNER_PROMPT_TASK_SOURCE } from './types';
 import { zonedDateTimeToTimestamp } from './engine';
 
 export interface StoredCalendarEvent {
@@ -34,6 +37,12 @@ export interface PlannerTaskExpansionOptions {
   horizonStart?: string | Date;
   horizonDays?: number;
   timeZone?: string;
+}
+
+export interface PlannerRequestedActivityExpansionOptions {
+  horizonStart: string | Date;
+  settings: PlannerSettings;
+  preferredEnd?: string;
 }
 
 function safeTimeZone(value?: string): string {
@@ -207,6 +216,88 @@ export function tasksToPlannerInputs(
         taskId: task.id,
         occurrenceDate,
         dueAt: new Date(zonedDateTimeToTimestamp(occurrenceDate, dueTime, timeZone)).toISOString(),
+      });
+    }
+  }
+
+  return results.sort((left, right) =>
+    (left.dueAt || '').localeCompare(right.dueAt || '')
+    || left.id.localeCompare(right.id)
+  );
+}
+
+/**
+ * Materialize prompt-only activity templates into day-bounded work inputs.
+ * `availableFrom` prevents tomorrow's requested work from being pulled into
+ * today simply because there is spare capacity.
+ */
+export function requestedActivitiesToPlannerInputs(
+  activities: readonly PlannerRequestedActivity[],
+  options: PlannerRequestedActivityExpansionOptions,
+): PlannerTaskInput[] {
+  const timeZone = safeTimeZone(options.settings.timeZone);
+  const requestedStart = options.horizonStart instanceof Date
+    ? options.horizonStart
+    : new Date(options.horizonStart);
+  const horizonStart = Number.isNaN(requestedStart.getTime()) ? new Date() : requestedStart;
+  const horizonDays = Math.max(1, Math.min(7, Math.trunc(options.settings.horizonDays || 7)));
+  const firstLocalDate = zonedDateParts(horizonStart, timeZone).date;
+  const results: PlannerTaskInput[] = [];
+  const occurrenceIds = new Set<string>();
+
+  for (const activity of [...activities].sort((left, right) => left.id.localeCompare(right.id))) {
+    const startOffset = Math.max(0, Math.min(6, Math.trunc(activity.startOffsetDays || 0)));
+    const durationDays = Math.max(1, Math.min(7, Math.trunc(activity.durationDays || 1)));
+    const endOffset = Math.min(horizonDays, startOffset + durationDays);
+    const configuredDays = normalizedRecurrenceDays(activity.daysOfWeek);
+    const fallbackWeeklyDay = localDayOfWeek(addLocalDays(firstLocalDate, startOffset));
+    let oncePlaced = false;
+
+    for (let offset = startOffset; offset < endOffset; offset += 1) {
+      const occurrenceDate = addLocalDays(firstLocalDate, offset);
+      const dayOfWeek = localDayOfWeek(occurrenceDate);
+      const occurs = activity.recurrence === 'daily'
+        ? configuredDays.length === 0 || configuredDays.includes(dayOfWeek)
+        : activity.recurrence === 'weekly'
+          ? (configuredDays.length > 0 ? configuredDays.includes(dayOfWeek) : dayOfWeek === fallbackWeeklyDay)
+          : !oncePlaced && (configuredDays.length === 0 || configuredDays.includes(dayOfWeek));
+      if (!occurs) continue;
+      oncePlaced = true;
+
+      const occurrenceId = `${PLANNER_PROMPT_TASK_SOURCE}:${activity.id}@${occurrenceDate}`;
+      if (occurrenceIds.has(occurrenceId)) continue;
+      occurrenceIds.add(occurrenceId);
+      const deadlineTime = validTime(activity.deadlineTime)
+        ? activity.deadlineTime
+        : validTime(options.preferredEnd)
+          ? options.preferredEnd
+          : options.settings.schoolDays.includes(dayOfWeek)
+            ? options.settings.bedtime
+            : options.settings.weekendAvailableEnd;
+      const deadlineDate = deadlineTime === '00:00'
+        ? addLocalDays(occurrenceDate, 1)
+        : occurrenceDate;
+
+      results.push({
+        id: occurrenceId,
+        taskId: null,
+        activityId: activity.id,
+        occurrenceDate,
+        availableFrom: new Date(zonedDateTimeToTimestamp(occurrenceDate, '00:00', timeZone)).toISOString(),
+        title: activity.title,
+        description: activity.description,
+        subjectId: null,
+        courseName: null,
+        priority: 'medium',
+        status: 'pending',
+        dueAt: new Date(zonedDateTimeToTimestamp(deadlineDate, deadlineTime, timeZone)).toISOString(),
+        assignmentType: 'other',
+        source: PLANNER_PROMPT_TASK_SOURCE,
+        externalId: activity.id,
+        updatedAt: null,
+        estimateMinutes: activity.minutesPerOccurrence,
+        recurrence: activity.recurrence === 'once' ? 'none' : activity.recurrence,
+        recurrenceDays: configuredDays,
       });
     }
   }

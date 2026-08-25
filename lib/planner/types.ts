@@ -2,6 +2,8 @@ export const PLANNER_SCHEMA_VERSION = 1;
 export const PLANNER_SLOT_MINUTES = 15;
 export const PLANNER_MAX_BLOCK_MINUTES = 90;
 export const PLANNER_MAX_HORIZON_DAYS = 7;
+export const PLANNER_PROMPT_TASK_SOURCE = 'planner_prompt';
+export const PLANNER_PROMPT_COMMITMENT_PREFIX = 'prompt-constraint-';
 
 export type IsoDateTime = string;
 export type LocalDate = string;
@@ -9,6 +11,7 @@ export type LocalTime = string;
 export type PlannerPriority = 'high' | 'medium' | 'low';
 export type PlannerTimeBucket = 'morning' | 'afternoon' | 'evening' | 'night';
 export type PlannerTimePreferenceScores = Readonly<Partial<Record<PlannerTimeBucket, number>>>;
+export type PlannerRequestedActivityRecurrence = 'once' | 'daily' | 'weekly';
 export type PlannerAssignmentType =
   | 'assignment'
   | 'exam'
@@ -16,6 +19,19 @@ export type PlannerAssignmentType =
   | 'discussion'
   | 'project'
   | 'other';
+
+/** Canonical plan-only activity extracted exclusively from the user's prompt. */
+export interface PlannerRequestedActivity {
+  id: string;
+  title: string;
+  description: string;
+  minutesPerOccurrence: number;
+  recurrence: PlannerRequestedActivityRecurrence;
+  daysOfWeek: number[];
+  startOffsetDays: number;
+  durationDays: number;
+  deadlineTime?: LocalTime;
+}
 
 export interface PlannerSettings {
   timeZone: string;
@@ -62,6 +78,10 @@ export interface PlannerTaskInput {
   taskId?: string | null;
   /** Local due date for a generated recurring occurrence. */
   occurrenceDate?: LocalDate | null;
+  /** Exact instant before which this occurrence cannot be scheduled. */
+  availableFrom?: IsoDateTime | null;
+  /** Stable plan-only activity template ID; null for durable tasks. */
+  activityId?: string | null;
   title: string;
   description?: string | null;
   subjectId?: string | null;
@@ -151,6 +171,8 @@ export interface PlannerGenerationInput {
   focusSubjects?: readonly string[];
   /** Learned, bounded preference scores; negative buckets remain usable if needed. */
   timePreferenceScores?: PlannerTimePreferenceScores;
+  /** Canonical templates used to create any plan-only task inputs. */
+  requestedActivities?: readonly PlannerRequestedActivity[];
 }
 
 export interface PlannerFixedInterval {
@@ -167,10 +189,11 @@ export interface PlannerFixedInterval {
 export interface PlannerBlock {
   id: string;
   planId: string;
-  kind: 'task' | 'exam_prep';
+  kind: 'task' | 'exam_prep' | 'requested_activity';
   sourceId: string;
   taskId?: string | null;
   examId?: string | null;
+  activityId?: string | null;
   title: string;
   description?: string | null;
   subjectId?: string | null;
@@ -226,6 +249,12 @@ export interface PlannerPlan {
   prompt?: string | null;
   /** Normalized intent used to deterministically break equal-deadline ties. */
   focusSubjects?: string[];
+  /** Plan-only work derived from the prompt, retained for stable staleness checks. */
+  promptTasks?: PlannerTaskInput[];
+  /** Canonical prompt templates retained so explicit replans do not lose intent. */
+  requestedActivities?: PlannerRequestedActivity[];
+  /** Prompt-only availability constraints retained with the plan snapshot. */
+  promptCommitments?: RecurringCommitmentInput[];
   inputFingerprint: string;
   inputSnapshot: PlannerInputSnapshot;
   settings: PlannerSettings;
@@ -269,6 +298,7 @@ export interface PlannerFeedbackRecord {
   blockId?: string | null;
   taskId?: string | null;
   examId?: string | null;
+  activityId?: string | null;
   subjectId?: string | null;
   assignmentType?: PlannerAssignmentType | null;
   predictedMinutes: number;

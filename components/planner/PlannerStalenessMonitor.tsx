@@ -54,7 +54,7 @@ export function PlannerStalenessMonitor() {
 
   const taskInputs = useMemo(() => {
     if (!plan) return [];
-    return tasksToPlannerInputs(
+    const durableTasks = tasksToPlannerInputs(
       tasks.filter(task => task.status !== 'completed'),
       {
         horizonStart: plan.horizonStart,
@@ -62,6 +62,10 @@ export function PlannerStalenessMonitor() {
         timeZone: plan.settings.timeZone,
       },
     );
+    return [...new Map([
+      ...durableTasks,
+      ...(plan.promptTasks || []),
+    ].map(task => [task.id, task])).values()];
   }, [plan, tasks]);
 
   const examInputs = useMemo(() => {
@@ -83,6 +87,7 @@ export function PlannerStalenessMonitor() {
     );
     storedEventsToCommitments(storedEvents, plan.settings.timeZone)
       .forEach(commitment => byId.set(commitment.id, commitment));
+    (plan.promptCommitments || []).forEach(commitment => byId.set(commitment.id, commitment));
     return [...byId.values()].sort((left, right) => left.id.localeCompare(right.id));
   }, [plan, plannerRecord, storedEvents]);
 
@@ -95,6 +100,7 @@ export function PlannerStalenessMonitor() {
       settings: plannerRecord.settings,
       prompt: plan.prompt,
       focusSubjects: plan.focusSubjects || [],
+      requestedActivities: plan.requestedActivities || [],
     });
     if (!staleness?.isStale) return;
 
