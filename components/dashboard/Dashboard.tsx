@@ -264,23 +264,12 @@ export function Dashboard() {
             {mounted ? format(new Date(), "EEEE, MMMM d, yyyy") : '\u00A0'}
           </p>
         </div>
-        <div className="flex items-center gap-2 self-start sm:self-auto">
-          <Button
-            size="sm"
-            variant="outline"
-            className="gap-2 rounded-xl h-9 sm:h-10 sm:px-5"
-            onClick={() => setShowTaskForm(true)}
-          >
-            <Plus className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-            <span className="text-xs sm:text-sm">New Task</span>
+        <Link href="/study" className="self-start sm:self-auto">
+          <Button size="sm" className="gap-2 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 shadow-lg shadow-indigo-500/20 rounded-xl text-white h-9 sm:h-10 sm:px-5">
+            <Play className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+            <span className="text-xs sm:text-sm">Start Study</span>
           </Button>
-          <Link href="/study">
-            <Button size="sm" className="gap-2 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 shadow-lg shadow-indigo-500/20 rounded-xl text-white h-9 sm:h-10 sm:px-5">
-              <Play className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-              <span className="text-xs sm:text-sm">Start Study</span>
-            </Button>
-          </Link>
-        </div>
+        </Link>
       </motion.div>
 
       {/* Stats Grid - Animated */}
@@ -345,6 +334,15 @@ export function Dashboard() {
                       Clear Filter
                     </Button>
                   )}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="gap-1 text-xs text-foreground hover:text-foreground h-7 px-2"
+                    onClick={() => setShowTaskForm(true)}
+                  >
+                    <Plus className="w-3 h-3" />
+                    New Task
+                  </Button>
                   <Link href="/tasks">
                     <Button variant="ghost" size="sm" className="gap-1 text-xs h-7">
                       View All
