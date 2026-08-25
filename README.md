@@ -16,6 +16,15 @@ bun dev
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
+Copy `.env.example` to `.env.local` and fill in the Supabase public values. The
+weekly Planner works without an AI key by using deterministic estimates. To add
+chat-based interpretation and richer assignment estimates, configure
+`DEEPSEEK_API_KEY`; `DEEPSEEK_MODEL` defaults to `deepseek-v4-flash`.
+
+The Planner migration is in `lib/supabase/planner-migration.sql`. Until that
+migration is applied, planner state is kept per user in the browser so the UI can
+still be tested safely.
+
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.

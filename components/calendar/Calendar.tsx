@@ -46,6 +46,8 @@ import {
   ChevronLeft,
   ChevronRight,
   Calendar as CalendarIcon,
+  CalendarClock,
+  CalendarDays,
   Clock,
   BookOpen,
   Target,
@@ -56,6 +58,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { cn, isExamType } from '@/lib/utils';
+import { PlannedCalendar } from './PlannedCalendar';
 
 type ViewMode = 'month' | 'week' | 'day';
 
@@ -65,12 +68,13 @@ interface CalendarEvent {
   description?: string;
   date: string;
   time?: string;
+  endTime?: string;
   type: 'event';
   color: string;
   recurrence?: 'none' | 'daily' | 'weekly' | 'weekdays';
 }
 
-export function Calendar() {
+function RegularCalendar() {
   const { tasks, exams, studySessions, subjects, addTask, user } = useAppStore();
   const [mounted, setMounted] = useState(false);
   const [currentDate, setCurrentDate] = useState<Date | null>(null);
@@ -83,6 +87,7 @@ export function Calendar() {
   const [newItemTitle, setNewItemTitle] = useState('');
   const [newItemDescription, setNewItemDescription] = useState('');
   const [newItemTime, setNewItemTime] = useState('09:00');
+  const [newItemEndTime, setNewItemEndTime] = useState('10:00');
   const [newItemRecurrence, setNewItemRecurrence] = useState<'none' | 'daily' | 'weekly' | 'weekdays'>('none');
   const [newItemPriority, setNewItemPriority] = useState<'low' | 'medium' | 'high'>('medium');
   
@@ -104,6 +109,7 @@ export function Calendar() {
   useEffect(() => {
     if (mounted) {
       localStorage.setItem('calendarEvents', JSON.stringify(localEvents));
+      window.dispatchEvent(new Event('orderly-calendar-events-changed'));
     }
   }, [localEvents, mounted]);
 
@@ -233,6 +239,7 @@ export function Calendar() {
         description: newItemDescription,
         date: format(selectedDate, 'yyyy-MM-dd'),
         time: newItemTime,
+        endTime: newItemEndTime,
         type: 'event',
         color: '#6366f1',
         recurrence: newItemRecurrence,
@@ -252,6 +259,7 @@ export function Calendar() {
     setNewItemTitle('');
     setNewItemDescription('');
     setNewItemTime('09:00');
+    setNewItemEndTime('10:00');
     setNewItemRecurrence('none');
     setNewItemPriority('medium');
     setAddType('task');
@@ -615,7 +623,11 @@ export function Calendar() {
                                 <X className="w-3 h-3" />
                               </button>
                             </div>
-                            {event.time && <p className="text-muted-foreground">{event.time}</p>}
+                            {event.time && (
+                              <p className="text-muted-foreground">
+                                {event.time}{event.endTime ? ` – ${event.endTime}` : ''}
+                              </p>
+                            )}
                             {event.recurrence !== 'none' && (
                               <Badge variant="outline" className="text-[10px] h-4 mt-1">
                                 {event.recurrence}
@@ -744,7 +756,7 @@ export function Calendar() {
 
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <Label className="text-sm">Time</Label>
+                <Label className="text-sm">{addType === 'event' ? 'Starts' : 'Time'}</Label>
                 <Input
                   type="time"
                   value={newItemTime}
@@ -769,21 +781,34 @@ export function Calendar() {
                 </div>
               ) : (
                 <div className="space-y-1.5">
-                  <Label className="text-sm">Repeat</Label>
-                  <Select value={newItemRecurrence} onValueChange={(v) => setNewItemRecurrence(v as 'none' | 'daily' | 'weekly' | 'weekdays')}>
-                    <SelectTrigger className="h-8">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">No repeat</SelectItem>
-                      <SelectItem value="daily">Every day</SelectItem>
-                      <SelectItem value="weekly">Every week</SelectItem>
-                      <SelectItem value="weekdays">Weekdays only</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  <Label className="text-sm">Ends</Label>
+                  <Input
+                    type="time"
+                    value={newItemEndTime}
+                    onChange={(e) => setNewItemEndTime(e.target.value)}
+                    className="h-8"
+                  />
                 </div>
               )}
             </div>
+
+            {addType === 'event' && (
+              <div className="space-y-1.5">
+                <Label className="text-sm">Repeat</Label>
+                <Select value={newItemRecurrence} onValueChange={(v) => setNewItemRecurrence(v as 'none' | 'daily' | 'weekly' | 'weekdays')}>
+                  <SelectTrigger className="h-8">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">No repeat</SelectItem>
+                    <SelectItem value="daily">Every day</SelectItem>
+                    <SelectItem value="weekly">Every week</SelectItem>
+                    <SelectItem value="weekdays">Weekdays only</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-[11px] text-muted-foreground">The Planner treats this whole time range as busy.</p>
+              </div>
+            )}
 
             <div className="flex gap-2 pt-2">
               <Button variant="outline" onClick={() => setShowAddModal(false)} className="flex-1 h-8">
@@ -796,6 +821,68 @@ export function Calendar() {
           </div>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+type CalendarSection = 'regular' | 'planned';
+
+export function Calendar() {
+  const [section, setSection] = useState<CalendarSection>('regular');
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h1 className="font-display text-xl font-semibold tracking-tight">Calendar</h1>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            {section === 'regular'
+              ? 'Deadlines, exams, study sessions, and personal events.'
+              : 'Your AI-planned week, including archived plans.'}
+          </p>
+        </div>
+
+        <div
+          className="relative grid w-full grid-cols-2 rounded-xl border border-border/50 bg-muted/35 p-1 sm:w-auto sm:min-w-[300px]"
+          role="tablist"
+          aria-label="Calendar section"
+        >
+          {([
+            { id: 'regular' as const, label: 'Regular', icon: CalendarDays },
+            { id: 'planned' as const, label: 'Planned', icon: CalendarClock },
+          ]).map(item => {
+            const Icon = item.icon;
+            const selected = section === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                role="tab"
+                aria-selected={selected}
+                onClick={() => setSection(item.id)}
+                className={cn(
+                  'relative z-10 flex h-9 items-center justify-center gap-2 rounded-lg px-4 text-sm font-medium transition-colors',
+                  selected ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
+                )}
+              >
+                {selected && (
+                  <motion.span
+                    layoutId="calendar-section-indicator"
+                    className="absolute inset-0 -z-10 rounded-lg border border-border/50 bg-background shadow-sm"
+                    transition={{ type: 'spring', stiffness: 420, damping: 34 }}
+                  />
+                )}
+                <Icon className={cn('h-4 w-4', selected && item.id === 'planned' && 'text-indigo-500')} />
+                {item.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div role="tabpanel">
+        {section === 'regular' ? <RegularCalendar /> : <PlannedCalendar />}
+      </div>
     </div>
   );
 }

@@ -30,12 +30,17 @@ import {
   Target,
   AlertTriangle,
   LogOut,
+  CalendarClock,
+  House,
+  Sunrise,
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { MainLayout } from '@/components/layout';
 import { useAppStore } from '@/lib/store';
+import { usePlannerStore } from '@/lib/planner/store';
+import { getDefaultPlannerSettings, type PlannerSettings } from '@/lib/planner/types';
 import { supabase } from '@/lib/supabase/client';
 import Link from 'next/link';
 import { toast } from 'sonner';
@@ -121,6 +126,9 @@ function ToggleSwitch({ checked, onChange, disabled }: { checked: boolean; onCha
 export default function SettingsPage() {
   const [mounted, setMounted] = useState(false);
   const { theme, setTheme, user, updateUserProfile, tasks, goals, exams, studySessions, subjects, logout } = useAppStore();
+  const plannerRecord = usePlannerStore(state => user ? state.users[user.id] : undefined);
+  const setPlannerActiveUser = usePlannerStore(state => state.setActiveUser);
+  const updatePlannerSettings = usePlannerStore(state => state.updateSettings);
   
   // Account state
   const [fullName, setFullName] = useState('');
@@ -141,6 +149,7 @@ export default function SettingsPage() {
   
   // Data export
   const [isExporting, setIsExporting] = useState(false);
+  const [plannerDraft, setPlannerDraft] = useState<PlannerSettings>(() => getDefaultPlannerSettings());
 
   useEffect(() => {
     setMounted(true);
@@ -159,8 +168,36 @@ export default function SettingsPage() {
   useEffect(() => {
     if (user) {
       setFullName(user.full_name || '');
+      setPlannerActiveUser(user.id, Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
     }
-  }, [user]);
+  }, [setPlannerActiveUser, user]);
+
+  useEffect(() => {
+    if (plannerRecord?.settings) setPlannerDraft(plannerRecord.settings);
+  }, [plannerRecord?.settings]);
+
+  const handleSavePlannerAvailability = () => {
+    if (!user) return;
+    if (
+      plannerDraft.wakeTime >= plannerDraft.schoolStartTime
+      || plannerDraft.schoolStartTime >= plannerDraft.schoolHomeTime
+      || plannerDraft.schoolHomeTime >= plannerDraft.bedtime
+    ) {
+      toast.error('School-day times must run in order: wake up, school starts, arrive home, then bedtime.');
+      return;
+    }
+    if (plannerDraft.weekendAvailableStart >= plannerDraft.weekendAvailableEnd) {
+      toast.error('Weekend end time must be later than its start time.');
+      return;
+    }
+    updatePlannerSettings(user.id, {
+      ...plannerDraft,
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || plannerDraft.timeZone,
+      horizonDays: 7,
+      slotMinutes: 15,
+    });
+    toast.success('Planner availability saved');
+  };
   
   const handleSaveProfile = async () => {
     if (!user) return;
@@ -406,6 +443,107 @@ export default function SettingsPage() {
                     </div>
                   ))}
                 </div>
+              </div>
+            </CardContent>
+          </Card>
+        </motion.div>
+
+        {/* Planner Availability Section */}
+        <motion.div variants={sectionVariants}>
+          <Card>
+            <CardHeader>
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-lg bg-indigo-500/10">
+                  <CalendarClock className="w-5 h-5 text-indigo-500" />
+                </div>
+                <div>
+                  <CardTitle className="text-lg">Planning Availability</CardTitle>
+                  <CardDescription>Tell Orderly when school and sleep make planning impossible</CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div>
+                <div className="flex items-center justify-between gap-4 mb-2">
+                  <div>
+                    <p className="text-sm font-medium">School days</p>
+                    <p className="text-xs text-muted-foreground">Orderly blocks the whole span from wake-up until you get home.</p>
+                  </div>
+                  <span className="text-[10px] rounded-full bg-indigo-500/10 px-2 py-1 text-indigo-400">7-day plans only</span>
+                </div>
+                <div className="grid grid-cols-7 gap-1.5">
+                  {[
+                    ['S', 0], ['M', 1], ['T', 2], ['W', 3], ['T', 4], ['F', 5], ['S', 6],
+                  ].map(([label, day], index) => {
+                    const dayNumber = Number(day);
+                    const selected = plannerDraft.schoolDays.includes(dayNumber);
+                    return (
+                      <button
+                        key={`${label}-${index}`}
+                        type="button"
+                        aria-pressed={selected}
+                        onClick={() => setPlannerDraft(current => ({
+                          ...current,
+                          schoolDays: selected
+                            ? current.schoolDays.filter(value => value !== dayNumber)
+                            : [...current.schoolDays, dayNumber].sort((a, b) => a - b),
+                        }))}
+                        className={`min-h-10 rounded-lg border text-xs font-semibold transition-colors ${selected ? 'border-primary bg-primary text-primary-foreground' : 'border-border text-muted-foreground hover:bg-muted/50'}`}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                {[
+                  { key: 'wakeTime' as const, label: 'Wake up', helper: 'Start of school-day block', icon: Sunrise },
+                  { key: 'schoolStartTime' as const, label: 'School starts', helper: 'Shown on the calendar', icon: GraduationCap },
+                  { key: 'schoolHomeTime' as const, label: 'Home from school', helper: 'Planning can begin after this', icon: House },
+                  { key: 'bedtime' as const, label: 'Bedtime', helper: 'No work is placed later', icon: Moon },
+                ].map(item => (
+                  <div key={item.key} className="space-y-1.5 rounded-xl border border-border/60 bg-muted/20 p-3">
+                    <label className="text-xs font-medium flex items-center gap-1.5"><item.icon className="w-3.5 h-3.5 text-muted-foreground" /> {item.label}</label>
+                    <Input
+                      type="time"
+                      value={plannerDraft[item.key]}
+                      onChange={event => setPlannerDraft(current => ({ ...current, [item.key]: event.target.value }))}
+                      className="h-9 bg-background"
+                    />
+                    <p className="text-[10px] text-muted-foreground leading-snug">{item.helper}</p>
+                  </div>
+                ))}
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 border-t pt-5">
+                <div className="rounded-xl border border-border/60 p-3">
+                  <p className="text-sm font-medium">Weekend planning window</p>
+                  <p className="text-xs text-muted-foreground mb-3">The available range on days without school.</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div><label className="text-[10px] text-muted-foreground">Start</label><Input type="time" value={plannerDraft.weekendAvailableStart} onChange={event => setPlannerDraft(current => ({ ...current, weekendAvailableStart: event.target.value }))} className="h-9" /></div>
+                    <div><label className="text-[10px] text-muted-foreground">End</label><Input type="time" value={plannerDraft.weekendAvailableEnd} onChange={event => setPlannerDraft(current => ({ ...current, weekendAvailableEnd: event.target.value }))} className="h-9" /></div>
+                  </div>
+                </div>
+                <div className="rounded-xl border border-border/60 p-3 space-y-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div><p className="text-sm font-medium">Maximum planned work</p><p className="text-xs text-muted-foreground">Per day, outside school.</p></div>
+                    <span className="text-sm font-bold">{Math.round(plannerDraft.maxDailyMinutes / 60 * 10) / 10}h</span>
+                  </div>
+                  <input type="range" min="60" max="480" step="15" value={plannerDraft.maxDailyMinutes} onChange={event => setPlannerDraft(current => ({ ...current, maxDailyMinutes: Number(event.target.value) }))} className="w-full accent-indigo-500" />
+                  <div className="grid grid-cols-2 gap-2">
+                    <div><label className="text-[10px] text-muted-foreground">Longest block</label><select value={plannerDraft.maxBlockMinutes} onChange={event => setPlannerDraft(current => ({ ...current, maxBlockMinutes: Number(event.target.value) }))} className="mt-1 h-9 w-full rounded-md border border-border bg-background px-2 text-xs"><option value="30">30 min</option><option value="45">45 min</option><option value="60">60 min</option><option value="75">75 min</option><option value="90">90 min</option></select></div>
+                    <div><label className="text-[10px] text-muted-foreground">Break between blocks</label><select value={plannerDraft.minBreakMinutes} onChange={event => setPlannerDraft(current => ({ ...current, minBreakMinutes: Number(event.target.value) }))} className="mt-1 h-9 w-full rounded-md border border-border bg-background px-2 text-xs"><option value="0">No buffer</option><option value="15">15 min</option><option value="30">30 min</option><option value="45">45 min</option><option value="60">60 min</option></select></div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-2 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-xs text-muted-foreground">Timezone: {plannerDraft.timeZone}. Calendar events with start and end times are also treated as busy.</p>
+                <Button size="sm" onClick={handleSavePlannerAvailability} className="gap-1.5 self-start sm:self-auto">
+                  <Save className="w-4 h-4" /> Save availability
+                </Button>
               </div>
             </CardContent>
           </Card>

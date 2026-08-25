@@ -8,6 +8,8 @@ import { BottomNav } from './BottomNav';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
 import { ErrorBoundary } from '@/components/ui/error-boundary';
+import { PlannerFeedbackNudge } from '@/components/planner/PlannerFeedbackNudge';
+import { PlannerStalenessMonitor } from '@/components/planner/PlannerStalenessMonitor';
 import { usePathname } from 'next/navigation';
 import {
   Sheet,
@@ -76,6 +78,8 @@ export function MainLayout({ children }: MainLayoutProps) {
 
       {/* Mobile bottom navigation */}
       <BottomNav onMoreTap={() => setMobileMenuOpen(true)} />
+      <PlannerStalenessMonitor />
+      <PlannerFeedbackNudge />
     </div>
   );
 }

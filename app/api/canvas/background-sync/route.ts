@@ -22,6 +22,19 @@ interface CanvasSyncSetting {
   time_zone: string | null;
 }
 
+function canvasTaskChanged(
+  existing: Record<string, unknown>,
+  next: Record<string, unknown>
+): boolean {
+  return Object.entries(next).some(([key, value]) => {
+    const current = existing[key];
+    if (key === 'due_date' && typeof current === 'string' && typeof value === 'string') {
+      return new Date(current).getTime() !== new Date(value).getTime();
+    }
+    return (current ?? null) !== (value ?? null);
+  });
+}
+
 function syncIsDue(setting: CanvasSyncSetting, now: Date): boolean {
   if (!setting.last_sync_at) return true;
   const interval = [5, 15, 30, 60].includes(Number(setting.auto_sync_interval))
@@ -121,6 +134,10 @@ async function syncOneUser(
     };
 
     if (existing) {
+      // Canvas feeds repeat every assignment on every request. Avoid touching
+      // unchanged rows so planner input fingerprints only become stale when an
+      // assignment actually changes.
+      if (!canvasTaskChanged(existing, taskValues)) continue;
       const { error } = await admin.from('tasks').update(taskValues).eq('id', existing.id);
       if (error) throw new Error(`Could not update Canvas task: ${error.message}`);
       updated++;

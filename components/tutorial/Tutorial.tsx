@@ -6,7 +6,7 @@ import { cn } from '@/lib/utils';
 import {
   X, ChevronRight, ChevronLeft, CheckCircle2,
   LayoutDashboard, CheckSquare, Calendar, Target,
-  Timer, GraduationCap, Sparkles,
+  Timer, GraduationCap, Sparkles, CalendarClock,
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 
@@ -50,11 +50,20 @@ const TUTORIAL_STEPS: TutorialStep[] = [
   {
     id: 'calendar',
     title: 'Calendar',
-    description: 'See all your tasks and exams displayed directly on the calendar (Google Calendar style). Switch between month, week, and day views.',
+    description: 'Switch between your regular calendar and the time blocks from your current weekly plan.',
     icon: Calendar,
     color: 'purple',
     page: '/calendar',
     tip: 'Tasks show directly on dates — no clicking required!',
+  },
+  {
+    id: 'planner',
+    title: 'Weekly Planner',
+    description: 'Ask Orderly to plan up to seven days around exact due times, exams, school, and recurring commitments. Drag or resize any block to make the plan yours.',
+    icon: CalendarClock,
+    color: 'cyan',
+    page: '/planner',
+    tip: 'Canvas descriptions improve estimates, but timing is always an estimate',
   },
   {
     id: 'goals',
@@ -68,7 +77,7 @@ const TUTORIAL_STEPS: TutorialStep[] = [
   {
     id: 'study',
     title: 'Study Sessions',
-    description: 'Use the Pomodoro timer or stopwatch to track your study time. The AI Scheduler creates a personalized 7-day study plan based on your workload.',
+    description: 'Use the Pomodoro timer or stopwatch to track your study time and build better timing feedback for future plans.',
     icon: Timer,
     color: 'rose',
     page: '/study',

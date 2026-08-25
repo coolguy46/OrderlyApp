@@ -3,14 +3,12 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useAppStore } from '@/lib/store';
 import { PomodoroTimer } from './PomodoroTimer';
-import { AIScheduler } from './AIScheduler';
 import { EggHatching, IceMelting } from './GamifiedProgress';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { TaskCard } from '@/components/tasks';
 import { motion } from 'framer-motion';
 import { formatDuration } from '@/lib/utils';
@@ -23,8 +21,6 @@ import {
   Snowflake,
   Settings,
   CheckCircle2,
-  Brain,
-  Sparkles,
 } from 'lucide-react';
 
 type VisualizationType = 'egg' | 'ice';
@@ -185,18 +181,7 @@ export function StudySession() {
         })}
       </div>
 
-      <Tabs defaultValue="timer">
-        <TabsList className="bg-muted/50 mb-4">
-          <TabsTrigger value="timer" className="flex items-center gap-1.5">
-            <Timer className="w-3.5 h-3.5" /> Timer
-          </TabsTrigger>
-          <TabsTrigger value="scheduler" className="flex items-center gap-1.5">
-            <Brain className="w-3.5 h-3.5" /> AI Scheduler
-            <span className="ml-1 px-1.5 py-0.5 text-[9px] bg-indigo-500/30 text-indigo-300 rounded-full font-medium">New</span>
-          </TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="timer">
+      <div>
           <motion.div variants={itemVariants} className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {/* Pomodoro Timer */}
             <div>
@@ -301,12 +286,7 @@ export function StudySession() {
               </CardContent>
             </Card>
           </motion.div>
-        </TabsContent>
-
-        <TabsContent value="scheduler">
-          <AIScheduler />
-        </TabsContent>
-      </Tabs>
+      </div>
 
       {/* Goal Settings Modal */}
       <Dialog open={showGoalSettings} onOpenChange={(open) => !open && setShowGoalSettings(false)}>
