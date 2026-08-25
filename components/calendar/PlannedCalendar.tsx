@@ -2,9 +2,8 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { format, startOfDay } from 'date-fns';
+import { addDays, differenceInCalendarDays, format, startOfDay } from 'date-fns';
 import {
-  Archive,
   CalendarClock,
   ChevronLeft,
   ChevronRight,
@@ -30,12 +29,8 @@ import {
 import { usePlannerStore } from '@/lib/planner/store';
 import type { PlannerPlan } from '@/lib/planner/types';
 import { useAppStore } from '@/lib/store';
-import { cn } from '@/lib/utils';
 
-function planTimestamp(plan: PlannerPlan): number {
-  const horizon = new Date(plan.horizonStart).getTime();
-  return Number.isFinite(horizon) ? horizon : new Date(plan.generatedAt).getTime();
-}
+const PLAN_DAYS = 7;
 
 function planDateRange(plan: PlannerPlan): string {
   const start = new Date(plan.horizonStart);
@@ -71,7 +66,6 @@ export function PlannedCalendar() {
   const userId = user?.id || null;
   const record = userId ? plannerUsers[userId] : null;
   const activePlan = record?.currentPlan || null;
-  const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState(() => startOfDay(new Date()));
   const [fullscreen, setFullscreen] = useState(false);
   const [detailTaskId, setDetailTaskId] = useState<string | null>(null);
@@ -84,45 +78,18 @@ export function PlannedCalendar() {
     );
   }, [setActiveUser, userId]);
 
-  const plans = useMemo(() => {
-    const unique = new Map<string, PlannerPlan>();
-    record?.history.forEach(plan => unique.set(plan.id, plan));
-    if (activePlan) unique.set(activePlan.id, activePlan);
-    return [...unique.values()].sort((left, right) => {
-      const difference = planTimestamp(left) - planTimestamp(right);
-      return difference || left.generatedAt.localeCompare(right.generatedAt);
-    });
-  }, [activePlan, record?.history]);
-
-  useEffect(() => {
-    if (!plans.length) {
-      setSelectedPlanId(null);
-      return;
-    }
-    if (selectedPlanId && plans.some(plan => plan.id === selectedPlanId)) return;
-    setSelectedPlanId(activePlan?.id || plans[plans.length - 1].id);
-  }, [activePlan?.id, plans, selectedPlanId]);
-
-  const selectedPlan = useMemo(
-    () => plans.find(plan => plan.id === selectedPlanId)
-      || activePlan
-      || plans[plans.length - 1]
-      || null,
-    [activePlan, plans, selectedPlanId],
-  );
+  const selectedPlan = activePlan;
 
   useEffect(() => {
     if (!selectedPlan) return;
     setSelectedDate(preferredDateForPlan(selectedPlan));
     setDetailTaskId(null);
-  }, [selectedPlan?.id]);
+  }, [selectedPlan?.horizonStart, selectedPlan?.id]);
 
-  const selectedIndex = selectedPlan
-    ? plans.findIndex(plan => plan.id === selectedPlan.id)
-    : -1;
-  const isActive = Boolean(
-    selectedPlan && activePlan && selectedPlan.id === activePlan.id,
-  );
+  const planStart = selectedPlan ? startOfDay(new Date(selectedPlan.horizonStart)) : null;
+  const selectedDayIndex = planStart
+    ? differenceInCalendarDays(startOfDay(selectedDate), planStart)
+    : 0;
   const blocks = useMemo(
     () => plannerBlockViews(selectedPlan, subjects, tasks),
     [selectedPlan, subjects, tasks],
@@ -145,12 +112,10 @@ export function PlannedCalendar() {
   );
   const detailTask = detailTaskId ? realTasksById.get(detailTaskId) || null : null;
 
-  const choosePlan = (index: number) => {
-    const plan = plans[index];
-    if (!plan) return;
-    setSelectedPlanId(plan.id);
-    setSelectedDate(preferredDateForPlan(plan));
-    setFullscreen(false);
+  const moveSelectedDay = (amount: number) => {
+    if (!planStart) return;
+    const nextIndex = Math.min(PLAN_DAYS - 1, Math.max(0, selectedDayIndex + amount));
+    setSelectedDate(addDays(planStart, nextIndex));
   };
 
   const isRealTask = (view: PlannerDayTaskView): boolean => {
@@ -178,8 +143,8 @@ export function PlannedCalendar() {
           </div>
           <h2 className="font-display text-xl font-semibold">No planned week yet</h2>
           <p className="mt-2 max-w-md text-sm leading-relaxed text-muted-foreground">
-            Ask Orderly to plan your week first. The result and any archived
-            weeks will appear here automatically.
+            Ask Orderly to plan your week first. Your active week will appear
+            here automatically.
           </p>
           <Button asChild className="mt-6 bg-gradient-to-r from-indigo-500 to-purple-600 text-white">
             <Link href="/planner">
@@ -200,28 +165,27 @@ export function PlannedCalendar() {
             type="button"
             variant="ghost"
             size="icon-sm"
-            disabled={selectedIndex <= 0}
-            onClick={() => choosePlan(selectedIndex - 1)}
-            aria-label="Show previous planned week"
+            disabled={selectedDayIndex <= 0}
+            onClick={() => moveSelectedDay(-1)}
+            aria-label="Previous planned day"
             className="h-8 w-8"
           >
             <ChevronLeft className="h-4 w-4" />
           </Button>
           <div className="min-w-0 px-1">
-            <p className="truncate text-xs font-semibold sm:text-sm">{planDateRange(selectedPlan)}</p>
+            <p className="truncate text-xs font-semibold sm:text-sm">{format(selectedDate, 'EEEE, MMM d')}</p>
             <p className="truncate text-[10px] text-muted-foreground">
-              Plan {selectedIndex + 1} of {plans.length}
-              {record?.history.length ? ` · ${record.history.length} archived` : ''}
-              {' · '}View only
+              Day {Math.min(PLAN_DAYS, Math.max(1, selectedDayIndex + 1))} of {PLAN_DAYS}
+              {' · '}{planDateRange(selectedPlan)} · View only
             </p>
           </div>
           <Button
             type="button"
             variant="ghost"
             size="icon-sm"
-            disabled={selectedIndex < 0 || selectedIndex >= plans.length - 1}
-            onClick={() => choosePlan(selectedIndex + 1)}
-            aria-label="Show next planned week"
+            disabled={selectedDayIndex >= PLAN_DAYS - 1}
+            onClick={() => moveSelectedDay(1)}
+            aria-label="Next planned day"
             className="h-8 w-8"
           >
             <ChevronRight className="h-4 w-4" />
@@ -231,17 +195,10 @@ export function PlannedCalendar() {
         <div className="flex flex-wrap items-center justify-end gap-1.5">
           <Badge
             variant="outline"
-            className={cn(
-              'h-6 gap-1 text-[9px] sm:text-[10px]',
-              isActive
-                ? 'border-indigo-500/25 bg-indigo-500/10 text-indigo-400'
-                : 'text-muted-foreground',
-            )}
+            className="h-6 gap-1 border-indigo-500/25 bg-indigo-500/10 text-[9px] text-indigo-400 sm:text-[10px]"
           >
-            {isActive ? <Sparkles className="h-2.5 w-2.5" /> : <Archive className="h-2.5 w-2.5" />}
-            {isActive
-              ? selectedPlan.status === 'stale' ? 'Needs update' : 'Current'
-              : 'Archived'}
+            <Sparkles className="h-2.5 w-2.5" />
+            {selectedPlan.status === 'stale' ? 'Needs update' : 'Current'}
           </Badge>
           <Badge variant="outline" className="hidden h-6 gap-1 text-[10px] sm:inline-flex">
             <Clock3 className="h-2.5 w-2.5" />
@@ -256,17 +213,6 @@ export function PlannedCalendar() {
               <CircleAlert className="h-2.5 w-2.5" />
               {selectedPlan.warnings.length}
             </Badge>
-          )}
-          {activePlan && !isActive && (
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="h-8 px-2.5 text-xs"
-              onClick={() => choosePlan(plans.findIndex(plan => plan.id === activePlan.id))}
-            >
-              Current week
-            </Button>
           )}
           <Button
             type="button"

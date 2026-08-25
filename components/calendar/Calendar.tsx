@@ -838,7 +838,7 @@ export function Calendar() {
           <p className="mt-0.5 text-xs text-muted-foreground">
             {section === 'regular'
               ? 'Deadlines, exams, study sessions, and personal events.'
-              : 'Your AI-planned week, including archived plans.'}
+              : 'Your current AI-planned week.'}
           </p>
         </div>
 
