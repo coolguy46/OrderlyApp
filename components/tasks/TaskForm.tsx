@@ -1,12 +1,13 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Task, TaskPriority, TaskStatus } from '@/lib/supabase/types';
+import { Subject, Task, TaskPriority, TaskStatus } from '@/lib/supabase/types';
 import { useAppStore } from '@/lib/store';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import {
   Dialog,
   DialogContent,
@@ -22,7 +23,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Save, X, Plus, AlertCircle, Sparkles, Calendar, Tag, Flag, BookOpen, FileText, Zap, Repeat, Clock } from 'lucide-react';
+import { Save, X, Plus, AlertCircle, Sparkles, Calendar, Tag, Flag, BookOpen, FileText, Zap, Repeat, Clock, Trash2 } from 'lucide-react';
 import { calculateSuggestedPriority } from '@/lib/utils';
 import { cn } from '@/lib/utils';
 
@@ -38,7 +39,7 @@ const SUBJECT_COLORS = [
 ];
 
 export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
-  const { addTask, updateTask, subjects, addSubject, user } = useAppStore();
+  const { addTask, updateTask, subjects, addSubject, deleteSubject, user } = useAppStore();
   
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -54,6 +55,8 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
   const [showNewSubject, setShowNewSubject] = useState(false);
   const [newSubjectName, setNewSubjectName] = useState('');
   const [newSubjectColor, setNewSubjectColor] = useState(SUBJECT_COLORS[0]);
+  const [subjectSelectOpen, setSubjectSelectOpen] = useState(false);
+  const [subjectToDelete, setSubjectToDelete] = useState<Subject | null>(null);
 
   useEffect(() => {
     if (!manualPriority && dueDate && !task) {
@@ -96,6 +99,24 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
     } catch (error) {
       console.error('Failed to create subject:', error);
     }
+  };
+
+  const requestSubjectDelete = (event: React.MouseEvent | React.PointerEvent, subject: Subject) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setSubjectSelectOpen(false);
+    setSubjectToDelete(subject);
+  };
+
+  const handleDeleteSubject = async () => {
+    if (!subjectToDelete) return;
+
+    const deletedSubjectId = subjectToDelete.id;
+    await deleteSubject(deletedSubjectId);
+    if (subjectId === deletedSubjectId) {
+      setSubjectId('none');
+    }
+    setSubjectToDelete(null);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -144,11 +165,14 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
     setRecurrenceDays([]);
     setShowNewSubject(false);
     setNewSubjectName('');
+    setSubjectSelectOpen(false);
+    setSubjectToDelete(null);
   };
 
   return (
-    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-[500px] p-0 overflow-hidden">
+    <>
+      <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+        <DialogContent className="sm:max-w-[500px] p-0 overflow-hidden">
         {/* Header */}
         <div className="px-6 pt-6 pb-4 bg-gradient-to-b from-indigo-500/5 to-transparent">
           <DialogHeader>
@@ -330,22 +354,40 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
                     animate={{ opacity: 1 }}
                     className="space-y-1.5"
                   >
-                    <Select value={subjectId} onValueChange={setSubjectId}>
+                    <Select open={subjectSelectOpen} onOpenChange={setSubjectSelectOpen} value={subjectId} onValueChange={setSubjectId}>
                       <SelectTrigger className="h-9 bg-muted/30 border-border/50">
                         <SelectValue placeholder="No Subject" />
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="none">No Subject</SelectItem>
                         {subjects.map((s) => (
-                          <SelectItem key={s.id} value={s.id}>
-                            <div className="flex items-center gap-2">
-                              <div 
-                                className="w-2.5 h-2.5 rounded-full" 
-                                style={{ backgroundColor: s.color }}
-                              />
-                              {s.name}
-                            </div>
-                          </SelectItem>
+                          <div key={s.id} className="relative group/subject">
+                            <SelectItem
+                              value={s.id}
+                              className="pr-16 [&_[data-slot=select-item-indicator]]:right-9"
+                            >
+                              <div className="flex min-w-0 items-center gap-2">
+                                <div
+                                  className="w-2.5 h-2.5 rounded-full shrink-0"
+                                  style={{ backgroundColor: s.color }}
+                                />
+                                <span className="truncate">{s.name}</span>
+                              </div>
+                            </SelectItem>
+                            <button
+                              type="button"
+                              aria-label={`Delete ${s.name}`}
+                              title={`Delete ${s.name}`}
+                              onPointerDown={(event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                              }}
+                              onClick={(event) => requestSubjectDelete(event, s)}
+                              className="absolute right-1.5 top-1/2 z-10 -translate-y-1/2 rounded-md p-1.5 text-muted-foreground opacity-70 transition-colors hover:bg-red-500/15 hover:text-red-500 hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
                         ))}
                       </SelectContent>
                     </Select>
@@ -471,7 +513,22 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
             </Button>
           </div>
         </form>
-      </DialogContent>
-    </Dialog>
+        </DialogContent>
+      </Dialog>
+
+      <ConfirmDialog
+        open={subjectToDelete !== null}
+        onOpenChange={(open) => {
+          if (!open) setSubjectToDelete(null);
+        }}
+        title="Delete Subject"
+        description={subjectToDelete
+          ? `Are you sure you want to delete "${subjectToDelete.name}"? Tasks and exams using it will remain, but their subject will be cleared.`
+          : ''}
+        confirmLabel="Delete Subject"
+        variant="danger"
+        onConfirm={handleDeleteSubject}
+      />
+    </>
   );
 }
