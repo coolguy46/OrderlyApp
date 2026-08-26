@@ -55,7 +55,12 @@ export function Sidebar({ mobile, onNavigate }: SidebarProps = {}) {
     >
       {/* Logo */}
       <div className="h-16 flex items-center px-4 border-b border-border/40">
-        <div className="flex items-center gap-3">
+        <Link
+          href="/"
+          onClick={onNavigate}
+          aria-label="Go to dashboard"
+          className="flex items-center gap-3 rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+        >
           <motion.div 
             className="w-10 h-10 rounded-xl flex-shrink-0 shadow-lg ring-1 ring-white/10"
             whileHover={{ scale: 1.08, rotate: 5 }}
@@ -76,7 +81,7 @@ export function Sidebar({ mobile, onNavigate }: SidebarProps = {}) {
               </motion.span>
             )}
           </AnimatePresence>
-        </div>
+        </Link>
       </div>
 
       {/* Navigation */}
