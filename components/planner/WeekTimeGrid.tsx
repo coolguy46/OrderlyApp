@@ -739,11 +739,8 @@ export function WeekTimeGrid({
                 {Array.from({ length: 24 }, (_, hour) => (
                   <div
                     key={hour}
-                    className={cn(
-                      'absolute inset-x-0 whitespace-nowrap pr-2 text-right text-[9px] leading-none text-muted-foreground',
-                      hour !== 0 && '-translate-y-1/2',
-                    )}
-                    style={{ top: hour === 0 ? 6 : hour * HOUR_HEIGHT }}
+                    className="absolute inset-x-0 whitespace-nowrap pr-2 text-right text-[9px] leading-none text-muted-foreground"
+                    style={{ top: hour * HOUR_HEIGHT + 6 }}
                   >
                     {format(addMinutes(startOfDay(new Date()), hour * 60), 'h a')}
                   </div>
