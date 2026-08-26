@@ -146,13 +146,26 @@ export function UntimedTaskShelf({
   draggable = false,
   acceptsScheduledDrops = false,
 }: UntimedTaskShelfProps) {
+  const { isOver: isShelfOver, setNodeRef: setShelfNodeRef } = useDroppable({
+    id: 'planner-untimed-shelf',
+    data: { type: 'untimed-shelf' },
+    disabled: !acceptsScheduledDrops,
+  });
+
   return (
     <div
-      className="grid min-h-12 border-b border-border/70 bg-card/95"
+      ref={setShelfNodeRef}
+      className={cn(
+        'grid min-h-12 border-b border-border/70 bg-card/95 transition-colors',
+        isShelfOver && 'bg-primary/10 ring-1 ring-inset ring-primary/40',
+      )}
       style={{ gridTemplateColumns: columns }}
       aria-label="Untimed tasks"
     >
-      <div className="sticky left-0 z-50 flex items-center justify-center gap-1 border-r border-border/60 bg-card/95 px-1 text-[9px] font-medium text-muted-foreground">
+      <div className={cn(
+        'sticky left-0 z-50 flex items-center justify-center gap-1 border-r border-border/60 bg-card/95 px-1 text-[9px] font-medium text-muted-foreground transition-colors',
+        isShelfOver && 'bg-primary/15 text-primary',
+      )}>
         <ListTodo className="h-3 w-3" />
         <span className="hidden sm:inline">Untimed</span>
       </div>

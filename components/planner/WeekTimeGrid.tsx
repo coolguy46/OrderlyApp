@@ -396,6 +396,19 @@ export function WeekTimeGrid({
     () => displayDateInTimeZone(now, resolvedTimeZone),
     [now, resolvedTimeZone],
   );
+  const shortTimeZoneLabel = useMemo(() => {
+    try {
+      return new Intl.DateTimeFormat('en-US', {
+        timeZone: resolvedTimeZone,
+        timeZoneName: 'short',
+      }).formatToParts(now).find(part => part.type === 'timeZoneName')?.value || 'Local';
+    } catch {
+      return 'Local';
+    }
+  }, [now, resolvedTimeZone]);
+  const displayedTimeZoneLabel = timeZoneLabel && timeZoneLabel.length <= 8
+    ? timeZoneLabel
+    : shortTimeZoneLabel;
 
   const normalizedWeekStart = useMemo(
     () => weekDateCarrier(weekStart, resolvedTimeZone),
@@ -476,10 +489,12 @@ export function WeekTimeGrid({
       if (!event.over) return;
 
       const overId = String(event.over.id);
-      if (block && overId.startsWith('planner-untimed:')) {
+      if (block && (overId === 'planner-untimed-shelf' || overId.startsWith('planner-untimed:'))) {
         if (!onBlockMoveToUntimed || isFixedBlock(block)) return;
-        const targetDate = overId.slice('planner-untimed:'.length);
-        if (!days.some(day => format(day, 'yyyy-MM-dd') === targetDate)) return;
+        const targetDate = overId.startsWith('planner-untimed:')
+          ? overId.slice('planner-untimed:'.length)
+          : undefined;
+        if (targetDate && !days.some(day => format(day, 'yyyy-MM-dd') === targetDate)) return;
         suppressClickUntil.current = Date.now() + 250;
         void Promise.resolve(onBlockMoveToUntimed(block, targetDate));
         return;
@@ -598,8 +613,8 @@ export function WeekTimeGrid({
   );
 
   const columns = variant === 'fullscreen'
-    ? '64px repeat(7, minmax(0, 1fr))'
-    : '64px repeat(7, minmax(132px, 1fr))';
+    ? '72px repeat(7, minmax(0, 1fr))'
+    : '72px repeat(7, minmax(132px, 1fr))';
   const contentMinWidth = variant === 'fullscreen' ? 'min-w-[980px] lg:min-w-0' : 'min-w-[990px]';
 
   return (
@@ -634,7 +649,17 @@ export function WeekTimeGrid({
         sensors={sensors}
         collisionDetection={(args) => {
           const pointerCollisions = pointerWithin(args);
-          if (args.pointerCoordinates) return pointerCollisions;
+          if (args.pointerCoordinates) {
+            const untimedDay = pointerCollisions.find(collision =>
+              String(collision.id).startsWith('planner-untimed:'),
+            );
+            if (untimedDay) return [untimedDay];
+            const untimedShelf = pointerCollisions.find(collision =>
+              String(collision.id) === 'planner-untimed-shelf',
+            );
+            if (untimedShelf) return [untimedShelf];
+            return pointerCollisions;
+          }
           return closestCenter(args);
         }}
         onDragStart={handleDragStart}
@@ -656,7 +681,9 @@ export function WeekTimeGrid({
                 style={{ gridTemplateColumns: columns }}
               >
                 <div className="sticky left-0 z-50 flex items-center justify-center border-r border-border/60 bg-card/95 px-1 text-[9px] font-medium text-muted-foreground">
-                  {timeZoneLabel || resolvedTimeZone}
+                  <span className="truncate" title={timeZoneLabel || resolvedTimeZone}>
+                    {displayedTimeZoneLabel}
+                  </span>
                 </div>
                 {days.map((day) => (
                   <div
@@ -712,8 +739,11 @@ export function WeekTimeGrid({
                 {Array.from({ length: 24 }, (_, hour) => (
                   <div
                     key={hour}
-                    className="absolute inset-x-0 -translate-y-1/2 pr-2 text-right text-[9px] text-muted-foreground"
-                    style={{ top: hour * HOUR_HEIGHT }}
+                    className={cn(
+                      'absolute inset-x-0 whitespace-nowrap pr-2 text-right text-[9px] leading-none text-muted-foreground',
+                      hour !== 0 && '-translate-y-1/2',
+                    )}
+                    style={{ top: hour === 0 ? 6 : hour * HOUR_HEIGHT }}
                   >
                     {format(addMinutes(startOfDay(new Date()), hour * 60), 'h a')}
                   </div>
