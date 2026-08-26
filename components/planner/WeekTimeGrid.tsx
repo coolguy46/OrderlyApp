@@ -34,7 +34,7 @@ import {
   isSameDay,
   startOfDay,
 } from 'date-fns';
-import { Clock3, Expand, GripVertical, LockKeyhole } from 'lucide-react';
+import { Clock3, Expand, GripVertical, ListTodo, LockKeyhole } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import {
   UntimedTaskShelf,
@@ -81,6 +81,7 @@ export interface WeekTimeGridProps {
     nextEnd: Date,
   ) => void | Promise<void>;
   onBlockClick?: (block: PlannerBlockView) => void;
+  onBlockMoveToUntimed?: (block: PlannerBlockView) => void | Promise<void>;
   onRequestFullscreen?: () => void;
   /** Optional Akiflow-style shelf shown below the date headers. */
   untimedItems?: UntimedScheduleItem[];
@@ -183,6 +184,7 @@ interface PositionedBlockProps {
   active?: boolean;
   suppressClickUntil: MutableRefObject<number>;
   onClick?: (block: PlannerBlockView) => void;
+  onMoveToUntimed?: (block: PlannerBlockView) => void | Promise<void>;
   onResizeStart?: (
     event: ReactPointerEvent<HTMLButtonElement>,
     block: PlannerBlockView,
@@ -197,6 +199,7 @@ function PositionedBlock({
   active,
   suppressClickUntil,
   onClick,
+  onMoveToUntimed,
   onResizeStart,
 }: PositionedBlockProps) {
   const fixed = isFixedBlock(block);
@@ -263,7 +266,7 @@ function PositionedBlock({
         ) : editable ? (
           <GripVertical className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground/70" />
         ) : null}
-        <div className="min-w-0 flex-1">
+        <div className={cn('min-w-0 flex-1', draggable && block.kind === 'task' && onMoveToUntimed && 'pr-4')}>
           <p
             className={cn(
               'truncate text-[11px] font-semibold leading-tight text-foreground',
@@ -284,6 +287,26 @@ function PositionedBlock({
           )}
         </div>
       </div>
+
+      {draggable && block.kind === 'task' && onMoveToUntimed && (
+        <button
+          type="button"
+          aria-label={`Move ${block.title} to untimed`}
+          title="Move to untimed"
+          onPointerDown={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          }}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            void Promise.resolve(onMoveToUntimed(block));
+          }}
+          className="absolute right-0.5 top-0.5 z-20 flex h-5 w-5 items-center justify-center rounded text-muted-foreground/80 opacity-75 transition hover:bg-background/70 hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary sm:opacity-0 sm:group-hover:opacity-100"
+        >
+          <ListTodo className="h-3 w-3" />
+        </button>
+      )}
 
       {draggable && (
         <button
@@ -348,6 +371,7 @@ export function WeekTimeGrid({
   onBlockMove,
   onBlockResize,
   onBlockClick,
+  onBlockMoveToUntimed,
   onRequestFullscreen,
   untimedItems = [],
   showUntimedShelf = false,
@@ -728,6 +752,7 @@ export function WeekTimeGrid({
                           active={activeDragId === block.id}
                           suppressClickUntil={suppressClickUntil}
                           onClick={onBlockClick}
+                          onMoveToUntimed={onBlockMoveToUntimed}
                           onResizeStart={handleResizeStart}
                         />
                       );

@@ -488,6 +488,39 @@ export function ScheduleCalendar() {
     });
   }, [entriesByTaskId, occurrenceById, setOccurrenceOverride, timedBlocks, timeZone, upsertTaskSchedule, userId]);
 
+  const handleMoveToUntimed = useCallback((block: PlannerBlockView) => {
+    if (!userId) return;
+    const occurrence = occurrenceById.get(block.id);
+    if (!occurrence?.startAt) return;
+    const entry = entriesByTaskId.get(occurrence.taskId);
+    const durationSeconds = occurrence.durationSeconds || occurrenceDuration(occurrence);
+    if (occurrence.recurrence !== 'none') {
+      if (!entry) {
+        upsertTaskSchedule(userId, occurrence.taskId, {
+          scheduledDate: taskDeadlineDate(occurrence.task, timeZone) || occurrence.recurrenceSourceDate,
+          startAt: null,
+          durationSeconds,
+          recurrence: occurrence.recurrence,
+          recurrenceDays: occurrence.task.recurrence_days,
+          recurrenceEndDate: null,
+        });
+      }
+      setOccurrenceOverride(userId, occurrence.taskId, occurrence.recurrenceSourceDate, {
+        scheduledDate: occurrence.date,
+        startAt: null,
+        durationSeconds,
+      });
+    } else {
+      upsertTaskSchedule(userId, occurrence.taskId, {
+        ...occurrenceInput(entry, occurrence),
+        scheduledDate: occurrence.date,
+        startAt: null,
+        durationSeconds,
+      });
+    }
+    toast.success(`${occurrence.title} moved to untimed`);
+  }, [entriesByTaskId, occurrenceById, setOccurrenceOverride, timeZone, upsertTaskSchedule, userId]);
+
   if (!weekStart) {
     return <div className="flex min-h-[520px] items-center justify-center text-sm text-muted-foreground">Loading schedule…</div>;
   }
@@ -558,6 +591,7 @@ export function ScheduleCalendar() {
         onBlockClick={block => block.taskId && setDetailOccurrenceId(block.id)}
         onBlockMove={handleMove}
         onBlockResize={handleResize}
+        onBlockMoveToUntimed={handleMoveToUntimed}
         timeZone={timeZone}
         timeZoneLabel={timeZone}
         initialScrollHour={6}

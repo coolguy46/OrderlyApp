@@ -672,6 +672,40 @@ export function Planner() {
     toast.success(`${occurrence.title} scheduled`);
   }, [blocks, entries, occurrenceById, setOccurrenceOverride, timeZone, upsertTaskSchedule, userId]);
 
+  const handleMoveToUntimed = useCallback((block: PlannerBlockView) => {
+    if (!userId) return;
+    const occurrence = occurrenceById.get(block.id);
+    if (!occurrence?.startAt) return;
+    const entry = entries.find(candidate => candidate.taskId === occurrence.taskId);
+    const durationSeconds = occurrence.durationSeconds || 30 * 60;
+    setUndoState({ entries: cloneEntries(entries), createdTaskIds: [], label: `Move “${occurrence.title}” to untimed` });
+    if (occurrence.recurrence !== 'none') {
+      if (!entry) {
+        upsertTaskSchedule(userId, occurrence.taskId, {
+          scheduledDate: taskDeadlineDate(occurrence.task, timeZone) || occurrence.recurrenceSourceDate,
+          startAt: null,
+          durationSeconds,
+          recurrence: occurrence.recurrence,
+          recurrenceDays: occurrence.task.recurrence_days,
+          recurrenceEndDate: null,
+        });
+      }
+      setOccurrenceOverride(userId, occurrence.taskId, occurrence.recurrenceSourceDate, {
+        scheduledDate: occurrence.date,
+        startAt: null,
+        durationSeconds,
+      });
+    } else {
+      upsertTaskSchedule(userId, occurrence.taskId, {
+        ...occurrenceScheduleInput(entry, occurrence),
+        scheduledDate: occurrence.date,
+        startAt: null,
+        durationSeconds,
+      });
+    }
+    toast.success(`${occurrence.title} moved to untimed`);
+  }, [entries, occurrenceById, setOccurrenceOverride, timeZone, upsertTaskSchedule, userId]);
+
   if (!userId) {
     return (
       <Card className="mx-auto mt-16 max-w-xl">
@@ -823,6 +857,7 @@ export function Planner() {
                 onSelectedDateChange={selectDay}
                 onBlockMove={handleMove}
                 onBlockResize={handleResize}
+                onBlockMoveToUntimed={handleMoveToUntimed}
                 untimedItems={untimedItems}
                 showUntimedShelf
                 onUntimedItemClick={item => {
