@@ -81,7 +81,10 @@ export interface WeekTimeGridProps {
     nextEnd: Date,
   ) => void | Promise<void>;
   onBlockClick?: (block: PlannerBlockView) => void;
-  onBlockMoveToUntimed?: (block: PlannerBlockView) => void | Promise<void>;
+  onBlockMoveToUntimed?: (
+    block: PlannerBlockView,
+    targetDate?: string,
+  ) => void | Promise<void>;
   onRequestFullscreen?: () => void;
   /** Optional Akiflow-style shelf shown below the date headers. */
   untimedItems?: UntimedScheduleItem[];
@@ -472,7 +475,17 @@ export function WeekTimeGrid({
       setActiveDragId(null);
       if (!event.over) return;
 
-      const targetDateString = String(event.over.id).replace('planner-day:', '');
+      const overId = String(event.over.id);
+      if (block && overId.startsWith('planner-untimed:')) {
+        if (!onBlockMoveToUntimed || isFixedBlock(block)) return;
+        const targetDate = overId.slice('planner-untimed:'.length);
+        if (!days.some(day => format(day, 'yyyy-MM-dd') === targetDate)) return;
+        suppressClickUntil.current = Date.now() + 250;
+        void Promise.resolve(onBlockMoveToUntimed(block, targetDate));
+        return;
+      }
+
+      const targetDateString = overId.replace('planner-day:', '');
       const targetDayIndex = days.findIndex((day) => format(day, 'yyyy-MM-dd') === targetDateString);
       if (targetDayIndex < 0) return;
 
@@ -522,7 +535,7 @@ export function WeekTimeGrid({
         invokeMove(block, nextStart, nextEnd);
       }
     },
-    [days, displayIntervals, invokeMove, onUntimedItemSchedule, resolvedTimeZone, untimedItems, validBlocks],
+    [days, displayIntervals, invokeMove, onBlockMoveToUntimed, onUntimedItemSchedule, resolvedTimeZone, untimedItems, validBlocks],
   );
 
   const handleResizeStart = useCallback(
@@ -686,6 +699,7 @@ export function WeekTimeGrid({
                   selectedDate={selectedDay}
                   onItemClick={onUntimedItemClick}
                   draggable={editable && Boolean(onUntimedItemSchedule)}
+                  acceptsScheduledDrops={editable && Boolean(onBlockMoveToUntimed)}
                 />
               )}
             </div>

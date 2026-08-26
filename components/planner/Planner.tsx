@@ -678,12 +678,13 @@ export function Planner() {
     toast.success(`${occurrence.title} scheduled`);
   }, [blocks, entries, occurrenceById, setOccurrenceOverride, timeZone, upsertTaskSchedule, userId]);
 
-  const handleMoveToUntimed = useCallback((block: PlannerBlockView) => {
+  const handleMoveToUntimed = useCallback((block: PlannerBlockView, targetDate?: string) => {
     if (!userId) return;
     const occurrence = occurrenceById.get(block.id);
     if (!occurrence?.startAt) return;
     const entry = entries.find(candidate => candidate.taskId === occurrence.taskId);
     const durationSeconds = occurrence.durationSeconds || 30 * 60;
+    const nextDate = targetDate || occurrence.date;
     setUndoState({ entries: cloneEntries(entries), createdTaskIds: [], label: `Move “${occurrence.title}” to untimed` });
     if (occurrence.recurrence !== 'none') {
       if (!entry) {
@@ -697,14 +698,14 @@ export function Planner() {
         });
       }
       setOccurrenceOverride(userId, occurrence.taskId, occurrence.recurrenceSourceDate, {
-        scheduledDate: occurrence.date,
+        scheduledDate: nextDate,
         startAt: null,
         durationSeconds,
       });
     } else {
       upsertTaskSchedule(userId, occurrence.taskId, {
         ...occurrenceScheduleInput(entry, occurrence),
-        scheduledDate: occurrence.date,
+        scheduledDate: nextDate,
         startAt: null,
         durationSeconds,
       });
@@ -906,7 +907,7 @@ export function Planner() {
                 <CalendarDays className="h-4 w-4 shrink-0 text-primary" />
                 <div className="min-w-0">
                   <CardTitle>{format(weekStart, 'MMM d')}–{format(addDays(weekStart, 6), 'MMM d, yyyy')}</CardTitle>
-                  <p className="mt-1 truncate text-xs text-muted-foreground">Drag tasks onto the calendar, then move or resize anything except school.</p>
+                  <p className="mt-1 truncate text-xs text-muted-foreground">Drag tasks onto the calendar or back to Untimed, then move or resize anything except school.</p>
                 </div>
               </div>
               <div className="flex gap-1">

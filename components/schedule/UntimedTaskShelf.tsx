@@ -1,6 +1,6 @@
 'use client';
 
-import { useDraggable } from '@dnd-kit/core';
+import { useDraggable, useDroppable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
 import { format, isSameDay } from 'date-fns';
 import { GripVertical, ListTodo } from 'lucide-react';
@@ -23,6 +23,7 @@ export interface UntimedTaskShelfProps {
   selectedDate?: Date | null;
   onItemClick?: (item: UntimedScheduleItem) => void;
   draggable?: boolean;
+  acceptsScheduledDrops?: boolean;
 }
 
 function durationLabel(seconds: number | null | undefined): string | null {
@@ -91,6 +92,51 @@ function UntimedTask({
   );
 }
 
+function UntimedDay({
+  day,
+  items,
+  selected,
+  draggable,
+  acceptsScheduledDrops,
+  onItemClick,
+}: {
+  day: Date;
+  items: UntimedScheduleItem[];
+  selected: boolean;
+  draggable: boolean;
+  acceptsScheduledDrops: boolean;
+  onItemClick?: (item: UntimedScheduleItem) => void;
+}) {
+  const date = format(day, 'yyyy-MM-dd');
+  const dayItems = items.filter(item => item.date === date);
+  const { isOver, setNodeRef } = useDroppable({
+    id: `planner-untimed:${date}`,
+    data: { type: 'untimed-day', date },
+    disabled: !acceptsScheduledDrops,
+  });
+
+  return (
+    <div
+      ref={setNodeRef}
+      className={cn(
+        'max-h-24 min-h-12 space-y-1 overflow-y-auto border-r border-border/50 p-1 transition-colors last:border-r-0',
+        selected && 'bg-indigo-500/[0.05]',
+        isOver && 'bg-primary/15 ring-1 ring-inset ring-primary/50',
+      )}
+      aria-label={`Untimed tasks for ${format(day, 'EEEE, MMMM d')}`}
+    >
+      {dayItems.map(item => (
+        <UntimedTask
+          key={item.id}
+          item={item}
+          draggable={draggable && !item.completed}
+          onClick={onItemClick}
+        />
+      ))}
+    </div>
+  );
+}
+
 export function UntimedTaskShelf({
   days,
   columns,
@@ -98,6 +144,7 @@ export function UntimedTaskShelf({
   selectedDate,
   onItemClick,
   draggable = false,
+  acceptsScheduledDrops = false,
 }: UntimedTaskShelfProps) {
   return (
     <div
@@ -110,30 +157,17 @@ export function UntimedTaskShelf({
         <span className="hidden sm:inline">Untimed</span>
       </div>
 
-      {days.map(day => {
-        const date = format(day, 'yyyy-MM-dd');
-        const dayItems = items.filter(item => item.date === date);
-        return (
-          <div
-            key={date}
-            className={cn(
-              'max-h-24 min-h-12 space-y-1 overflow-y-auto border-r border-border/50 p-1 last:border-r-0',
-              selectedDate && isSameDay(day, selectedDate) && 'bg-indigo-500/[0.05]',
-            )}
-          >
-            {dayItems.map(item => {
-              return (
-                <UntimedTask
-                  key={item.id}
-                  item={item}
-                  draggable={draggable && !item.completed}
-                  onClick={onItemClick}
-                />
-              );
-            })}
-          </div>
-        );
-      })}
+      {days.map(day => (
+        <UntimedDay
+          key={format(day, 'yyyy-MM-dd')}
+          day={day}
+          items={items}
+          selected={Boolean(selectedDate && isSameDay(day, selectedDate))}
+          draggable={draggable}
+          acceptsScheduledDrops={acceptsScheduledDrops}
+          onItemClick={onItemClick}
+        />
+      ))}
     </div>
   );
 }

@@ -488,12 +488,13 @@ export function ScheduleCalendar() {
     });
   }, [entriesByTaskId, occurrenceById, setOccurrenceOverride, timedBlocks, timeZone, upsertTaskSchedule, userId]);
 
-  const handleMoveToUntimed = useCallback((block: PlannerBlockView) => {
+  const handleMoveToUntimed = useCallback((block: PlannerBlockView, targetDate?: string) => {
     if (!userId) return;
     const occurrence = occurrenceById.get(block.id);
     if (!occurrence?.startAt) return;
     const entry = entriesByTaskId.get(occurrence.taskId);
     const durationSeconds = occurrence.durationSeconds || occurrenceDuration(occurrence);
+    const nextDate = targetDate || occurrence.date;
     if (occurrence.recurrence !== 'none') {
       if (!entry) {
         upsertTaskSchedule(userId, occurrence.taskId, {
@@ -506,14 +507,14 @@ export function ScheduleCalendar() {
         });
       }
       setOccurrenceOverride(userId, occurrence.taskId, occurrence.recurrenceSourceDate, {
-        scheduledDate: occurrence.date,
+        scheduledDate: nextDate,
         startAt: null,
         durationSeconds,
       });
     } else {
       upsertTaskSchedule(userId, occurrence.taskId, {
         ...occurrenceInput(entry, occurrence),
-        scheduledDate: occurrence.date,
+        scheduledDate: nextDate,
         startAt: null,
         durationSeconds,
       });
@@ -566,7 +567,7 @@ export function ScheduleCalendar() {
             <p className="truncate text-sm font-semibold sm:text-base">
               {format(weekStart, 'MMM d')}–{format(addDays(weekStart, 6), 'MMM d, yyyy')}
             </p>
-            <p className="hidden text-[10px] text-muted-foreground sm:block">Drag untimed tasks onto a time · move or resize any block except school</p>
+            <p className="hidden text-[10px] text-muted-foreground sm:block">Drag tasks onto a time or back to Untimed · move or resize anything except school</p>
           </div>
         </div>
         <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
