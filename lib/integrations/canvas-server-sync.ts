@@ -50,6 +50,10 @@ interface LoadedCanvasAssignments {
   eventCount: number;
 }
 
+export interface CanvasFeedSummary {
+  courses: number;
+}
+
 interface AssignmentSyncCounts {
   imported: number;
   updated: number;
@@ -279,6 +283,17 @@ async function loadCanvasAssignments(icalUrl: string): Promise<LoadedCanvasAssig
   }
 
   return { assignments, eventCount };
+}
+
+export async function getCanvasFeedSummary(icalUrl: string): Promise<CanvasFeedSummary> {
+  const { assignments } = await loadCanvasAssignments(icalUrl);
+  const courses = new Set(
+    assignments
+      .map(assignment => assignment.courseName.trim().toLowerCase())
+      .filter(courseName => courseName && courseName !== 'unknown course')
+  ).size;
+
+  return { courses };
 }
 
 function canvasTaskChanged(

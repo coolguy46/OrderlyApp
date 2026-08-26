@@ -85,6 +85,7 @@ export default function IntegrationsPage() {
 
   // Canvas URL input state (separate from saved settings)
   const [canvasUrlInput, setCanvasUrlInput] = useState('');
+  const [feedCourseCount, setFeedCourseCount] = useState<number | null>(null);
 
   // Sync input with saved URL
   useEffect(() => {
@@ -92,6 +93,36 @@ export default function IntegrationsPage() {
       setCanvasUrlInput(canvasSettings.icalUrl);
     }
   }, [canvasSettings.icalUrl]);
+
+  // Course enrollment cannot be inferred reliably from stored tasks because a
+  // course may currently have no imported assignment. Read the distinct course
+  // names from the connected Canvas feed instead.
+  useEffect(() => {
+    if (!canvasSettings.icalUrl) {
+      setFeedCourseCount(null);
+      return;
+    }
+
+    const controller = new AbortController();
+    const loadFeedSummary = async () => {
+      try {
+        const response = await fetch('/api/canvas/sync', {
+          method: 'GET',
+          cache: 'no-store',
+          signal: controller.signal,
+        });
+        if (!response.ok) return;
+        const summary = await response.json();
+        if (Number.isFinite(summary.courses)) setFeedCourseCount(summary.courses);
+      } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') return;
+        console.error('Could not load Canvas feed summary:', error);
+      }
+    };
+
+    void loadFeedSummary();
+    return () => controller.abort();
+  }, [canvasSettings.icalUrl, lastSyncTimestamp]);
 
   const handleCanvasConnect = async () => {
     if (!canvasUrlInput.trim()) return;
@@ -136,7 +167,7 @@ export default function IntegrationsPage() {
     },
     {
       label: 'Courses',
-      value: canvasCourseCount,
+      value: feedCourseCount ?? canvasCourseCount,
       tone: 'text-violet-400',
     },
   ];

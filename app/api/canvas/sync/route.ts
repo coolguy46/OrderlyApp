@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import {
+  getCanvasFeedSummary,
   syncCanvasUser,
   type CanvasSyncSetting,
 } from '@/lib/integrations/canvas-server-sync';
@@ -79,8 +80,31 @@ export async function POST() {
  * Returns sync status and instructions
  */
 export async function GET() {
-  return NextResponse.json({
-    message: 'Canvas iCal sync endpoint',
-    instructions: 'Send an authenticated POST request after saving a Canvas feed in Integrations.',
-  });
+  try {
+    const sessionClient = await createSupabaseServerClient();
+    const { data: { user }, error: authError } = await sessionClient.auth.getUser();
+    if (authError || !user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: setting, error: settingError } = await (sessionClient as any)
+      .from('canvas_settings')
+      .select('ical_url')
+      .eq('user_id', user.id)
+      .maybeSingle();
+
+    if (settingError) {
+      return NextResponse.json({ error: settingError.message }, { status: 500 });
+    }
+    if (!setting?.ical_url) {
+      return NextResponse.json({ error: 'Canvas is not connected' }, { status: 404 });
+    }
+
+    const summary = await getCanvasFeedSummary(setting.ical_url);
+    return NextResponse.json(summary);
+  } catch (error) {
+    console.error('Canvas feed summary error:', error);
+    return NextResponse.json({ error: 'Could not load Canvas feed summary' }, { status: 500 });
+  }
 }
