@@ -12,11 +12,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { TaskCard } from '@/components/tasks';
 import { motion } from 'framer-motion';
 import { formatDuration } from '@/lib/utils';
+import { useCurrentTime } from '@/lib/use-current-time';
+import { usePlannerStore } from '@/lib/planner/store';
 import {
-  Timer,
-  Flame,
-  Clock,
-  TrendingUp,
   Egg,
   Snowflake,
   Settings,
@@ -39,7 +37,12 @@ const itemVariants = {
 };
 
 export function StudySession() {
-  const { studySessions, tasks, user, pomodoroSettings, activeStudySeconds } = useAppStore();
+  const { studySessions, tasks, pomodoroSettings, activeStudySeconds, user } = useAppStore();
+  const plannerUsers = usePlannerStore(state => state.users);
+  const currentTime = useCurrentTime();
+  const timeZone = (user?.id ? plannerUsers[user.id]?.settings.timeZone : null)
+    || Intl.DateTimeFormat().resolvedOptions().timeZone
+    || 'UTC';
   const [visualType, setVisualType] = useState<VisualizationType>(() => {
     if (typeof window !== 'undefined') {
       return (localStorage.getItem('studyVisualType') as VisualizationType) || 'egg';
@@ -79,31 +82,14 @@ export function StudySession() {
 
   // Calculate today's study time
   const todayStats = useMemo(() => {
-    if (!mounted) return { totalMinutes: 0, sessionCount: 0 };
+    if (!mounted) return { totalMinutes: 0 };
     const today = new Date().toDateString();
     const todaySessions = studySessions.filter(
       (s) => new Date(s.started_at).toDateString() === today
     );
     const savedMinutes = todaySessions.reduce((acc, s) => acc + s.duration_minutes, 0);
     const totalMinutes = savedMinutes + Math.floor(activeStudySeconds / 60);
-    const sessionCount = todaySessions.length;
-
-    return { totalMinutes, sessionCount };
-  }, [studySessions, mounted, activeStudySeconds]);
-
-  // Calculate weekly study time
-  const weeklyStats = useMemo(() => {
-    if (!mounted) return { totalMinutes: 0, sessionCount: 0 };
-    const now = new Date();
-    const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-    
-    const weeklySessions = studySessions.filter(
-      (s) => new Date(s.started_at) >= weekAgo
-    );
-    const savedMinutes = weeklySessions.reduce((acc, s) => acc + s.duration_minutes, 0);
-    const totalMinutes = savedMinutes + Math.floor(activeStudySeconds / 60);
-    
-    return { totalMinutes, sessionCount: weeklySessions.length };
+    return { totalMinutes };
   }, [studySessions, mounted, activeStudySeconds]);
 
   // Daily goal progress
@@ -141,13 +127,6 @@ export function StudySession() {
     setShowGoalSettings(true);
   };
 
-  const statCards = [
-    { icon: Timer, label: 'Today', value: formatDuration(todayStats.totalMinutes), color: 'indigo', gradient: 'from-indigo-500/10 to-indigo-500/5' },
-    { icon: Clock, label: 'Sessions', value: todayStats.sessionCount, color: 'green', gradient: 'from-green-500/10 to-green-500/5' },
-    { icon: TrendingUp, label: 'This Week', value: formatDuration(weeklyStats.totalMinutes), color: 'purple', gradient: 'from-purple-500/10 to-purple-500/5' },
-    { icon: Flame, label: 'Day Streak', value: user?.current_streak || 0, color: 'orange', gradient: 'from-orange-500/10 to-orange-500/5' },
-  ];
-
   return (
     <motion.div
       variants={containerVariants}
@@ -155,32 +134,6 @@ export function StudySession() {
       animate="show"
       className="space-y-4"
     >
-      {/* Stats Grid */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        {statCards.map((stat) => {
-          const Icon = stat.icon;
-          return (
-            <motion.div
-              key={stat.label}
-              variants={itemVariants}
-              whileHover={{ scale: 1.03, y: -2 }}
-              transition={{ type: 'spring', stiffness: 400, damping: 17 }}
-              className={`bg-gradient-to-br ${stat.gradient} backdrop-blur-xl border border-border rounded-xl p-3 glow-border`}
-            >
-              <div className="flex items-center gap-2">
-                <div className={`p-1.5 bg-${stat.color}-500/20 rounded-lg`}>
-                  <Icon className={`w-4 h-4 text-${stat.color}-400`} />
-                </div>
-                <div>
-                  <p className="text-lg font-bold text-foreground">{stat.value}</p>
-                  <p className="text-xs text-muted-foreground">{stat.label}</p>
-                </div>
-              </div>
-            </motion.div>
-          );
-        })}
-      </div>
-
       <div>
           <motion.div variants={itemVariants} className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {/* Pomodoro Timer */}
@@ -275,7 +228,7 @@ export function StudySession() {
                 <div className="space-y-2">
                   {pendingTasks.length > 0 ? (
                     pendingTasks.map((task) => (
-                      <TaskCard key={task.id} task={task} compact />
+                      <TaskCard key={task.id} task={task} compact currentTime={currentTime} timeZone={timeZone} />
                     ))
                   ) : (
                     <p className="text-center text-muted-foreground py-6 text-sm">

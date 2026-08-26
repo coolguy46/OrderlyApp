@@ -19,17 +19,20 @@ import {
   ListTodo,
   CheckCircle2,
   Clock,
-  TrendingUp,
   Search,
   SlidersHorizontal,
   Sparkles,
   ArrowUpDown,
+  AlertTriangle,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/Input';
+import { isTaskMissing, taskDueAt } from '@/lib/task-status';
+import { useCurrentTime } from '@/lib/use-current-time';
+import { usePlannerStore } from '@/lib/planner/store';
 
 type SortOption = 'due_date' | 'priority' | 'created_at' | 'title';
-type FilterOption = 'all' | 'pending' | 'completed';
+type FilterOption = 'all' | 'pending' | 'missing' | 'completed';
 
 const containerVariants = {
   hidden: { opacity: 0 },
@@ -48,7 +51,12 @@ const itemVariants = {
 };
 
 export function TaskList() {
-  const { tasks, subjects } = useAppStore();
+  const { tasks, subjects, user } = useAppStore();
+  const plannerUsers = usePlannerStore(state => state.users);
+  const now = useCurrentTime();
+  const timeZone = (user?.id ? plannerUsers[user.id]?.settings.timeZone : null)
+    || Intl.DateTimeFormat().resolvedOptions().timeZone
+    || 'UTC';
   const [showForm, setShowForm] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [sortBy, setSortBy] = useState<SortOption>('due_date');
@@ -62,7 +70,12 @@ export function TaskList() {
 
     // Filter by status
     if (filterBy === 'pending') {
-      filtered = filtered.filter((t) => t.status === 'pending' || t.status === 'in_progress');
+      filtered = filtered.filter((t) =>
+        (t.status === 'pending' || t.status === 'in_progress')
+        && !isTaskMissing(t, now, timeZone)
+      );
+    } else if (filterBy === 'missing') {
+      filtered = filtered.filter((t) => isTaskMissing(t, now, timeZone));
     } else if (filterBy === 'completed') {
       filtered = filtered.filter((t) => t.status === 'completed');
     }
@@ -88,7 +101,7 @@ export function TaskList() {
         case 'due_date':
           if (!a.due_date) return 1;
           if (!b.due_date) return -1;
-          return new Date(a.due_date).getTime() - new Date(b.due_date).getTime();
+          return (taskDueAt(a, timeZone)?.getTime() || 0) - (taskDueAt(b, timeZone)?.getTime() || 0);
         case 'priority': {
           const priorityOrder = { high: 0, medium: 1, low: 2 };
           return priorityOrder[a.priority] - priorityOrder[b.priority];
@@ -103,15 +116,16 @@ export function TaskList() {
     });
 
     return filtered;
-  }, [tasks, sortBy, filterBy, filterSubject, searchQuery]);
+  }, [tasks, sortBy, filterBy, filterSubject, searchQuery, now, timeZone]);
 
   const stats = useMemo(() => {
     const total = tasks.length;
-    const pending = tasks.filter((t) => t.status === 'pending' || t.status === 'in_progress').length;
+    const incomplete = tasks.filter((t) => t.status === 'pending' || t.status === 'in_progress').length;
+    const missing = tasks.filter((t) => isTaskMissing(t, now, timeZone)).length;
+    const pending = incomplete - missing;
     const completed = tasks.filter((t) => t.status === 'completed').length;
-    const completionRate = total > 0 ? Math.round((completed / total) * 100) : 0;
-    return { total, pending, completed, completionRate };
-  }, [tasks]);
+    return { total, incomplete, pending, missing, completed };
+  }, [tasks, now, timeZone]);
 
   const handleEdit = (task: Task) => {
     setEditingTask(task);
@@ -121,6 +135,7 @@ export function TaskList() {
   const filterOptions: { key: FilterOption; label: string; icon: typeof ListTodo; count: number }[] = [
     { key: 'all', label: 'All', icon: ListTodo, count: stats.total },
     { key: 'pending', label: 'Active', icon: Clock, count: stats.pending },
+    { key: 'missing', label: 'Missing', icon: AlertTriangle, count: stats.missing },
     { key: 'completed', label: 'Done', icon: CheckCircle2, count: stats.completed },
   ];
 
@@ -152,8 +167,8 @@ export function TaskList() {
             <div>
               <h1 className="text-2xl font-bold tracking-tight font-display">Tasks</h1>
               <p className="text-sm text-muted-foreground">
-                {stats.pending > 0
-                  ? `${stats.pending} task${stats.pending !== 1 ? 's' : ''} to complete`
+                {stats.incomplete > 0
+                  ? `${stats.incomplete} task${stats.incomplete !== 1 ? 's' : ''} to complete`
                   : 'All caught up! 🎉'}
               </p>
             </div>
@@ -175,8 +190,8 @@ export function TaskList() {
         {[
           { label: 'Total', value: stats.total, icon: ListTodo, gradient: 'from-slate-500/15 to-slate-400/5', iconBg: 'bg-slate-500/20', iconColor: 'text-slate-400' },
           { label: 'Active', value: stats.pending, icon: Clock, gradient: 'from-amber-500/15 to-orange-400/5', iconBg: 'bg-amber-500/20', iconColor: 'text-amber-400' },
+          { label: 'Missing', value: stats.missing, icon: AlertTriangle, gradient: 'from-red-500/15 to-rose-400/5', iconBg: 'bg-red-500/20', iconColor: 'text-red-400' },
           { label: 'Done', value: stats.completed, icon: CheckCircle2, gradient: 'from-emerald-500/15 to-green-400/5', iconBg: 'bg-emerald-500/20', iconColor: 'text-emerald-400' },
-          { label: 'Rate', value: `${stats.completionRate}%`, icon: TrendingUp, gradient: 'from-indigo-500/15 to-purple-400/5', iconBg: 'bg-indigo-500/20', iconColor: 'text-indigo-400' },
         ].map((stat) => (
           <motion.div key={stat.label} variants={itemVariants}>
             <div
@@ -382,7 +397,7 @@ export function TaskList() {
                 exit={{ opacity: 0, scale: 0.95 }}
                 transition={{ type: 'spring' as const, stiffness: 300, damping: 24, delay: index * 0.03 }}
               >
-                <TaskCard task={task} onEdit={handleEdit} index={index} />
+                <TaskCard task={task} onEdit={handleEdit} index={index} currentTime={now} timeZone={timeZone} />
               </motion.div>
             ))
           )}

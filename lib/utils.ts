@@ -62,13 +62,6 @@ export function calculateSuggestedPriority(dueDate: string | Date | null): 'high
   return 'low'; // More than 3 days
 }
 
-// Check if a task is overdue (only if the due date is strictly before today)
-export function isTaskOverdue(dueDate: string | Date | null, status: string): boolean {
-  if (!dueDate || status === 'completed') return false;
-  const daysUntil = getDaysUntil(dueDate);
-  return daysUntil < 0;
-}
-
 // Exam-type keywords for detecting exam/test/quiz tasks
 const EXAM_KEYWORDS = ['exam', 'test', 'quiz', 'midterm', 'final', 'assessment'];
 

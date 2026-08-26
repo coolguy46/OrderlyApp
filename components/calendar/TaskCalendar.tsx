@@ -43,6 +43,8 @@ import type { ScheduleEntry } from '@/lib/schedule/types';
 import { getDefaultPlannerSettings } from '@/lib/planner/types';
 import { usePlannerStore } from '@/lib/planner/store';
 import { cn, isExamType } from '@/lib/utils';
+import { isTaskMissing } from '@/lib/task-status';
+import { useCurrentTime } from '@/lib/use-current-time';
 
 type TaskCalendarMode = 'week' | 'month';
 
@@ -134,6 +136,7 @@ function TaskDeadlineChip({
   compact = false,
   displayDateKey,
   timeZone,
+  currentTime,
   onClick,
 }: {
   task: Task;
@@ -141,16 +144,20 @@ function TaskDeadlineChip({
   compact?: boolean;
   displayDateKey: string;
   timeZone: string;
+  currentTime: Date;
   onClick: () => void;
 }) {
-  const color = subject?.color || priorityColor(task);
+  const missing = isTaskMissing(task, currentTime, timeZone);
+  const color = missing ? '#ef4444' : subject?.color || priorityColor(task);
   const taskIsExam = isExamType(task.title, task.assignment_type);
   const time = taskTimeLabel(task, timeZone);
   const actualDueDate = taskDeadlineDate(task, timeZone);
   const shifted = Boolean(actualDueDate && actualDueDate !== displayDateKey);
-  const dueLabel = shifted && actualDueDate
-    ? `Due ${format(localDateFromKey(actualDueDate), 'EEE')}${time ? ` ${time}` : ''}`
-    : time;
+  const dueLabel = missing
+    ? 'Overdue'
+    : shifted && actualDueDate
+      ? `Due ${format(localDateFromKey(actualDueDate), 'EEE')}${time ? ` ${time}` : ''}`
+      : time;
 
   return (
     <button
@@ -162,6 +169,7 @@ function TaskDeadlineChip({
       className={cn(
         'group w-full overflow-hidden rounded-md border px-2 py-1.5 text-left transition-colors hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
         task.status === 'completed' && 'opacity-55',
+        missing && 'border-red-500/70 bg-red-500/15',
         compact && 'px-1.5 py-1',
       )}
       style={{ borderColor: `${color}55`, backgroundColor: `${color}12` }}
@@ -176,8 +184,8 @@ function TaskDeadlineChip({
           <p className={cn('truncate text-[11px] font-medium leading-tight', task.status === 'completed' && 'line-through')}>
             {task.title}
           </p>
-          {(!compact || shifted) && (subject || dueLabel) && (
-            <p className="mt-0.5 truncate text-[9px] text-muted-foreground">
+          {(!compact || shifted || missing) && (subject || dueLabel) && (
+            <p className={cn('mt-0.5 truncate text-[9px] text-muted-foreground', missing && 'font-medium text-red-400')}>
               {[subject?.name, dueLabel].filter(Boolean).join(' · ')}
             </p>
           )}
@@ -215,6 +223,7 @@ export function TaskCalendar() {
   const [mode, setMode] = useState<TaskCalendarMode>('month');
   const [taskFormOpen, setTaskFormOpen] = useState(false);
   const [detailTaskId, setDetailTaskId] = useState<string | null>(null);
+  const now = useCurrentTime();
 
   useEffect(() => {
     setCurrentDate(new Date());
@@ -356,6 +365,7 @@ export function TaskCalendar() {
                     const visibleTasks = items.tasks.slice(0, 3);
                     const visibleExams = items.exams.slice(0, Math.max(0, 4 - visibleTasks.length));
                     const shown = visibleTasks.length + visibleExams.length;
+                    const hasMissingTasks = items.tasks.some(task => isTaskMissing(task, now, timeZone));
                     return (
                       <div
                         key={key}
@@ -363,6 +373,7 @@ export function TaskCalendar() {
                           'min-h-[128px] border-b border-r border-border/40 p-1.5 last:border-r-0',
                           !isSameMonth(day, currentDate) && 'bg-muted/[0.08] text-muted-foreground opacity-55',
                           isToday(day) && 'bg-primary/[0.035]',
+                          hasMissingTasks && 'bg-red-500/[0.07] ring-1 ring-inset ring-red-500/35',
                         )}
                       >
                         <div className="mb-1 flex items-center justify-between">
@@ -376,7 +387,7 @@ export function TaskCalendar() {
                         </div>
                         <div className="space-y-1">
                           {visibleTasks.map(task => (
-                            <TaskDeadlineChip key={task.id} task={task} subject={task.subject_id ? subjectById.get(task.subject_id) : undefined} compact displayDateKey={key} timeZone={timeZone} onClick={() => setDetailTaskId(task.id)} />
+                            <TaskDeadlineChip key={task.id} task={task} subject={task.subject_id ? subjectById.get(task.subject_id) : undefined} compact displayDateKey={key} timeZone={timeZone} currentTime={now} onClick={() => setDetailTaskId(task.id)} />
                           ))}
                           {visibleExams.map(exam => (
                             <ExamDeadlineChip key={exam.id} exam={exam} subject={exam.subject_id ? subjectById.get(exam.subject_id) : undefined} compact />
@@ -403,8 +414,13 @@ export function TaskCalendar() {
                   {visibleDays.map(day => {
                     const key = format(day, 'yyyy-MM-dd');
                     const items = itemsByDate.get(key) || { tasks: [], exams: [] };
+                    const hasMissingTasks = items.tasks.some(task => isTaskMissing(task, now, timeZone));
                     return (
-                      <div key={key} className={cn('min-h-[calc(100dvh-15.5rem)] border-r border-border/45 p-2 last:border-r-0', isToday(day) && 'bg-primary/[0.035]')}>
+                      <div key={key} className={cn(
+                        'min-h-[calc(100dvh-15.5rem)] border-r border-border/45 p-2 last:border-r-0',
+                        isToday(day) && 'bg-primary/[0.035]',
+                        hasMissingTasks && 'bg-red-500/[0.07] ring-1 ring-inset ring-red-500/35',
+                      )}>
                         <div className="mb-2 flex items-center justify-center">
                           <span className={cn('flex h-7 min-w-7 items-center justify-center rounded-full px-2 text-sm font-semibold', isToday(day) && 'bg-primary text-primary-foreground shadow-sm')}>
                             {format(day, 'd')}
@@ -412,7 +428,7 @@ export function TaskCalendar() {
                         </div>
                         <div className="space-y-1.5">
                           {items.tasks.map(task => (
-                            <TaskDeadlineChip key={task.id} task={task} subject={task.subject_id ? subjectById.get(task.subject_id) : undefined} displayDateKey={key} timeZone={timeZone} onClick={() => setDetailTaskId(task.id)} />
+                            <TaskDeadlineChip key={task.id} task={task} subject={task.subject_id ? subjectById.get(task.subject_id) : undefined} displayDateKey={key} timeZone={timeZone} currentTime={now} onClick={() => setDetailTaskId(task.id)} />
                           ))}
                           {items.exams.map(exam => (
                             <ExamDeadlineChip key={exam.id} exam={exam} subject={exam.subject_id ? subjectById.get(exam.subject_id) : undefined} />

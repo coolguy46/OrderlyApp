@@ -17,7 +17,6 @@ import {
   Edit3,
   AlertTriangle,
   CheckCircle2,
-  BookOpen,
   ClipboardList,
   X,
 } from 'lucide-react';
@@ -534,28 +533,22 @@ export function ExamList() {
   }, [examTypeTasks, filter, mounted]);
 
   const stats = useMemo(() => {
-    if (!mounted) return { total: 0, upcoming: 0, thisWeek: 0, avgPrep: 0 };
+    if (!mounted) return { total: 0, upcoming: 0, thisWeek: 0 };
     const now = new Date();
     const allDates = allExamItems;
     const upcoming = allDates.filter((item) => new Date(item.date) >= now);
     const thisWeek = upcoming.filter((item) => getDaysUntil(item.date) <= 7);
-    const avgPrep = exams.length > 0
-      ? Math.round(exams.reduce((acc, e) => acc + e.preparation_progress, 0) / exams.length)
-      : 0;
-
     return {
       total: allDates.length,
       upcoming: upcoming.length,
       thisWeek: thisWeek.length,
-      avgPrep,
     };
-  }, [exams, allExamItems, mounted]);
+  }, [allExamItems, mounted]);
 
   const statCards = [
     { icon: GraduationCap, label: 'Total Exams', value: stats.total, color: 'indigo', gradient: 'from-indigo-500/10 to-indigo-500/5' },
     { icon: Calendar, label: 'Upcoming', value: stats.upcoming, color: 'blue', gradient: 'from-blue-500/10 to-blue-500/5' },
     { icon: AlertTriangle, label: 'This Week', value: stats.thisWeek, color: 'yellow', gradient: 'from-yellow-500/10 to-yellow-500/5' },
-    { icon: BookOpen, label: 'Avg. Preparation', value: `${stats.avgPrep}%`, color: 'green', gradient: 'from-green-500/10 to-green-500/5' },
   ];
 
   return (
@@ -566,7 +559,7 @@ export function ExamList() {
       className="space-y-6"
     >
       {/* Stats */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         {statCards.map((stat) => {
           const Icon = stat.icon;
           return (

@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test:canvas-sync": "node --test --experimental-strip-types tests/canvas-sync-schedule.test.mjs"
+    "test:canvas-sync": "node --test --experimental-strip-types tests/canvas-sync-schedule.test.mjs",
+    "test:task-status": "node --test --experimental-strip-types tests/task-status.test.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

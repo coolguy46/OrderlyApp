@@ -27,6 +27,7 @@ import { Save, Plus, Sparkles, Calendar, Tag, Flag, BookOpen, FileText, Zap, Rep
 import { calculateSuggestedPriority } from '@/lib/utils';
 import { cn } from '@/lib/utils';
 import { useScheduleStore } from '@/lib/schedule/store';
+import { usePlannerStore } from '@/lib/planner/store';
 import {
   DEFAULT_SCHEDULE_DURATION_SECONDS,
   formatDurationInput,
@@ -50,13 +51,17 @@ const SUBJECT_COLORS = [
 
 export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
   const { addTask, updateTask, subjects, addSubject, deleteSubject, user } = useAppStore();
+  const plannerUsers = usePlannerStore(state => state.users);
+  const timeZone = (user?.id ? plannerUsers[user.id]?.settings.timeZone : null)
+    || Intl.DateTimeFormat().resolvedOptions().timeZone
+    || 'UTC';
   const importedDeadlineLocked = Boolean(
     task && (task.source === 'canvas' || task.source === 'google_classroom'),
   );
   const importedDeadlineTime = importedDeadlineLocked && task?.due_date
     ? localTimeFromIso(
         task.due_date,
-        Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+        timeZone,
       ) || ''
     : '';
   const upsertTaskSchedule = useScheduleStore(state => state.upsertTaskSchedule);
@@ -107,14 +112,14 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
       setSubjectId(task.subject_id || 'none');
       setDueDate(task.due_date
         ? localDateFromIso(
-            task.due_date,
-            Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+          task.due_date,
+            timeZone,
           ) || ''
         : '');
       setDueTime(task.due_time || '');
       setScheduleDate(scheduleEntry?.scheduledDate || '');
       setScheduleStartTime(scheduleEntry?.startAt
-        ? localTimeFromIso(scheduleEntry.startAt, Intl.DateTimeFormat().resolvedOptions().timeZone) || ''
+        ? localTimeFromIso(scheduleEntry.startAt, timeZone) || ''
         : '');
       setDurationInput(formatDurationInput(scheduleEntry?.durationSeconds));
       setScheduleError('');
@@ -123,7 +128,7 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
     } else {
       resetForm();
     }
-  }, [task, isOpen, scheduleEntry]);
+  }, [task, isOpen, scheduleEntry, timeZone]);
 
   const handleCreateSubject = async () => {
     if (!newSubjectName.trim()) return;
@@ -176,7 +181,6 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
       return;
     }
 
-    const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
     const startAt = scheduleStartTime
       ? localDateTimeToIso(scheduleDate, `${scheduleStartTime}:00`, timeZone)
       : null;
@@ -228,11 +232,10 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
         priority,
         status,
         subject_id: subjectId === 'none' ? null : subjectId,
-        // Preserve exact Canvas/Classroom deadline instants when the user only
-        // edits schedule metadata. Due fields and work schedule are independent.
-        due_date: task?.due_date && dueDate === originalDueDate
-          ? task.due_date
-          : dueDate ? new Date(dueDate + 'T00:00:00').toISOString() : null,
+        // Store the real deadline instant. Previously this discarded
+        // `deadlineAt` and saved local midnight, so a 3 PM task could not
+        // become missing when 3 PM passed.
+        due_date: deadlineAt,
         due_time: dueTime || null,
         recurrence,
         recurrence_days: recurrence === 'weekly' && recurrenceDays.length > 0 ? recurrenceDays : null,
@@ -703,12 +706,12 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
                 ? localDateTimeToIso(
                     scheduleDate,
                     `${scheduleStartTime}:00`,
-                    Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+                    timeZone,
                   )
                 : null;
               const previewEnd = scheduledEndAt(previewStart, previewDuration);
               const endTime = previewEnd
-                ? localTimeFromIso(previewEnd, Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC')
+                ? localTimeFromIso(previewEnd, timeZone)
                 : null;
               if (!previewStart || !endTime) return null;
               const formatClock = (value: string) => {

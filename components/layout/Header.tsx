@@ -22,17 +22,13 @@ import {
   Settings, 
   User, 
   LogOut,
-  Menu,
   CheckSquare,
   Target,
   GraduationCap,
   X,
   ArrowLeft,
-  HelpCircle,
-  Crown,
 } from 'lucide-react';
 import Link from 'next/link';
-import { Tutorial } from '@/components/tutorial/Tutorial';
 
 interface HeaderProps {
   onMobileMenuToggle?: () => void;
@@ -44,7 +40,6 @@ export function Header({ onMobileMenuToggle }: HeaderProps) {
   const [searchOpen, setSearchOpen] = useState(false);
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [showTutorial, setShowTutorial] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const mobileSearchInputRef = useRef<HTMLInputElement>(null);
 
@@ -256,17 +251,6 @@ export function Header({ onMobileMenuToggle }: HeaderProps) {
               <Search className="w-5 h-5" />
             </Button>
 
-            {/* Help / Tutorial button */}
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-10 w-10 hidden sm:flex text-muted-foreground hover:text-foreground"
-              onClick={() => setShowTutorial(true)}
-              title="App Tutorial"
-            >
-              <HelpCircle className="w-5 h-5" />
-            </Button>
-
             {/* User Menu */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -371,11 +355,6 @@ export function Header({ onMobileMenuToggle }: HeaderProps) {
           </motion.div>
         )}
       </AnimatePresence>
-
-      {/* Tutorial overlay (triggered from header) */}
-      {showTutorial && (
-        <Tutorial forceShow onComplete={() => setShowTutorial(false)} />
-      )}
     </>
   );
 }

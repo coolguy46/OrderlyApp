@@ -17,16 +17,18 @@ import { TaskCard, TaskForm } from '@/components/tasks';
 import { DashboardSchedule } from './DashboardSchedule';
 import { usePlannerStore } from '@/lib/planner/store';
 import { getDefaultPlannerSettings } from '@/lib/planner/types';
-import { taskUntimedDisplayDate } from '@/lib/schedule/selectors';
-import { formatDuration, getDaysUntil, cn, isExamType } from '@/lib/utils';
-import { format, isToday, startOfDay, startOfMonth, endOfMonth, startOfWeek, endOfWeek, addDays } from 'date-fns';
+import { localDateFromIso, taskUntimedDisplayDate } from '@/lib/schedule/selectors';
+import { getDaysUntil, cn, isExamType } from '@/lib/utils';
+import { isTaskMissing, taskDueAt } from '@/lib/task-status';
+import { useCurrentTime } from '@/lib/use-current-time';
+import { format, isToday, startOfMonth, endOfMonth, startOfWeek, endOfWeek, addDays } from 'date-fns';
 import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Clock,
   CheckCircle2,
   Target,
-  Flame,
+  AlertTriangle,
   Calendar,
   GraduationCap,
   Play,
@@ -38,25 +40,6 @@ import {
   ListTodo,
   CalendarClock,
 } from 'lucide-react';
-
-// Animated counter hook
-function useAnimatedCounter(target: number, duration: number = 800) {
-  const [count, setCount] = useState(0);
-  useEffect(() => {
-    if (target === 0) { setCount(0); return; }
-    let start = 0;
-    const startTime = performance.now();
-    const step = (currentTime: number) => {
-      const elapsed = currentTime - startTime;
-      const progress = Math.min(elapsed / duration, 1);
-      const eased = 1 - Math.pow(1 - progress, 3); // easeOutCubic
-      setCount(Math.round(eased * target));
-      if (progress < 1) requestAnimationFrame(step);
-    };
-    requestAnimationFrame(step);
-  }, [target, duration]);
-  return count;
-}
 
 // Framer motion variants
 const containerVariants = {
@@ -75,30 +58,21 @@ const itemVariants = {
   }
 };
 
-const cardHover = {
-  rest: { scale: 1, y: 0 },
-  hover: { 
-    scale: 1.02, y: -4,
-    transition: { type: 'spring' as const, stiffness: 400, damping: 20 }
-  }
-};
-
 // Normalize any date value to a 'yyyy-MM-dd' string in local time.
 // Handles ISO strings, date-only strings, and Date objects consistently.
-function toLocalDateStr(d: string | Date): string {
+function toLocalDateStr(d: string | Date, timeZone: string): string {
   if (typeof d === 'string') {
     // For date-only strings like '2026-03-16', return as-is
     if (!d.includes('T')) return d.slice(0, 10);
-    // For ISO strings, convert to local Date first then format
-    const local = new Date(d);
-    return format(local, 'yyyy-MM-dd');
+    return localDateFromIso(d, timeZone) || d.slice(0, 10);
   }
-  return format(d, 'yyyy-MM-dd');
+  return localDateFromIso(d.toISOString(), timeZone) || format(d, 'yyyy-MM-dd');
 }
 
 export function Dashboard() {
-  const { tasks, goals, exams, studySessions, subjects, user, activeStudySeconds } = useAppStore();
+  const { tasks, goals, exams, subjects, user } = useAppStore();
   const plannerUsers = usePlannerStore(state => state.users);
+  const now = useCurrentTime();
   const [mounted, setMounted] = useState(false);
   const [currentDate, setCurrentDate] = useState(new Date());
   const [showTaskForm, setShowTaskForm] = useState(false);
@@ -124,42 +98,43 @@ export function Dashboard() {
 
   // Today's stats
   const todayStats = useMemo(() => {
-    if (!mounted) return { studyMinutes: 0, sessionsCount: 0, tasksCompleted: 0, tasksDue: 0 };
+    if (!mounted) return { tasksCompleted: 0, tasksDue: 0 };
     
-    const today = new Date().toDateString();
-    const todaySessions = studySessions.filter(
-      (s) => new Date(s.started_at).toDateString() === today
-    );
-    const totalMinutes = todaySessions.reduce((acc, s) => acc + s.duration_minutes, 0) + Math.floor(activeStudySeconds / 60);
-
-    const todayDate = new Date();
+    const today = localDateFromIso(now.toISOString(), taskDisplayOptions.timeZone);
+    if (!today) return { tasksCompleted: 0, tasksDue: 0 };
+    const todayDate = new Date(`${today}T12:00:00`);
     const todayDayOfWeek = todayDate.getDay();
     const todayTasks = tasks.filter((t) => {
-      if (t.due_date && new Date(t.due_date).toDateString() === today) return true;
+      if (t.due_date && taskUntimedDisplayDate(t, taskDisplayOptions) === today) return true;
       if (t.recurrence && t.recurrence !== 'none' && t.status !== 'completed') {
-        const taskStart = t.due_date ? new Date(t.due_date) : new Date(t.created_at);
-        if (todayDate < startOfDay(taskStart)) return false;
-        if (t.due_date && new Date(t.due_date).toDateString() === today) return false;
+        const taskStartKey = toLocalDateStr(t.due_date || t.created_at, taskDisplayOptions.timeZone);
+        if (today < taskStartKey) return false;
+        if (t.due_date && toLocalDateStr(t.due_date, taskDisplayOptions.timeZone) === today) return false;
         if (t.recurrence === 'daily') return true;
         if (t.recurrence === 'weekly') {
           if (t.recurrence_days && t.recurrence_days.length > 0) return t.recurrence_days.includes(todayDayOfWeek);
+          const taskStart = new Date(`${taskStartKey}T12:00:00`);
           return todayDate.getDay() === taskStart.getDay();
         }
+        const taskStart = new Date(`${taskStartKey}T12:00:00`);
         if (t.recurrence === 'monthly') return todayDate.getDate() === taskStart.getDate();
       }
       return false;
     });
     const completedToday = tasks.filter(
-      (t) => t.completed_at && new Date(t.completed_at).toDateString() === today
+      (t) => t.completed_at && localDateFromIso(t.completed_at, taskDisplayOptions.timeZone) === today
     ).length;
 
     return {
-      studyMinutes: totalMinutes,
-      sessionsCount: todaySessions.length,
       tasksCompleted: completedToday,
       tasksDue: todayTasks.length,
     };
-  }, [studySessions, tasks, mounted, activeStudySeconds]);
+  }, [tasks, mounted, now, taskDisplayOptions]);
+
+  const missingTasks = useMemo(
+    () => tasks.filter(task => isTaskMissing(task, now, plannerSettings.timeZone)),
+    [now, plannerSettings.timeZone, tasks],
+  );
 
   // Upcoming tasks - filter by selected date if any
   const upcomingTasks = useMemo(() => {
@@ -171,26 +146,40 @@ export function Dashboard() {
         .filter((t) => {
           if (t.due_date && taskUntimedDisplayDate(t, taskDisplayOptions) === selectedDateStr) return true;
           if (t.recurrence && t.recurrence !== 'none') {
-            const taskStart = t.due_date ? new Date(t.due_date) : new Date(t.created_at);
-            if (selDate < startOfDay(taskStart)) return false;
-            if (t.due_date && toLocalDateStr(t.due_date) === selectedDateStr) return false;
+            const taskStartKey = toLocalDateStr(t.due_date || t.created_at, taskDisplayOptions.timeZone);
+            if (selectedDateStr < taskStartKey) return false;
+            if (t.due_date && toLocalDateStr(t.due_date, taskDisplayOptions.timeZone) === selectedDateStr) return false;
             if (t.recurrence === 'daily') return true;
             if (t.recurrence === 'weekly') {
               if (t.recurrence_days && t.recurrence_days.length > 0) return t.recurrence_days.includes(selDayOfWeek);
+              const taskStart = new Date(`${taskStartKey}T12:00:00`);
               return selDate.getDay() === taskStart.getDay();
             }
+            const taskStart = new Date(`${taskStartKey}T12:00:00`);
             if (t.recurrence === 'monthly') return selDate.getDate() === taskStart.getDate();
           }
           return false;
         })
         .sort((a, b) => new Date(a.due_date || a.created_at).getTime() - new Date(b.due_date || b.created_at).getTime());
     }
-    // Default: show upcoming non-completed tasks
+    // Keep tasks completed today in place until the day ends. They are never
+    // considered missing, but this avoids a row vanishing the instant it is checked.
+    const todayKey = localDateFromIso(now.toISOString(), taskDisplayOptions.timeZone);
     return tasks
-      .filter((t) => t.status !== 'completed' && t.due_date)
-      .sort((a, b) => new Date(a.due_date!).getTime() - new Date(b.due_date!).getTime())
+      .filter((t) => t.due_date && (
+        t.status !== 'completed'
+        || Boolean(
+          t.completed_at
+          && todayKey
+          && localDateFromIso(t.completed_at, taskDisplayOptions.timeZone) === todayKey
+        )
+      ))
+      .sort((a, b) =>
+        (taskDueAt(a, taskDisplayOptions.timeZone)?.getTime() || 0)
+        - (taskDueAt(b, taskDisplayOptions.timeZone)?.getTime() || 0)
+      )
       .slice(0, 6);
-  }, [selectedDateStr, taskDisplayOptions, tasks]);
+  }, [now, selectedDateStr, taskDisplayOptions, tasks]);
 
   // Active goals
   const activeGoals = useMemo(() => {
@@ -200,13 +189,13 @@ export function Dashboard() {
   // Upcoming exams
   const upcomingExams = useMemo(() => {
     if (!mounted) return [];
-    // Compare at start-of-day so exams today still show as upcoming
-    const todayStart = startOfDay(new Date());
+    const today = localDateFromIso(now.toISOString(), taskDisplayOptions.timeZone);
+    if (!today) return [];
     return exams
-      .filter((e) => startOfDay(new Date(e.exam_date)) >= todayStart)
+      .filter((e) => toLocalDateStr(e.exam_date, taskDisplayOptions.timeZone) >= today)
       .sort((a, b) => new Date(a.exam_date).getTime() - new Date(b.exam_date).getTime())
       .slice(0, 3);
-  }, [exams, mounted]);
+  }, [exams, mounted, now, taskDisplayOptions.timeZone]);
 
   // Calendar days for mini calendar
   const calendarDays = useMemo(() => {
@@ -233,18 +222,20 @@ export function Dashboard() {
 
       // Recurring task expansion
       if (task.recurrence && task.recurrence !== 'none' && task.status !== 'completed') {
-        const taskStart = task.due_date ? new Date(task.due_date) : new Date(task.created_at);
-        if (date < startOfDay(taskStart)) return false;
-        if (task.due_date && toLocalDateStr(task.due_date) === dateStr) return false;
+        const taskStartKey = toLocalDateStr(task.due_date || task.created_at, taskDisplayOptions.timeZone);
+        if (dateStr < taskStartKey) return false;
+        if (task.due_date && toLocalDateStr(task.due_date, taskDisplayOptions.timeZone) === dateStr) return false;
 
         if (task.recurrence === 'daily') return true;
         if (task.recurrence === 'weekly') {
           if (task.recurrence_days && task.recurrence_days.length > 0) {
             return task.recurrence_days.includes(dayOfWeek);
           }
+          const taskStart = new Date(`${taskStartKey}T12:00:00`);
           return date.getDay() === taskStart.getDay();
         }
         if (task.recurrence === 'monthly') {
+          const taskStart = new Date(`${taskStartKey}T12:00:00`);
           return date.getDate() === taskStart.getDate();
         }
       }
@@ -252,7 +243,7 @@ export function Dashboard() {
       return false;
     });
     const dayExams = exams.filter((exam) => {
-      return toLocalDateStr(exam.exam_date) === dateStr;
+      return toLocalDateStr(exam.exam_date, taskDisplayOptions.timeZone) === dateStr;
     });
     return { tasks: dayTasks, exams: dayExams };
   }, [tasks, exams, taskDisplayOptions]);
@@ -290,12 +281,11 @@ export function Dashboard() {
       </motion.div>
 
       {/* Stats Grid - Animated */}
-      <motion.div variants={containerVariants} className="grid grid-cols-2 gap-2.5 sm:gap-3 lg:grid-cols-4">
+      <motion.div variants={containerVariants} className="grid grid-cols-1 gap-2.5 sm:grid-cols-3 sm:gap-3">
         {[
-          { label: 'Study Time', value: formatDuration(todayStats.studyMinutes), sub: `${todayStats.sessionsCount} sessions`, icon: Clock, color: 'indigo', gradient: 'from-indigo-500/10 to-blue-500/10', borderColor: 'border-indigo-500/20' },
           { label: 'Completed', value: String(todayStats.tasksCompleted), sub: `${todayStats.tasksDue} due today`, icon: CheckCircle2, color: 'green', gradient: 'from-green-500/10 to-emerald-500/10', borderColor: 'border-green-500/20' },
-          { label: 'Streak', value: `${user?.current_streak || 0}d`, sub: `Best: ${user?.longest_streak || 0}d`, icon: Flame, color: 'orange', gradient: 'from-orange-500/10 to-amber-500/10', borderColor: 'border-orange-500/20' },
           { label: 'Goals', value: String(activeGoals.length), sub: `${goals.filter((g) => g.status === 'completed').length} done`, icon: Target, color: 'purple', gradient: 'from-purple-500/10 to-pink-500/10', borderColor: 'border-purple-500/20' },
+          { label: 'Missing', value: String(missingTasks.length), sub: missingTasks.length === 1 ? '1 overdue task' : `${missingTasks.length} overdue tasks`, icon: AlertTriangle, color: 'red', gradient: 'from-red-500/10 to-rose-500/10', borderColor: 'border-red-500/20' },
         ].map((stat, i) => (
           <motion.div key={stat.label} variants={itemVariants}>
             <Card className={cn(
@@ -452,7 +442,7 @@ export function Dashboard() {
                           show: { opacity: 1, x: 0, transition: { type: 'spring', stiffness: 300, damping: 24 } }
                         }}
                       >
-                        <TaskCard task={task} compact />
+                        <TaskCard task={task} compact currentTime={now} timeZone={taskDisplayOptions.timeZone} />
                       </motion.div>
                     ))}
                   </motion.div>
@@ -507,6 +497,9 @@ export function Dashboard() {
                 {calendarDays.map((day, index) => {
                   const dayEvents = getEventsForDate(day);
                   const hasEvents = dayEvents.tasks.length > 0 || dayEvents.exams.length > 0;
+                  const hasMissingTasks = dayEvents.tasks.some(task =>
+                    isTaskMissing(task, now, taskDisplayOptions.timeZone)
+                  );
                   const isCurrentMonth = day.getMonth() === currentDate.getMonth();
                   return (
                     <button
@@ -517,6 +510,8 @@ export function Dashboard() {
                         !isCurrentMonth && 'opacity-30',
                         isToday(day) && 'bg-primary/20 border border-primary font-bold dot-pulse',
                         selectedDateStr === format(day, 'yyyy-MM-dd') && 'bg-primary/10 ring-1 ring-primary/50',
+                        hasMissingTasks && 'border border-red-500/70 bg-red-500/15 text-red-300',
+                        hasMissingTasks && selectedDateStr === format(day, 'yyyy-MM-dd') && 'ring-1 ring-red-500/70',
                         !isToday(day) && 'hover:bg-muted hover:scale-110'
                       )}
                     >
@@ -524,7 +519,12 @@ export function Dashboard() {
                       {hasEvents && (
                         <div className="absolute bottom-0.5 flex gap-0.5">
                           {dayEvents.tasks.slice(0, 2).map((t, i) => (
-                            <div key={i} className={cn('w-1 h-1 rounded-full', isExamType(t.title, t.assignment_type) ? 'bg-purple-500' : 'bg-primary')} />
+                            <div key={i} className={cn(
+                              'w-1 h-1 rounded-full',
+                              isTaskMissing(t, now, taskDisplayOptions.timeZone)
+                                ? 'bg-red-500'
+                                : isExamType(t.title, t.assignment_type) ? 'bg-purple-500' : 'bg-primary'
+                            )} />
                           ))}
                           {dayEvents.exams.slice(0, 1).map((_, i) => (
                             <div key={`e-${i}`} className="w-1 h-1 rounded-full bg-purple-500" />

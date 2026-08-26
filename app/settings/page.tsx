@@ -342,6 +342,28 @@ export default function SettingsPage() {
           </Card>
         </motion.div>
 
+        {/* Integrations Link */}
+        <motion.div variants={sectionVariants}>
+          <Link href="/settings/integrations">
+            <Card className="hover:bg-muted/30 transition-colors cursor-pointer group">
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 rounded-lg bg-purple-500/10">
+                      <Plug className="w-5 h-5 text-purple-500" />
+                    </div>
+                    <div>
+                      <p className="font-medium">Integrations</p>
+                      <p className="text-sm text-muted-foreground">Connect with Canvas LMS, Google Classroom, and more</p>
+                    </div>
+                  </div>
+                  <ChevronRight className="w-5 h-5 text-muted-foreground group-hover:translate-x-1 transition-transform" />
+                </div>
+              </CardContent>
+            </Card>
+          </Link>
+        </motion.div>
+
         {/* Account Section */}
         <motion.div variants={sectionVariants}>
           <Card>
@@ -698,28 +720,6 @@ export default function SettingsPage() {
               </div>
             </CardContent>
           </Card>
-        </motion.div>
-
-        {/* Integrations Link */}
-        <motion.div variants={sectionVariants}>
-          <Link href="/settings/integrations">
-            <Card className="hover:bg-muted/30 transition-colors cursor-pointer group">
-              <CardContent className="p-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 rounded-lg bg-purple-500/10">
-                      <Plug className="w-5 h-5 text-purple-500" />
-                    </div>
-                    <div>
-                      <p className="font-medium">Integrations</p>
-                      <p className="text-sm text-muted-foreground">Connect with Canvas LMS, Google Classroom, and more</p>
-                    </div>
-                  </div>
-                  <ChevronRight className="w-5 h-5 text-muted-foreground group-hover:translate-x-1 transition-transform" />
-                </div>
-              </CardContent>
-            </Card>
-          </Link>
         </motion.div>
 
         {/* Spacer for bottom padding */}

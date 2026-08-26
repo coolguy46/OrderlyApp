@@ -15,7 +15,8 @@ import {
 } from '@/components/ui';
 import { SubjectBadge } from '@/components/ui';
 import { TaskDetailViewer } from './TaskDetailViewer';
-import { formatDate, getDaysUntil, cn, isTaskOverdue, isExamType } from '@/lib/utils';
+import { formatDate, cn, isExamType } from '@/lib/utils';
+import { isTaskMissing, taskDueDayDistance } from '@/lib/task-status';
 import { useScheduleStore } from '@/lib/schedule/store';
 import { formatDurationInput, scheduledEndAt, selectScheduleEntry } from '@/lib/schedule/selectors';
 import { format } from 'date-fns';
@@ -44,9 +45,11 @@ interface TaskCardProps {
   onEdit?: (task: Task) => void;
   compact?: boolean;
   index?: number;
+  currentTime?: Date;
+  timeZone?: string;
 }
 
-export const TaskCard = memo(function TaskCard({ task, onEdit, compact = false, index = 0 }: TaskCardProps) {
+export const TaskCard = memo(function TaskCard({ task, onEdit, compact = false, index = 0, currentTime, timeZone }: TaskCardProps) {
   const { completeTask, deleteTask, updateTask, subjects } = useAppStore();
   const scheduleEntry = useScheduleStore((state) =>
     selectScheduleEntry(state.entriesByUser, task.user_id, task.id)
@@ -54,13 +57,13 @@ export const TaskCard = memo(function TaskCard({ task, onEdit, compact = false, 
   const [showViewer, setShowViewer] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const subject = subjects.find((s) => s.id === task.subject_id);
-  const daysUntil = task.due_date ? getDaysUntil(task.due_date) : null;
-
-  const isOverdue = isTaskOverdue(task.due_date, task.status);
+  const now = currentTime || new Date();
+  const daysUntil = taskDueDayDistance(task, now, timeZone);
+  const isCompleted = task.status === 'completed';
+  const isOverdue = isTaskMissing(task, now, timeZone);
   const displayPriority = isOverdue ? 'high' : task.priority;
   const isExternalTask = task.source && task.source !== 'manual';
   const isExamTask = isExamType(task.title, task.assignment_type);
-  const isCompleted = task.status === 'completed';
   const isInProgress = task.status === 'in_progress';
   const isRecurring = task.recurrence && task.recurrence !== 'none';
 
@@ -115,8 +118,15 @@ export const TaskCard = memo(function TaskCard({ task, onEdit, compact = false, 
   const getDueDateDisplay = () => {
     if (!task.due_date) return null;
     if (daysUntil === null) return null;
-    
-    if (daysUntil < 0) return { text: `${Math.abs(daysUntil)}d overdue`, urgent: true, warning: false };
+
+    if (isCompleted) return { text: 'Completed', urgent: false, warning: false };
+    if (isOverdue) {
+      return {
+        text: daysUntil < 0 ? `${Math.abs(daysUntil)}d overdue` : 'Overdue',
+        urgent: true,
+        warning: false,
+      };
+    }
     if (daysUntil === 0) return { text: 'Due today', urgent: false, warning: true };
     if (daysUntil === 1) return { text: 'Tomorrow', urgent: false, warning: true };
     if (daysUntil <= 3) return { text: `${daysUntil} days left`, urgent: false, warning: true };
@@ -194,7 +204,7 @@ export const TaskCard = memo(function TaskCard({ task, onEdit, compact = false, 
               dueInfo.urgent ? 'text-red-400' : dueInfo.warning ? 'text-amber-400' : 'text-muted-foreground'
             )}>
               {dueInfo.text}
-              {task.due_time && ` ${formatTime(task.due_time)}`}
+              {!isCompleted && task.due_time && ` ${formatTime(task.due_time)}`}
             </span>
           )}
           {isRecurring && (

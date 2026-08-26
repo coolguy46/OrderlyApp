@@ -12,8 +12,11 @@ import {
   Badge,
 } from '@/components/ui';
 import { SubjectBadge } from '@/components/ui';
-import { formatDate, getDaysUntil, cn, isTaskOverdue, isExamType } from '@/lib/utils';
+import { formatDate, cn, isExamType } from '@/lib/utils';
+import { isTaskMissing, taskDueDayDistance } from '@/lib/task-status';
+import { useCurrentTime } from '@/lib/use-current-time';
 import { useScheduleStore } from '@/lib/schedule/store';
+import { usePlannerStore } from '@/lib/planner/store';
 import { formatDurationInput, scheduledEndAt, selectScheduleEntry } from '@/lib/schedule/selectors';
 import type { ScheduleOccurrence } from '@/lib/schedule/types';
 import { format } from 'date-fns';
@@ -48,15 +51,20 @@ export function TaskDetailViewer({ task, open, onOpenChange, onEdit, scheduleOcc
   const scheduleEntry = useScheduleStore((state) =>
     selectScheduleEntry(state.entriesByUser, task?.user_id, task?.id)
   );
+  const plannerUsers = usePlannerStore(state => state.users);
+  const now = useCurrentTime();
   
   if (!task) return null;
   
   const subject = subjects.find((s) => s.id === task.subject_id);
-  const daysUntil = task.due_date ? getDaysUntil(task.due_date) : null;
-  const isOverdue = isTaskOverdue(task.due_date, task.status);
+  const timeZone = plannerUsers[task.user_id]?.settings.timeZone
+    || Intl.DateTimeFormat().resolvedOptions().timeZone
+    || 'UTC';
+  const daysUntil = taskDueDayDistance(task, now, timeZone);
+  const isCompleted = task.status === 'completed';
+  const isOverdue = isTaskMissing(task, now, timeZone);
   const displayPriority = isOverdue ? 'high' : task.priority;
   const isExamTask = isExamType(task.title, task.assignment_type);
-  const isCompleted = task.status === 'completed';
   const isInProgress = task.status === 'in_progress';
   const isRecurring = task.recurrence && task.recurrence !== 'none';
 
@@ -66,6 +74,17 @@ export function TaskDetailViewer({ task, open, onOpenChange, onEdit, scheduleOcc
     const ampm = hour >= 12 ? 'PM' : 'AM';
     const hour12 = hour % 12 || 12;
     return `${hour12}:${m} ${ampm}`;
+  };
+
+  const formatZonedDate = (value: string) => {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return formatDate(value);
+    return new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    }).format(date);
   };
 
   const handleComplete = async () => {
@@ -103,11 +122,19 @@ export function TaskDetailViewer({ task, open, onOpenChange, onEdit, scheduleOcc
   // Due date display
   const getDueDisplay = () => {
     if (!task.due_date || daysUntil === null) return null;
-    if (daysUntil < 0) return { text: `${Math.abs(daysUntil)} days overdue`, sub: formatDate(task.due_date), urgent: true, warning: false };
-    if (daysUntil === 0) return { text: 'Due Today', sub: formatDate(task.due_date), urgent: false, warning: true };
-    if (daysUntil === 1) return { text: 'Due Tomorrow', sub: formatDate(task.due_date), urgent: false, warning: true };
-    if (daysUntil <= 3) return { text: `${daysUntil} days left`, sub: formatDate(task.due_date), urgent: false, warning: true };
-    return { text: formatDate(task.due_date), sub: `${daysUntil} days left`, urgent: false, warning: false };
+    if (isCompleted) return { text: 'Completed', sub: formatZonedDate(task.due_date), urgent: false, warning: false };
+    if (isOverdue) {
+      return {
+        text: daysUntil < 0 ? `${Math.abs(daysUntil)} days overdue` : 'Overdue',
+        sub: formatZonedDate(task.due_date),
+        urgent: true,
+        warning: false,
+      };
+    }
+    if (daysUntil === 0) return { text: 'Due Today', sub: formatZonedDate(task.due_date), urgent: false, warning: true };
+    if (daysUntil === 1) return { text: 'Due Tomorrow', sub: formatZonedDate(task.due_date), urgent: false, warning: true };
+    if (daysUntil <= 3) return { text: `${daysUntil} days left`, sub: formatZonedDate(task.due_date), urgent: false, warning: true };
+    return { text: formatZonedDate(task.due_date), sub: `${daysUntil} days left`, urgent: false, warning: false };
   };
   const dueDisplay = getDueDisplay();
   const scheduledStartAt = scheduleOccurrence
@@ -296,7 +323,7 @@ export function TaskDetailViewer({ task, open, onOpenChange, onEdit, scheduleOcc
                       dueDisplay.warning ? 'text-amber-400' : ''
                     )}>
                       {dueDisplay.text}
-                      {task.due_time && ` at ${formatTime(task.due_time)}`}
+                      {!isCompleted && task.due_time && ` at ${formatTime(task.due_time)}`}
                     </p>
                     <p className="text-[11px] text-muted-foreground">{dueDisplay.sub}</p>
                   </div>
@@ -341,7 +368,7 @@ export function TaskDetailViewer({ task, open, onOpenChange, onEdit, scheduleOcc
                     <CheckCircle2 className="w-4 h-4 text-emerald-400" />
                   </div>
                   <div className="min-w-0">
-                    <p className="text-sm font-semibold">{formatDate(task.completed_at)}</p>
+                    <p className="text-sm font-semibold">{formatZonedDate(task.completed_at)}</p>
                     <p className="text-[11px] text-muted-foreground">Completed</p>
                   </div>
                 </div>
