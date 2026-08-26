@@ -112,8 +112,14 @@ export default function IntegrationsPage() {
   });
   const canvasCourseCount = new Set(
     canvasTasks
-      .map((task) => task.course_name?.trim())
-      .filter((courseName): courseName is string => Boolean(courseName))
+      .map((task) => {
+        // The subject relation is the persisted course identity. Older Canvas
+        // rows can have a valid subject_id even when course_name is blank.
+        if (task.subject_id) return `subject:${task.subject_id}`;
+        const courseName = task.course_name?.trim().toLowerCase();
+        return courseName ? `name:${courseName}` : null;
+      })
+      .filter((courseIdentity): courseIdentity is string => Boolean(courseIdentity))
   ).size;
 
   const assignmentSummary = [
