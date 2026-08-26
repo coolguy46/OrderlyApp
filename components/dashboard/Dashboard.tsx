@@ -15,6 +15,9 @@ import {
 import { SubjectBadge } from '@/components/ui';
 import { TaskCard, TaskForm } from '@/components/tasks';
 import { DashboardSchedule } from './DashboardSchedule';
+import { usePlannerStore } from '@/lib/planner/store';
+import { getDefaultPlannerSettings } from '@/lib/planner/types';
+import { taskUntimedDisplayDate } from '@/lib/schedule/selectors';
 import { formatDuration, getDaysUntil, cn, isExamType } from '@/lib/utils';
 import { format, isToday, startOfDay, startOfMonth, endOfMonth, startOfWeek, endOfWeek, addDays } from 'date-fns';
 import Link from 'next/link';
@@ -95,6 +98,7 @@ function toLocalDateStr(d: string | Date): string {
 
 export function Dashboard() {
   const { tasks, goals, exams, studySessions, subjects, user, activeStudySeconds } = useAppStore();
+  const plannerUsers = usePlannerStore(state => state.users);
   const [mounted, setMounted] = useState(false);
   const [currentDate, setCurrentDate] = useState(new Date());
   const [showTaskForm, setShowTaskForm] = useState(false);
@@ -104,6 +108,15 @@ export function Dashboard() {
 
   // Derive a Date from the selected string for display/comparison in the calendar UI
   const selectedDate = selectedDateStr ? new Date(selectedDateStr + 'T00:00:00') : null;
+  const fallbackTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  const plannerSettings = (user?.id ? plannerUsers[user.id]?.settings : null)
+    || getDefaultPlannerSettings(fallbackTimeZone);
+  const taskDisplayOptions = useMemo(() => ({
+    timeZone: plannerSettings.timeZone,
+    schoolDays: plannerSettings.schoolDays,
+    schoolStartTime: plannerSettings.schoolStartTime,
+    schoolHomeTime: plannerSettings.schoolHomeTime,
+  }), [plannerSettings.schoolDays, plannerSettings.schoolHomeTime, plannerSettings.schoolStartTime, plannerSettings.timeZone]);
 
   useEffect(() => {
     setMounted(true);
@@ -156,7 +169,7 @@ export function Dashboard() {
       // When a date is selected, show ALL tasks for that date (including completed and recurring)
       return tasks
         .filter((t) => {
-          if (t.due_date && toLocalDateStr(t.due_date) === selectedDateStr) return true;
+          if (t.due_date && taskUntimedDisplayDate(t, taskDisplayOptions) === selectedDateStr) return true;
           if (t.recurrence && t.recurrence !== 'none') {
             const taskStart = t.due_date ? new Date(t.due_date) : new Date(t.created_at);
             if (selDate < startOfDay(taskStart)) return false;
@@ -177,7 +190,7 @@ export function Dashboard() {
       .filter((t) => t.status !== 'completed' && t.due_date)
       .sort((a, b) => new Date(a.due_date!).getTime() - new Date(b.due_date!).getTime())
       .slice(0, 6);
-  }, [tasks, selectedDateStr]);
+  }, [selectedDateStr, taskDisplayOptions, tasks]);
 
   // Active goals
   const activeGoals = useMemo(() => {
@@ -216,7 +229,7 @@ export function Dashboard() {
     const dayOfWeek = date.getDay();
     const dayTasks = tasks.filter((task) => {
       // Exact due_date match
-      if (task.due_date && toLocalDateStr(task.due_date) === dateStr) return true;
+      if (task.due_date && taskUntimedDisplayDate(task, taskDisplayOptions) === dateStr) return true;
 
       // Recurring task expansion
       if (task.recurrence && task.recurrence !== 'none' && task.status !== 'completed') {
@@ -242,7 +255,7 @@ export function Dashboard() {
       return toLocalDateStr(exam.exam_date) === dateStr;
     });
     return { tasks: dayTasks, exams: dayExams };
-  }, [tasks, exams]);
+  }, [tasks, exams, taskDisplayOptions]);
 
   return (
     <motion.div 

@@ -261,6 +261,7 @@ export function PlannedCalendar() {
               onBlockClick={handleBlockClick}
               showSummaryHeader={false}
               viewportClassName="h-full"
+              timeZone={selectedPlan.settings.timeZone}
               timeZoneLabel={selectedPlan.settings.timeZone}
               className="h-full"
             />
@@ -277,6 +278,7 @@ export function PlannedCalendar() {
         selectedDate={selectedDate}
         onSelectedDateChange={setSelectedDate}
         onBlockClick={handleBlockClick}
+        timeZone={selectedPlan.settings.timeZone}
         timeZoneLabel={selectedPlan.settings.timeZone}
       />
 

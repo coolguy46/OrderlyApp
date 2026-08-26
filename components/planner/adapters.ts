@@ -102,17 +102,21 @@ export function plannerBlockViews(
     };
   });
 
-  const fixed = plan.fixedIntervals.map<PlannerBlockView>(interval => ({
-    id: interval.id,
-    title: interval.title,
-    startAt: interval.startAt,
-    endAt: interval.endAt,
-    color: interval.color || (interval.kind === 'school' ? '#64748b' : '#0ea5e9'),
-    source: interval.kind === 'school' ? 'School day' : 'Calendar commitment',
-    kind: interval.kind,
-    fixed: true,
-    locked: true,
-  }));
+  const fixed = plan.fixedIntervals.map<PlannerBlockView>(interval => {
+    const school = interval.kind === 'school';
+    return {
+      id: interval.id,
+      title: interval.title,
+      startAt: interval.startAt,
+      endAt: interval.endAt,
+      color: interval.color || (school ? '#64748b' : '#0ea5e9'),
+      source: school ? 'School day' : 'Calendar commitment',
+      kind: interval.kind,
+      commitmentId: interval.commitmentId,
+      fixed: school || !interval.editable,
+      locked: school || !interval.editable,
+    };
+  });
 
   return [...fixed, ...planned];
 }

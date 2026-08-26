@@ -48,7 +48,6 @@ function isFixed(block: PlannerBlockView): boolean {
   return Boolean(
     block.fixed ||
       block.locked ||
-      block.kind === 'commitment' ||
       block.kind === 'school',
   );
 }

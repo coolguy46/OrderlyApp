@@ -26,7 +26,7 @@ export function Calendar() {
           <h1 className="font-display text-xl font-semibold tracking-tight">Calendar</h1>
           <p className="mt-0.5 text-xs text-muted-foreground">
             {section === 'tasks'
-              ? 'See every task, assignment, and exam by its deadline.'
+              ? 'See what needs attention each day, with school-time deadlines surfaced early.'
               : 'See exactly when your scheduled work fits into the week.'}
           </p>
         </div>

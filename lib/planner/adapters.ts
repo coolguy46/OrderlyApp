@@ -7,6 +7,7 @@ import type {
   PlannerSettings,
   PlannerTaskInput,
   RecurringCommitmentInput,
+  CommitmentOccurrenceOverride,
 } from './types';
 import { PLANNER_PROMPT_TASK_SOURCE } from './types';
 import { zonedDateTimeToTimestamp } from './engine';
@@ -20,6 +21,7 @@ export interface StoredCalendarEvent {
   endTime?: string;
   color?: string;
   recurrence?: 'none' | 'daily' | 'weekly' | 'weekdays';
+  occurrenceOverrides?: Record<string, CommitmentOccurrenceOverride>;
 }
 
 function validTime(value: string | null | undefined): value is string {
@@ -385,6 +387,7 @@ export function storedEventsToCommitments(
       enabled: true,
       color: event.color || '#0ea5e9',
       updatedAt: null,
+      occurrenceOverrides: event.occurrenceOverrides || {},
     }];
   });
 }
@@ -397,4 +400,10 @@ export function readStoredCalendarEvents(): StoredCalendarEvent[] {
   } catch {
     return [];
   }
+}
+
+export function writeStoredCalendarEvents(events: readonly StoredCalendarEvent[]): void {
+  if (typeof window === 'undefined') return;
+  localStorage.setItem('calendarEvents', JSON.stringify(events));
+  window.dispatchEvent(new CustomEvent('orderly-calendar-events-changed'));
 }

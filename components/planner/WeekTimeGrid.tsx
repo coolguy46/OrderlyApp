@@ -16,6 +16,7 @@ import {
   KeyboardSensor,
   PointerSensor,
   TouchSensor,
+  closestCenter,
   pointerWithin,
   useDraggable,
   useDroppable,
@@ -39,6 +40,11 @@ import {
   UntimedTaskShelf,
   type UntimedScheduleItem,
 } from '@/components/schedule/UntimedTaskShelf';
+import {
+  localDateFromIso,
+  localDateTimeToIso,
+  localTimeFromIso,
+} from '@/lib/schedule/selectors';
 import { cn } from '@/lib/utils';
 import type { PlannerBlockView } from './types';
 
@@ -58,6 +64,8 @@ export interface WeekTimeGridProps {
   /** Overrides the default 600px preview viewport for embedded workspaces. */
   viewportClassName?: string;
   showSummaryHeader?: boolean;
+  /** IANA timezone used to render and persist wall-clock positions. */
+  timeZone?: string;
   timeZoneLabel?: string;
   initialScrollHour?: number;
   selectedDate?: string | Date;
@@ -78,10 +86,50 @@ export interface WeekTimeGridProps {
   untimedItems?: UntimedScheduleItem[];
   showUntimedShelf?: boolean;
   onUntimedItemClick?: (item: UntimedScheduleItem) => void;
+  onUntimedItemSchedule?: (
+    item: UntimedScheduleItem,
+    nextStart: Date,
+    nextEnd: Date,
+  ) => void | Promise<void>;
 }
 
 function asDate(value: string | Date): Date {
   return value instanceof Date ? new Date(value.getTime()) : new Date(value);
+}
+
+function dateFromLocalParts(date: string, time = '00:00'): Date {
+  const [year, month, day] = date.split('-').map(Number);
+  const [hours, minutes] = time.split(':').map(Number);
+  return new Date(year, month - 1, day, hours || 0, minutes || 0);
+}
+
+/** Convert a real instant into a browser-local Date carrying another zone's wall-clock parts. */
+function displayDateInTimeZone(value: string | Date, timeZone: string): Date {
+  const instant = asDate(value);
+  if (!isValidDate(instant)) return instant;
+  const iso = instant.toISOString();
+  const date = localDateFromIso(iso, timeZone);
+  const time = localTimeFromIso(iso, timeZone);
+  return date && time ? dateFromLocalParts(date, time) : instant;
+}
+
+/** Convert a wall-clock grid Date back into a real instant in the planner timezone. */
+function instantFromDisplayDate(value: Date, timeZone: string): Date | null {
+  const iso = localDateTimeToIso(
+    format(value, 'yyyy-MM-dd'),
+    `${format(value, 'HH:mm')}:00`,
+    timeZone,
+  );
+  if (!iso) return null;
+  const instant = new Date(iso);
+  return isValidDate(instant) ? instant : null;
+}
+
+function weekDateCarrier(value: string | Date, timeZone: string): Date {
+  if (value instanceof Date) return startOfDay(value);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return dateFromLocalParts(value);
+  const date = localDateFromIso(value, timeZone);
+  return date ? dateFromLocalParts(date) : startOfDay(asDate(value));
 }
 
 function isValidDate(value: Date): boolean {
@@ -119,7 +167,6 @@ function isFixedBlock(block: PlannerBlockView): boolean {
   return Boolean(
     block.fixed ||
       block.locked ||
-      block.kind === 'commitment' ||
       block.kind === 'school',
   );
 }
@@ -258,6 +305,7 @@ function DayColumn({ day }: { day: Date }) {
   return (
     <div
       ref={setNodeRef}
+      data-planner-day={format(day, 'yyyy-MM-dd')}
       className={cn(
         'relative border-r border-border/50 bg-background/25 transition-colors last:border-r-0',
         isOver && 'bg-primary/5',
@@ -292,6 +340,7 @@ export function WeekTimeGrid({
   className,
   viewportClassName,
   showSummaryHeader = true,
+  timeZone,
   timeZoneLabel,
   initialScrollHour = 6,
   selectedDate,
@@ -303,15 +352,28 @@ export function WeekTimeGrid({
   untimedItems = [],
   showUntimedShelf = false,
   onUntimedItemClick,
+  onUntimedItemSchedule,
 }: WeekTimeGridProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const resizeCleanupRef = useRef<(() => void) | null>(null);
   const suppressClickUntil = useRef(0);
-  const [activeBlockId, setActiveBlockId] = useState<string | null>(null);
+  const [activeDragId, setActiveDragId] = useState<string | null>(null);
   const [resizePreview, setResizePreview] = useState<{ blockId: string; end: Date } | null>(null);
   const [now, setNow] = useState(() => new Date());
 
-  const normalizedWeekStart = useMemo(() => startOfDay(asDate(weekStart)), [weekStart]);
+  const resolvedTimeZone = useMemo(
+    () => timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+    [timeZone],
+  );
+  const displayNow = useMemo(
+    () => displayDateInTimeZone(now, resolvedTimeZone),
+    [now, resolvedTimeZone],
+  );
+
+  const normalizedWeekStart = useMemo(
+    () => weekDateCarrier(weekStart, resolvedTimeZone),
+    [resolvedTimeZone, weekStart],
+  );
   const days = useMemo(
     () => Array.from({ length: DAYS_IN_PLAN }, (_, index) => addDays(normalizedWeekStart, index)),
     [normalizedWeekStart],
@@ -331,10 +393,18 @@ export function WeekTimeGrid({
       }),
     [blocks],
   );
+  const displayIntervals = useMemo(() => new Map(validBlocks.map(block => [block.id, {
+    start: displayDateInTimeZone(block.startAt, resolvedTimeZone),
+    end: displayDateInTimeZone(block.endAt, resolvedTimeZone),
+  }] as const)), [resolvedTimeZone, validBlocks]);
 
   const activeBlock = useMemo(
-    () => validBlocks.find((block) => block.id === activeBlockId) || null,
-    [activeBlockId, validBlocks],
+    () => validBlocks.find((block) => block.id === activeDragId) || null,
+    [activeDragId, validBlocks],
+  );
+  const activeUntimedItem = useMemo(
+    () => untimedItems.find(item => item.id === activeDragId) || null,
+    [activeDragId, untimedItems],
   );
 
   const sensors = useSensors(
@@ -365,23 +435,50 @@ export function WeekTimeGrid({
   );
 
   const handleDragStart = useCallback((event: DragStartEvent) => {
-    setActiveBlockId(String(event.active.id));
+    setActiveDragId(String(event.active.id));
   }, []);
 
-  const handleDragCancel = useCallback(() => setActiveBlockId(null), []);
+  const handleDragCancel = useCallback(() => setActiveDragId(null), []);
 
   const handleDragEnd = useCallback(
     (event: DragEndEvent) => {
+      const activeId = String(event.active.id);
+      const untimedItem = untimedItems.find(item => item.id === activeId);
       const block = validBlocks.find((candidate) => candidate.id === String(event.active.id));
-      setActiveBlockId(null);
-      if (!block || !event.over || isFixedBlock(block)) return;
+      setActiveDragId(null);
+      if (!event.over) return;
 
       const targetDateString = String(event.over.id).replace('planner-day:', '');
       const targetDayIndex = days.findIndex((day) => format(day, 'yyyy-MM-dd') === targetDateString);
       if (targetDayIndex < 0) return;
 
-      const originalStart = asDate(block.startAt);
-      const originalEnd = asDate(block.endAt);
+      if (untimedItem) {
+        if (!onUntimedItemSchedule) return;
+        const requestedMinutes = untimedItem.durationSeconds
+          ? Math.max(SNAP_MINUTES, Math.ceil((untimedItem.durationSeconds / 60) / SNAP_MINUTES) * SNAP_MINUTES)
+          : 30;
+        const duration = Math.min(requestedMinutes, MINUTES_PER_DAY);
+        const translated = event.active.rect.current.translated || event.active.rect.current.initial;
+        if (!translated) return;
+        const dropCenterY = translated.top + translated.height / 2;
+        const requestedStartMinute = snapMinutes((dropCenterY - event.over.rect.top) / PIXELS_PER_MINUTE);
+        const nextMinute = clamp(requestedStartMinute, 0, MINUTES_PER_DAY - duration);
+        const displayStart = addMinutes(startOfDay(days[targetDayIndex]), nextMinute);
+        const displayEnd = addMinutes(displayStart, duration);
+        const nextStart = instantFromDisplayDate(displayStart, resolvedTimeZone);
+        const nextEnd = instantFromDisplayDate(displayEnd, resolvedTimeZone);
+        if (!nextStart || !nextEnd || nextEnd <= nextStart) return;
+        suppressClickUntil.current = Date.now() + 250;
+        void Promise.resolve(onUntimedItemSchedule(untimedItem, nextStart, nextEnd));
+        return;
+      }
+
+      if (!block || isFixedBlock(block)) return;
+
+      const displayInterval = displayIntervals.get(block.id);
+      if (!displayInterval) return;
+      const originalStart = displayInterval.start;
+      const originalEnd = displayInterval.end;
       const duration = Math.max(SNAP_MINUTES, differenceInMinutes(originalEnd, originalStart));
       const movedMinutes = snapMinutes(event.delta.y / PIXELS_PER_MINUTE);
       const nextMinute = clamp(
@@ -389,16 +486,19 @@ export function WeekTimeGrid({
         0,
         MINUTES_PER_DAY - duration,
       );
-      const nextStart = addMinutes(startOfDay(days[targetDayIndex]), nextMinute);
-      const nextEnd = addMinutes(nextStart, duration);
-      const changed = nextStart.getTime() !== originalStart.getTime();
+      const displayStart = addMinutes(startOfDay(days[targetDayIndex]), nextMinute);
+      const displayEnd = addMinutes(displayStart, duration);
+      const changed = displayStart.getTime() !== originalStart.getTime();
 
       if (changed) {
+        const nextStart = instantFromDisplayDate(displayStart, resolvedTimeZone);
+        const nextEnd = instantFromDisplayDate(displayEnd, resolvedTimeZone);
+        if (!nextStart || !nextEnd || nextEnd <= nextStart) return;
         suppressClickUntil.current = Date.now() + 250;
         invokeMove(block, nextStart, nextEnd);
       }
     },
-    [days, invokeMove, validBlocks],
+    [days, displayIntervals, invokeMove, onUntimedItemSchedule, resolvedTimeZone, untimedItems, validBlocks],
   );
 
   const handleResizeStart = useCallback(
@@ -409,8 +509,10 @@ export function WeekTimeGrid({
 
       resizeCleanupRef.current?.();
 
-      const originalStart = asDate(block.startAt);
-      const originalEnd = asDate(block.endAt);
+      const displayInterval = displayIntervals.get(block.id);
+      if (!displayInterval) return;
+      const originalStart = displayInterval.start;
+      const originalEnd = displayInterval.end;
       const originalDuration = Math.max(SNAP_MINUTES, differenceInMinutes(originalEnd, originalStart));
       const maximumDuration = MINUTES_PER_DAY - minutesIntoDay(originalStart);
       const pointerStart = event.clientY;
@@ -436,7 +538,11 @@ export function WeekTimeGrid({
         setResizePreview(null);
         suppressClickUntil.current = Date.now() + 250;
         if (nextEnd.getTime() !== originalEnd.getTime() && onBlockResize) {
-          void Promise.resolve(onBlockResize(block, originalStart, nextEnd));
+          const actualStart = instantFromDisplayDate(originalStart, resolvedTimeZone);
+          const actualEnd = instantFromDisplayDate(nextEnd, resolvedTimeZone);
+          if (actualStart && actualEnd && actualEnd > actualStart) {
+            void Promise.resolve(onBlockResize(block, actualStart, actualEnd));
+          }
         }
       };
 
@@ -451,7 +557,7 @@ export function WeekTimeGrid({
       window.addEventListener('pointercancel', onPointerCancel);
       setResizePreview({ blockId: block.id, end: originalEnd });
     },
-    [editable, onBlockResize],
+    [displayIntervals, editable, onBlockResize, resolvedTimeZone],
   );
 
   const columns = variant === 'fullscreen'
@@ -489,7 +595,11 @@ export function WeekTimeGrid({
 
       <DndContext
         sensors={sensors}
-        collisionDetection={pointerWithin}
+        collisionDetection={(args) => {
+          const pointerCollisions = pointerWithin(args);
+          if (args.pointerCoordinates) return pointerCollisions;
+          return closestCenter(args);
+        }}
         onDragStart={handleDragStart}
         onDragCancel={handleDragCancel}
         onDragEnd={handleDragEnd}
@@ -509,14 +619,14 @@ export function WeekTimeGrid({
                 style={{ gridTemplateColumns: columns }}
               >
                 <div className="sticky left-0 z-50 flex items-center justify-center border-r border-border/60 bg-card/95 px-1 text-[9px] font-medium text-muted-foreground">
-                  {timeZoneLabel || 'Local'}
+                  {timeZoneLabel || resolvedTimeZone}
                 </div>
                 {days.map((day) => (
                   <div
                     key={day.toISOString()}
                     className={cn(
                       'flex items-stretch justify-stretch border-r border-border/50 last:border-r-0',
-                      isSameDay(day, now) && 'bg-primary/5',
+                      isSameDay(day, displayNow) && 'bg-primary/5',
                       selectedDay && isSameDay(day, selectedDay) && 'bg-indigo-500/10',
                     )}
                   >
@@ -533,8 +643,8 @@ export function WeekTimeGrid({
                       <span
                         className={cn(
                           'mt-0.5 flex h-6 min-w-6 items-center justify-center rounded-full px-1.5 text-xs font-semibold',
-                          isSameDay(day, now) && 'bg-primary text-primary-foreground shadow-sm',
-                          selectedDay && isSameDay(day, selectedDay) && !isSameDay(day, now) && 'bg-indigo-500 text-white shadow-sm',
+                          isSameDay(day, displayNow) && 'bg-primary text-primary-foreground shadow-sm',
+                          selectedDay && isSameDay(day, selectedDay) && !isSameDay(day, displayNow) && 'bg-indigo-500 text-white shadow-sm',
                         )}
                       >
                         {format(day, 'd')}
@@ -551,6 +661,7 @@ export function WeekTimeGrid({
                   items={untimedItems}
                   selectedDate={selectedDay}
                   onItemClick={onUntimedItemClick}
+                  draggable={editable && Boolean(onUntimedItemSchedule)}
                 />
               )}
             </div>
@@ -572,9 +683,12 @@ export function WeekTimeGrid({
               </div>
 
               {days.map((day) => {
-                const dayBlocks = validBlocks.filter((block) => isSameDay(asDate(block.startAt), day));
-                const today = isSameDay(day, now);
-                const currentMinute = minutesIntoDay(now);
+                const dayBlocks = validBlocks.filter((block) => {
+                  const interval = displayIntervals.get(block.id);
+                  return Boolean(interval && isSameDay(interval.start, day));
+                });
+                const today = isSameDay(day, displayNow);
+                const currentMinute = minutesIntoDay(displayNow);
 
                 return (
                   <div
@@ -598,10 +712,12 @@ export function WeekTimeGrid({
                     )}
 
                     {dayBlocks.map((block) => {
-                      const start = asDate(block.startAt);
+                      const interval = displayIntervals.get(block.id);
+                      if (!interval) return null;
+                      const start = interval.start;
                       const end = resizePreview?.blockId === block.id
                         ? resizePreview.end
-                        : asDate(block.endAt);
+                        : interval.end;
                       return (
                         <PositionedBlock
                           key={block.id}
@@ -609,7 +725,7 @@ export function WeekTimeGrid({
                           start={start}
                           end={end}
                           editable={editable}
-                          active={activeBlockId === block.id}
+                          active={activeDragId === block.id}
                           suppressClickUntil={suppressClickUntil}
                           onClick={onBlockClick}
                           onResizeStart={handleResizeStart}
@@ -632,7 +748,18 @@ export function WeekTimeGrid({
               <p className="truncate text-[11px] font-semibold">{activeBlock.title}</p>
               <p className="text-[9px] text-muted-foreground">
                 <Clock3 className="mr-1 inline h-2.5 w-2.5" />
-                {format(asDate(activeBlock.startAt), 'h:mm a')}
+                {format(displayIntervals.get(activeBlock.id)?.start || asDate(activeBlock.startAt), 'h:mm a')}
+              </p>
+            </div>
+          ) : activeUntimedItem ? (
+            <div
+              className="w-44 rounded-md border border-primary/50 border-l-[3px] bg-card/95 px-2 py-1.5 shadow-2xl backdrop-blur-xl"
+              style={{ borderLeftColor: activeUntimedItem.color || '#6366f1' }}
+            >
+              <p className="truncate text-[11px] font-semibold">{activeUntimedItem.title}</p>
+              <p className="text-[9px] text-muted-foreground">
+                <Clock3 className="mr-1 inline h-2.5 w-2.5" />
+                Drop on a time to schedule
               </p>
             </div>
           ) : null}

@@ -31,9 +31,17 @@ import { Button } from '@/components/ui/Button';
 import { Card, CardContent } from '@/components/ui/Card';
 import { useAppStore } from '@/lib/store';
 import type { Exam, Subject, Task } from '@/lib/supabase/types';
-import { selectScheduleEntriesForUser } from '@/lib/schedule/selectors';
+import {
+  localTimeFromIso,
+  selectScheduleEntriesForUser,
+  taskDeadlineDate,
+  taskUntimedDisplayDate,
+  type TaskUntimedDisplayDateOptions,
+} from '@/lib/schedule/selectors';
 import { useScheduleStore } from '@/lib/schedule/store';
 import type { ScheduleEntry } from '@/lib/schedule/types';
+import { getDefaultPlannerSettings } from '@/lib/planner/types';
+import { usePlannerStore } from '@/lib/planner/store';
 import { cn, isExamType } from '@/lib/utils';
 
 type TaskCalendarMode = 'week' | 'month';
@@ -58,9 +66,14 @@ function localDateFromKey(value: string): Date {
   return new Date(year, month - 1, day, 12);
 }
 
-function taskOccursOn(task: Task, date: Date, scheduleEntry?: ScheduleEntry): boolean {
+function taskOccursOn(
+  task: Task,
+  date: Date,
+  scheduleEntry: ScheduleEntry | undefined,
+  displayOptions: TaskUntimedDisplayDateOptions,
+): boolean {
   const dateKey = format(date, 'yyyy-MM-dd');
-  const dueDateKey = task.due_date ? localDateKey(task.due_date) : null;
+  const dueDateKey = taskUntimedDisplayDate(task, displayOptions);
   if (dueDateKey === dateKey) return true;
   const recurrence = scheduleEntry?.recurrence || task.recurrence || 'none';
   if (recurrence === 'none' || task.status === 'completed') return false;
@@ -79,26 +92,32 @@ function taskOccursOn(task: Task, date: Date, scheduleEntry?: ScheduleEntry): bo
     && date.getDate() === localDateFromKey(anchorKey).getDate();
 }
 
-function taskTimeLabel(task: Task): string | null {
+function taskTimeLabel(task: Task, timeZone?: string): string | null {
   if (task.due_time && /^\d{2}:\d{2}/.test(task.due_time)) {
     const [hours, minutes] = task.due_time.split(':').map(Number);
     return format(new Date(2000, 0, 1, hours, minutes), 'h:mm a');
   }
   if (task.due_date && task.due_date.includes('T') && task.source !== 'manual') {
-    const date = new Date(task.due_date);
-    if (!Number.isNaN(date.getTime())) return format(date, 'h:mm a');
+    const localTime = localTimeFromIso(task.due_date, timeZone);
+    if (localTime) {
+      const [hours, minutes] = localTime.split(':').map(Number);
+      return format(new Date(2000, 0, 1, hours, minutes), 'h:mm a');
+    }
   }
   return null;
 }
 
-function taskTimeSortValue(task: Task): number {
+function taskTimeSortValue(task: Task, timeZone?: string): number {
   if (task.due_time && /^\d{2}:\d{2}/.test(task.due_time)) {
     const [hours, minutes] = task.due_time.split(':').map(Number);
     return hours * 60 + minutes;
   }
   if (task.due_date && task.due_date.includes('T') && task.source !== 'manual') {
-    const date = new Date(task.due_date);
-    if (!Number.isNaN(date.getTime())) return date.getHours() * 60 + date.getMinutes();
+    const localTime = localTimeFromIso(task.due_date, timeZone);
+    if (localTime) {
+      const [hours, minutes] = localTime.split(':').map(Number);
+      return hours * 60 + minutes;
+    }
   }
   return Number.MAX_SAFE_INTEGER;
 }
@@ -113,16 +132,25 @@ function TaskDeadlineChip({
   task,
   subject,
   compact = false,
+  displayDateKey,
+  timeZone,
   onClick,
 }: {
   task: Task;
   subject?: Subject;
   compact?: boolean;
+  displayDateKey: string;
+  timeZone: string;
   onClick: () => void;
 }) {
   const color = subject?.color || priorityColor(task);
   const taskIsExam = isExamType(task.title, task.assignment_type);
-  const time = taskTimeLabel(task);
+  const time = taskTimeLabel(task, timeZone);
+  const actualDueDate = taskDeadlineDate(task, timeZone);
+  const shifted = Boolean(actualDueDate && actualDueDate !== displayDateKey);
+  const dueLabel = shifted && actualDueDate
+    ? `Due ${format(localDateFromKey(actualDueDate), 'EEE')}${time ? ` ${time}` : ''}`
+    : time;
 
   return (
     <button
@@ -148,9 +176,9 @@ function TaskDeadlineChip({
           <p className={cn('truncate text-[11px] font-medium leading-tight', task.status === 'completed' && 'line-through')}>
             {task.title}
           </p>
-          {!compact && (subject || time) && (
+          {(!compact || shifted) && (subject || dueLabel) && (
             <p className="mt-0.5 truncate text-[9px] text-muted-foreground">
-              {[subject?.name, time].filter(Boolean).join(' · ')}
+              {[subject?.name, dueLabel].filter(Boolean).join(' · ')}
             </p>
           )}
         </div>
@@ -180,6 +208,8 @@ function ExamDeadlineChip({ exam, subject, compact = false }: { exam: Exam; subj
 export function TaskCalendar() {
   const { tasks, exams, subjects, user } = useAppStore();
   const entriesByUser = useScheduleStore(state => state.entriesByUser);
+  const plannerUsers = usePlannerStore(state => state.users);
+  const setActiveUser = usePlannerStore(state => state.setActiveUser);
   const [mounted, setMounted] = useState(false);
   const [currentDate, setCurrentDate] = useState<Date | null>(null);
   const [mode, setMode] = useState<TaskCalendarMode>('month');
@@ -190,6 +220,22 @@ export function TaskCalendar() {
     setCurrentDate(new Date());
     setMounted(true);
   }, []);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    setActiveUser(user.id, Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
+  }, [setActiveUser, user?.id]);
+
+  const plannerRecord = user?.id ? plannerUsers[user.id] : null;
+  const fallbackTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  const plannerSettings = plannerRecord?.settings || getDefaultPlannerSettings(fallbackTimeZone);
+  const timeZone = plannerSettings.timeZone;
+  const displayOptions = useMemo<TaskUntimedDisplayDateOptions>(() => ({
+    timeZone,
+    schoolDays: plannerSettings.schoolDays,
+    schoolStartTime: plannerSettings.schoolStartTime,
+    schoolHomeTime: plannerSettings.schoolHomeTime,
+  }), [plannerSettings.schoolDays, plannerSettings.schoolHomeTime, plannerSettings.schoolStartTime, timeZone]);
 
   const subjectById = useMemo(
     () => new Map(subjects.map(subject => [subject.id, subject])),
@@ -225,15 +271,15 @@ export function TaskCalendar() {
     for (const day of visibleDays) {
       const key = format(day, 'yyyy-MM-dd');
       const dayTasks = tasks
-        .filter(task => taskOccursOn(task, day, scheduleByTaskId.get(task.id)))
-        .sort((left, right) => taskTimeSortValue(left) - taskTimeSortValue(right) || left.title.localeCompare(right.title));
+        .filter(task => taskOccursOn(task, day, scheduleByTaskId.get(task.id), displayOptions))
+        .sort((left, right) => taskTimeSortValue(left, timeZone) - taskTimeSortValue(right, timeZone) || left.title.localeCompare(right.title));
       const dayExams = exams
         .filter(exam => localDateKey(exam.exam_date) === key)
         .sort((left, right) => left.exam_date.localeCompare(right.exam_date));
       result.set(key, { tasks: dayTasks, exams: dayExams });
     }
     return result;
-  }, [exams, scheduleByTaskId, tasks, visibleDays]);
+  }, [displayOptions, exams, scheduleByTaskId, tasks, timeZone, visibleDays]);
 
   const navigate = (direction: -1 | 1) => {
     if (!currentDate) return;
@@ -330,7 +376,7 @@ export function TaskCalendar() {
                         </div>
                         <div className="space-y-1">
                           {visibleTasks.map(task => (
-                            <TaskDeadlineChip key={task.id} task={task} subject={task.subject_id ? subjectById.get(task.subject_id) : undefined} compact onClick={() => setDetailTaskId(task.id)} />
+                            <TaskDeadlineChip key={task.id} task={task} subject={task.subject_id ? subjectById.get(task.subject_id) : undefined} compact displayDateKey={key} timeZone={timeZone} onClick={() => setDetailTaskId(task.id)} />
                           ))}
                           {visibleExams.map(exam => (
                             <ExamDeadlineChip key={exam.id} exam={exam} subject={exam.subject_id ? subjectById.get(exam.subject_id) : undefined} compact />
@@ -366,7 +412,7 @@ export function TaskCalendar() {
                         </div>
                         <div className="space-y-1.5">
                           {items.tasks.map(task => (
-                            <TaskDeadlineChip key={task.id} task={task} subject={task.subject_id ? subjectById.get(task.subject_id) : undefined} onClick={() => setDetailTaskId(task.id)} />
+                            <TaskDeadlineChip key={task.id} task={task} subject={task.subject_id ? subjectById.get(task.subject_id) : undefined} displayDateKey={key} timeZone={timeZone} onClick={() => setDetailTaskId(task.id)} />
                           ))}
                           {items.exams.map(exam => (
                             <ExamDeadlineChip key={exam.id} exam={exam} subject={exam.subject_id ? subjectById.get(exam.subject_id) : undefined} />
@@ -374,7 +420,7 @@ export function TaskCalendar() {
                           {items.tasks.length === 0 && items.exams.length === 0 && (
                             <div className="flex min-h-24 flex-col items-center justify-center text-center text-[10px] text-muted-foreground/60">
                               <CalendarDays className="mb-1 h-4 w-4" />
-                              Nothing due
+                              Nothing to handle
                             </div>
                           )}
                         </div>

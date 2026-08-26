@@ -23,6 +23,7 @@ import {
   type PlannerWarning,
   type RecurringCommitmentInput,
 } from './types';
+import { buildCommitmentOccurrences } from './commitments';
 
 const MINUTE_MS = 60_000;
 const DAY_MS = 24 * 60 * MINUTE_MS;
@@ -570,6 +571,9 @@ function commitmentSnapshotValue(commitment: RecurringCommitmentInput): string {
     endDate: commitment.endDate || null,
     timeZone: commitment.timeZone || null,
     enabled: commitment.enabled !== false,
+    occurrenceOverrides: Object.fromEntries(
+      Object.entries(commitment.occurrenceOverrides || {}).sort(([left], [right]) => left.localeCompare(right)),
+    ),
   });
 }
 
@@ -757,23 +761,18 @@ function buildCalendar(
     }
 
     const commitmentTimeZone = safeTimeZone(commitment.timeZone || settings.timeZone);
-    const days = normalizeDays(commitment.daysOfWeek);
-    for (let dayIndex = 0; dayIndex < settings.horizonDays; dayIndex += 1) {
-      const localDate = addLocalDays(localStartDate, dayIndex);
-      if (!days.includes(localDayOfWeek(localDate))) continue;
-      if (commitment.startDate && localDate < commitment.startDate) continue;
-      if (commitment.endDate && localDate > commitment.endDate) continue;
-
+    const localEndDate = addLocalDays(localStartDate, settings.horizonDays - 1);
+    for (const occurrence of buildCommitmentOccurrences(commitment, localStartDate, localEndDate)) {
       const range = timestampForPossiblyOvernightRange(
-        localDate,
-        commitment.startTime,
-        commitment.endTime,
+        occurrence.date,
+        occurrence.startTime,
+        occurrence.endTime,
         commitmentTimeZone,
       );
       const clipped = clipInterval(range, horizonStart, horizonEnd);
       if (!clipped) continue;
       fixedIntervals.push({
-        id: `commitment-${commitment.id}-${localDate}`,
+        id: occurrence.id,
         kind: 'commitment',
         title: commitment.title,
         startAt: new Date(clipped.start).toISOString(),

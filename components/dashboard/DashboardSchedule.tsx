@@ -24,6 +24,7 @@ import {
 } from '@/lib/planner/adapters';
 import { usePlannerStore } from '@/lib/planner/store';
 import type { RecurringCommitmentInput } from '@/lib/planner/types';
+import { buildCommitmentOccurrences } from '@/lib/planner/commitments';
 
 const HOUR_HEIGHT = 54;
 const DAY_HEIGHT = 24 * HOUR_HEIGHT;
@@ -54,6 +55,7 @@ interface DashboardFixedBlock {
   startAt: string;
   endAt: string;
   color: string;
+  locked: boolean;
 }
 
 function commitmentBlocksForDate(
@@ -61,24 +63,25 @@ function commitmentBlocksForDate(
   date: string,
   timeZone: string,
 ): DashboardFixedBlock[] {
-  const dayOfWeek = new Date(`${date}T12:00:00`).getDay();
   return commitments.flatMap(commitment => {
-    if (commitment.enabled === false || !commitment.daysOfWeek.includes(dayOfWeek)) return [];
-    if (commitment.startDate && date < commitment.startDate) return [];
-    if (commitment.endDate && date > commitment.endDate) return [];
+    return buildCommitmentOccurrences(commitment, date, date).flatMap(occurrence => {
+      const commitmentTimeZone = commitment.timeZone || timeZone;
+      const startAt = localDateTimeToIso(occurrence.date, occurrence.startTime, commitmentTimeZone);
+      const endDate = occurrence.endTime > occurrence.startTime
+        ? occurrence.date
+        : addLocalDays(occurrence.date, 1);
+      const endAt = localDateTimeToIso(endDate, occurrence.endTime, commitmentTimeZone);
+      if (!startAt || !endAt) return [];
 
-    const startAt = localDateTimeToIso(date, commitment.startTime, timeZone);
-    const endDate = commitment.endTime > commitment.startTime ? date : addLocalDays(date, 1);
-    const endAt = localDateTimeToIso(endDate, commitment.endTime, timeZone);
-    if (!startAt || !endAt) return [];
-
-    return [{
-      id: `dashboard-commitment:${commitment.id}@${date}`,
-      title: commitment.title,
-      startAt,
-      endAt,
-      color: commitment.color || '#64748b',
-    }];
+      return [{
+        id: occurrence.id,
+        title: commitment.title,
+        startAt,
+        endAt,
+        color: commitment.color || '#64748b',
+        locked: commitment.kind === 'school',
+      }];
+    });
   });
 }
 
@@ -126,8 +129,13 @@ export function DashboardSchedule() {
       startDate: dateKey,
       endDate: dateKey,
       timeZone,
+      schoolHours: plannerRecord ? {
+        schoolDays: plannerRecord.settings.schoolDays,
+        schoolStartTime: plannerRecord.settings.schoolStartTime,
+        schoolHomeTime: plannerRecord.settings.schoolHomeTime,
+      } : undefined,
     }),
-    [dateKey, entries, subjects, tasks, timeZone],
+    [dateKey, entries, plannerRecord, subjects, tasks, timeZone],
   );
   const taskById = useMemo(() => new Map(tasks.map(task => [task.id, task])), [tasks]);
   const occurrenceById = useMemo(
@@ -275,7 +283,10 @@ export function DashboardSchedule() {
                 return (
                   <div
                     key={item.id}
-                    className="absolute left-2 right-2 overflow-hidden rounded-md border border-l-[3px] border-dashed px-2 py-1 text-left shadow-sm"
+                    className={cn(
+                      'absolute left-2 right-2 overflow-hidden rounded-md border border-l-[3px] px-2 py-1 text-left shadow-sm',
+                      item.locked && 'border-dashed',
+                    )}
                     style={{
                       top: (startMinute / 60) * HOUR_HEIGHT,
                       height: Math.max(24, (duration / 60) * HOUR_HEIGHT),
@@ -287,7 +298,7 @@ export function DashboardSchedule() {
                     aria-label={`${item.title}, ${format(start, 'h:mm a')}–${format(end, 'h:mm a')}, busy`}
                   >
                     <p className="flex min-w-0 items-center gap-1 truncate text-[11px] font-semibold">
-                      <LockKeyhole className="h-3 w-3 shrink-0 text-muted-foreground" />
+                      {item.locked && <LockKeyhole className="h-3 w-3 shrink-0 text-muted-foreground" />}
                       <span className="truncate">{item.title}</span>
                     </p>
                     <p className="truncate text-[9px] text-muted-foreground">

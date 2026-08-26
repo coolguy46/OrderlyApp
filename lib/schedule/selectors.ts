@@ -175,8 +175,52 @@ function normalizedDays(value: number[] | null | undefined): number[] {
     .sort((left, right) => left - right);
 }
 
-function taskDeadlineDate(task: Task, timeZone?: string): LocalDate | null {
+export function taskDeadlineDate(task: Task, timeZone?: string): LocalDate | null {
   return task.due_date ? localDateFromIso(task.due_date, timeZone) : null;
+}
+
+export interface TaskUntimedDisplayDateOptions {
+  timeZone?: string;
+  schoolDays?: readonly number[];
+  schoolStartTime?: string;
+  schoolHomeTime?: string;
+}
+
+/**
+ * Canvas/Classroom deadlines that land during configured school hours are
+ * surfaced on the previous day's task shelf. The real deadline is never edited.
+ */
+export function taskUntimedDisplayDate(
+  task: Task,
+  options: TaskUntimedDisplayDateOptions = {},
+): LocalDate | null {
+  const deadlineDate = taskDeadlineDate(task, options.timeZone);
+  if (!deadlineDate) return null;
+  if (task.source !== 'canvas' && task.source !== 'google_classroom') return deadlineDate;
+  if ((task.recurrence || 'none') !== 'none') return deadlineDate;
+  if (!task.due_date) return deadlineDate;
+
+  const schoolDays = [...new Set((options.schoolDays || [])
+    .filter(day => Number.isInteger(day) && day >= 0 && day <= 6))];
+  const schoolStart = options.schoolStartTime || '';
+  const schoolHome = options.schoolHomeTime || '';
+  if (
+    schoolDays.length === 0
+    || !/^\d{2}:\d{2}$/.test(schoolStart)
+    || !/^\d{2}:\d{2}$/.test(schoolHome)
+    || schoolStart >= schoolHome
+  ) {
+    return deadlineDate;
+  }
+
+  const due = new Date(task.due_date);
+  if (Number.isNaN(due.getTime())) return deadlineDate;
+  const local = localDateParts(due, options.timeZone);
+  const dueTime = local.time.slice(0, 5);
+  const duringSchool = schoolDays.includes(localDayOfWeek(local.date))
+    && dueTime >= schoolStart
+    && dueTime < schoolHome;
+  return duringSchool ? addLocalDays(local.date, -1) : deadlineDate;
 }
 
 function recurrenceFor(task: Task, entry: ScheduleEntry | null): ScheduleRecurrence {
@@ -270,6 +314,7 @@ export function buildScheduleOccurrences({
   startDate,
   endDate,
   timeZone,
+  schoolHours,
 }: BuildScheduleOccurrencesInput): ScheduleOccurrenceCollection {
   if (!isLocalDate(startDate) || !isLocalDate(endDate) || startDate > endDate) {
     return { timed: [], untimed: [] };
@@ -280,9 +325,16 @@ export function buildScheduleOccurrences({
 
   for (const task of tasks) {
     const entry = entriesByTask.get(task.id) || null;
-    const anchorDate = entry?.scheduledDate || taskDeadlineDate(task, timeZone);
-    if (!anchorDate || !isLocalDate(anchorDate)) continue;
     const recurrence = recurrenceFor(task, entry);
+    const anchorDate = entry?.scheduledDate || (recurrence === 'none'
+      ? taskUntimedDisplayDate(task, {
+        timeZone,
+        schoolDays: schoolHours?.schoolDays,
+        schoolStartTime: schoolHours?.schoolStartTime,
+        schoolHomeTime: schoolHours?.schoolHomeTime,
+      })
+      : taskDeadlineDate(task, timeZone));
+    if (!anchorDate || !isLocalDate(anchorDate)) continue;
     const recurrenceDays = normalizedDays(entry?.recurrenceDays || task.recurrence_days);
     const recurrenceEndDate = entry?.recurrenceEndDate;
     const persistedOverrides = entry?.occurrenceOverrides || {};

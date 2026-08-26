@@ -1,7 +1,9 @@
 'use client';
 
+import { useDraggable } from '@dnd-kit/core';
+import { CSS } from '@dnd-kit/utilities';
 import { format, isSameDay } from 'date-fns';
-import { ListTodo } from 'lucide-react';
+import { GripVertical, ListTodo } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 export interface UntimedScheduleItem {
@@ -20,6 +22,7 @@ export interface UntimedTaskShelfProps {
   items: UntimedScheduleItem[];
   selectedDate?: Date | null;
   onItemClick?: (item: UntimedScheduleItem) => void;
+  draggable?: boolean;
 }
 
 function durationLabel(seconds: number | null | undefined): string | null {
@@ -39,12 +42,62 @@ function colorBorder(color: string | null | undefined): string {
   return color && /^#[0-9a-f]{6}$/i.test(color) ? `${color}66` : 'rgba(99, 102, 241, 0.35)';
 }
 
+function UntimedTask({
+  item,
+  draggable,
+  onClick,
+}: {
+  item: UntimedScheduleItem;
+  draggable: boolean;
+  onClick?: (item: UntimedScheduleItem) => void;
+}) {
+  const duration = durationLabel(item.durationSeconds);
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+    id: item.id,
+    data: { type: 'untimed-task', item },
+    disabled: !draggable,
+  });
+
+  return (
+    <button
+      ref={setNodeRef}
+      type="button"
+      {...attributes}
+      {...listeners}
+      onClick={() => {
+        if (!isDragging) onClick?.(item);
+      }}
+      disabled={!onClick && !draggable}
+      className={cn(
+        'flex w-full min-w-0 items-center gap-1 rounded-md border px-1.5 py-1 text-left text-[10px] shadow-sm transition-[filter,opacity] hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-default',
+        draggable && 'cursor-grab touch-none active:cursor-grabbing',
+        item.completed && 'opacity-50',
+        isDragging && 'opacity-20',
+      )}
+      style={{
+        borderColor: colorBorder(item.color),
+        backgroundColor: colorBackground(item.color),
+        transform: CSS.Translate.toString(transform),
+      }}
+      aria-label={`${item.title}${duration ? `, ${duration}` : ''}, untimed${draggable ? ', drag to schedule' : ''}`}
+    >
+      {draggable && <GripVertical className="h-3 w-3 shrink-0 text-muted-foreground/70" />}
+      <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: item.color || '#6366f1' }} />
+      <span className={cn('min-w-0 flex-1 truncate font-medium', item.completed && 'line-through')}>
+        {item.title}
+      </span>
+      {duration && <span className="shrink-0 text-[8px] text-muted-foreground">{duration}</span>}
+    </button>
+  );
+}
+
 export function UntimedTaskShelf({
   days,
   columns,
   items,
   selectedDate,
   onItemClick,
+  draggable = false,
 }: UntimedTaskShelfProps) {
   return (
     <div
@@ -69,29 +122,13 @@ export function UntimedTaskShelf({
             )}
           >
             {dayItems.map(item => {
-              const duration = durationLabel(item.durationSeconds);
               return (
-                <button
+                <UntimedTask
                   key={item.id}
-                  type="button"
-                  onClick={() => onItemClick?.(item)}
-                  disabled={!onItemClick}
-                  className={cn(
-                    'flex w-full min-w-0 items-center gap-1.5 rounded-md border px-1.5 py-1 text-left text-[10px] shadow-sm transition-colors hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-default',
-                    item.completed && 'opacity-50',
-                  )}
-                  style={{
-                    borderColor: colorBorder(item.color),
-                    backgroundColor: colorBackground(item.color),
-                  }}
-                  aria-label={`${item.title}${duration ? `, ${duration}` : ''}, untimed`}
-                >
-                  <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: item.color || '#6366f1' }} />
-                  <span className={cn('min-w-0 flex-1 truncate font-medium', item.completed && 'line-through')}>
-                    {item.title}
-                  </span>
-                  {duration && <span className="shrink-0 text-[8px] text-muted-foreground">{duration}</span>}
-                </button>
+                  item={item}
+                  draggable={draggable && !item.completed}
+                  onClick={onItemClick}
+                />
               );
             })}
           </div>

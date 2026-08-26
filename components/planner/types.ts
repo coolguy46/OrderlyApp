@@ -26,6 +26,9 @@ export interface PlannerBlockView {
   kind?: PlannerBlockKind;
   taskId?: string | null;
   examId?: string | null;
+  commitmentId?: string | null;
+  calendarEventId?: string | null;
+  occurrenceDate?: string | null;
   fixed?: boolean;
   locked?: boolean;
   completed?: boolean;

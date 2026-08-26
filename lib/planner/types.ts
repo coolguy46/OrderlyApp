@@ -112,6 +112,14 @@ export interface PlannerExamInput {
 
 export type CommitmentKind = 'class' | 'school' | 'sports' | 'work' | 'appointment' | 'personal' | 'other';
 
+export interface CommitmentOccurrenceOverride {
+  scheduledDate?: LocalDate | null;
+  startTime?: LocalTime | null;
+  endTime?: LocalTime | null;
+  skipped?: boolean;
+  updatedAt?: IsoDateTime;
+}
+
 export interface RecurringCommitmentInput {
   id: string;
   title: string;
@@ -125,6 +133,8 @@ export interface RecurringCommitmentInput {
   enabled?: boolean;
   color?: string | null;
   updatedAt?: IsoDateTime | null;
+  /** Per-day edits keep a recurring commitment intact while allowing one block to move. */
+  occurrenceOverrides?: Record<LocalDate, CommitmentOccurrenceOverride>;
 }
 
 export interface PlannerEstimateCacheEntry {

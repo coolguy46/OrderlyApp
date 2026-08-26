@@ -77,6 +77,12 @@ export interface BuildScheduleOccurrencesInput extends ScheduleRange {
   /** Optional transient overrides for previews. Persisted overrides live on entries. */
   overrides?: ScheduleOverrideMap;
   timeZone?: string;
+  /** Optional school window used only to place untimed imported work one day early. */
+  schoolHours?: {
+    schoolDays: readonly number[];
+    schoolStartTime: string;
+    schoolHomeTime: string;
+  };
 }
 
 export type ScheduleBatchOperation =
