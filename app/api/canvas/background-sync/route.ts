@@ -1,184 +1,53 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import {
-  hydrateCanvasDueDate,
-  syncCanvasCalendar,
-  type CanvasAssignment,
-} from '@/lib/integrations/canvas';
+  syncCanvasUser,
+  type CanvasSyncSetting,
+} from '@/lib/integrations/canvas-server-sync';
+import {
+  isCanvasSyncDispatchDue,
+  isCanvasSyncDue,
+} from '@/lib/integrations/canvas-sync-schedule';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
-const SUBJECT_COLORS = [
-  '#6366f1', '#ec4899', '#f59e0b', '#10b981', '#3b82f6',
-  '#8b5cf6', '#ef4444', '#14b8a6', '#f97316', '#06b6d4',
-];
+const MAX_USERS_PER_RUN = 9;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-interface CanvasSyncSetting {
-  user_id: string;
-  ical_url: string;
-  last_sync_at: string | null;
-  auto_sync_interval: number | null;
-  time_zone: string | null;
+interface BackgroundSyncBody {
+  userId?: unknown;
 }
 
-function canvasTaskChanged(
-  existing: Record<string, unknown>,
-  next: Record<string, unknown>
-): boolean {
-  return Object.entries(next).some(([key, value]) => {
-    const current = existing[key];
-    if (key === 'due_date' && typeof current === 'string' && typeof value === 'string') {
-      return new Date(current).getTime() !== new Date(value).getTime();
-    }
-    return (current ?? null) !== (value ?? null);
-  });
-}
+async function readTargetUserId(request: NextRequest): Promise<{
+  userId: string | null;
+  error: string | null;
+}> {
+  const rawBody = await request.text();
+  if (!rawBody.trim()) return { userId: null, error: null };
 
-function syncIsDue(setting: CanvasSyncSetting, now: Date): boolean {
-  if (!setting.last_sync_at) return true;
-  const interval = [5, 15, 30, 60].includes(Number(setting.auto_sync_interval))
-    ? Number(setting.auto_sync_interval)
-    : 15;
-  return now.getTime() - new Date(setting.last_sync_at).getTime() >= interval * 60_000;
-}
-
-function dueTimeFor(assignment: CanvasAssignment, dueDate: Date, timeZone: string): string | null {
-  if (assignment.dueDateOnly) return '23:59';
-  if (!assignment.hasDueTime) return null;
+  let parsed: BackgroundSyncBody;
   try {
-    const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
-      timeZone,
-      hour: '2-digit',
-      minute: '2-digit',
-      hourCycle: 'h23',
-    }).formatToParts(dueDate).map(({ type, value }) => [type, value]));
-    return `${parts.hour}:${parts.minute}`;
+    parsed = JSON.parse(rawBody) as BackgroundSyncBody;
   } catch {
-    return `${String(dueDate.getUTCHours()).padStart(2, '0')}:${String(dueDate.getUTCMinutes()).padStart(2, '0')}`;
-  }
-}
-
-async function syncOneUser(
-  // The service-role client intentionally operates across user RLS boundaries.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  admin: any,
-  setting: CanvasSyncSetting
-) {
-  const assignments = await syncCanvasCalendar(setting.ical_url);
-  const currentIds = assignments.map(assignment => assignment.id);
-
-  const [{ data: existingSubjects, error: subjectError }, { data: existingTasks, error: taskError }] = await Promise.all([
-    admin.from('subjects').select('id, name').eq('user_id', setting.user_id),
-    admin.from('tasks').select('*').eq('user_id', setting.user_id).eq('source', 'canvas'),
-  ]);
-
-  if (subjectError) throw new Error(`Could not load subjects: ${subjectError.message}`);
-  if (taskError) throw new Error(`Could not load Canvas tasks: ${taskError.message}`);
-
-  const subjectIds = new Map<string, string>(
-    (existingSubjects || []).map((subject: { id: string; name: string }) => [subject.name.toLowerCase(), subject.id])
-  );
-  const uniqueCourses = [...new Set(
-    assignments
-      .map(assignment => assignment.courseName)
-      .filter(course => course && course !== 'Unknown Course')
-  )];
-
-  for (const courseName of uniqueCourses) {
-    if (subjectIds.has(courseName.toLowerCase())) continue;
-    const { data: created, error } = await admin
-      .from('subjects')
-      .insert({
-        user_id: setting.user_id,
-        name: courseName,
-        color: SUBJECT_COLORS[subjectIds.size % SUBJECT_COLORS.length],
-      })
-      .select('id')
-      .single();
-    if (error) throw new Error(`Could not create subject: ${error.message}`);
-    subjectIds.set(courseName.toLowerCase(), created.id);
+    return { userId: null, error: 'Request body must be valid JSON' };
   }
 
-  const tasksByExternalId = new Map<string, Record<string, unknown>>(
-    (existingTasks || [])
-      .filter((task: Record<string, unknown>) => typeof task.external_id === 'string')
-      .map((task: Record<string, unknown>) => [task.external_id as string, task])
-  );
-  let imported = 0;
-  let updated = 0;
-  const now = new Date();
-
-  for (const assignment of assignments) {
-    const dueDate = hydrateCanvasDueDate(assignment, setting.time_zone || 'UTC');
-    if (!dueDate) continue;
-
-    const existing = tasksByExternalId.get(assignment.id);
-    if (!existing && dueDate < now) continue;
-
-    const resolvedCourseName = assignment.courseName !== 'Unknown Course'
-      ? assignment.courseName
-      : typeof existing?.course_name === 'string' ? existing.course_name : null;
-    const subjectId = resolvedCourseName
-      ? subjectIds.get(resolvedCourseName.toLowerCase()) || existing?.subject_id || null
-      : existing?.subject_id || null;
-    const taskValues = {
-      title: `[Canvas] ${assignment.title}`,
-      description: assignment.description || `Course: ${resolvedCourseName || 'Canvas'}`,
-      due_date: dueDate.toISOString(),
-      due_time: dueTimeFor(assignment, dueDate, setting.time_zone || 'UTC'),
-      subject_id: subjectId,
-      external_url: assignment.url || null,
-      course_name: resolvedCourseName,
-      assignment_type: assignment.type || 'assignment',
-    };
-
-    if (existing) {
-      // Canvas feeds repeat every assignment on every request. Avoid touching
-      // unchanged rows so planner input fingerprints only become stale when an
-      // assignment actually changes.
-      if (!canvasTaskChanged(existing, taskValues)) continue;
-      const { error } = await admin.from('tasks').update(taskValues).eq('id', existing.id);
-      if (error) throw new Error(`Could not update Canvas task: ${error.message}`);
-      updated++;
-    } else {
-      const { error } = await admin.from('tasks').insert({
-        user_id: setting.user_id,
-        ...taskValues,
-        priority: assignment.type === 'exam' ? 'high' : 'medium',
-        status: 'pending',
-        recurrence: 'none',
-        recurrence_days: null,
-        completed_at: null,
-        source: 'canvas',
-        external_id: assignment.id,
-      });
-      if (error) throw new Error(`Could not import Canvas task: ${error.message}`);
-      imported++;
-    }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return { userId: null, error: 'Request body must be a JSON object' };
+  }
+  if (parsed.userId === undefined || parsed.userId === null) {
+    return { userId: null, error: null };
+  }
+  if (typeof parsed.userId !== 'string' || !UUID_PATTERN.test(parsed.userId)) {
+    return { userId: null, error: 'userId must be a valid UUID' };
   }
 
-  const orphanIds = (existingTasks || [])
-    .filter((task: Record<string, unknown>) =>
-      typeof task.external_id === 'string' && !currentIds.includes(task.external_id)
-    )
-    .map((task: Record<string, unknown>) => task.id as string);
-  if (orphanIds.length > 0) {
-    const { error } = await admin.from('tasks').delete().in('id', orphanIds);
-    if (error) throw new Error(`Could not remove old Canvas tasks: ${error.message}`);
-  }
-
-  const { error: settingsError } = await admin
-    .from('canvas_settings')
-    .update({ last_sync_at: new Date().toISOString() })
-    .eq('user_id', setting.user_id);
-  if (settingsError) throw new Error(`Could not save sync time: ${settingsError.message}`);
-
-  return { imported, updated, removed: orphanIds.length };
+  return { userId: parsed.userId, error: null };
 }
 
 /**
- * Called by the repository's five-minute scheduler. The service-role key stays
+ * Called by Supabase's five-minute scheduler. The service-role key stays
  * on the server; callers must provide the separate cron secret.
  */
 export async function POST(request: NextRequest) {
@@ -193,29 +62,106 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Background sync is not configured' }, { status: 503 });
   }
 
+  const target = await readTargetUserId(request);
+  if (target.error) {
+    return NextResponse.json({ error: target.error }, { status: 400 });
+  }
+
   const admin = createClient(supabaseUrl, serviceRoleKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
-  const { data, error } = await admin
-    .from('canvas_settings')
-    .select('user_id, ical_url, last_sync_at, auto_sync_interval, time_zone')
-    .eq('sync_enabled', true)
-    .not('ical_url', 'is', null);
+  const loadSettings = async (includeAttemptMarker: boolean) => {
+    const columns = includeAttemptMarker
+      ? 'user_id, ical_url, last_sync_at, last_background_sync_at, last_background_attempt_at, auto_sync_interval, time_zone'
+      : 'user_id, ical_url, last_sync_at, last_background_sync_at, auto_sync_interval, time_zone';
+    let settingsQuery = admin
+      .from('canvas_settings')
+      .select(columns)
+      .eq('sync_enabled', true)
+      .not('ical_url', 'is', null);
+    if (target.userId) {
+      settingsQuery = settingsQuery.eq('user_id', target.userId);
+    }
+    return settingsQuery;
+  };
+
+  let supportsAttemptMarker = true;
+  let settingsResult = await loadSettings(true);
+  // This makes deployment safe before the SQL migration is applied. The old
+  // empty-body cron continues to work during the short rollout window.
+  if (
+    settingsResult.error?.code === '42703'
+    && settingsResult.error.message.includes('last_background_attempt_at')
+  ) {
+    supportsAttemptMarker = false;
+    settingsResult = await loadSettings(false);
+  }
+  const { data, error } = settingsResult;
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
   const now = new Date();
-  const dueSettings = ((data || []) as CanvasSyncSetting[]).filter(setting => syncIsDue(setting, now));
-  const results: Array<{ userId: string; success: boolean; imported?: number; updated?: number; removed?: number; error?: string }> = [];
+  const dueSettings = ((data || []) as unknown as CanvasSyncSetting[])
+    .filter(setting => target.userId
+      ? isCanvasSyncDue(setting.last_background_sync_at, setting.auto_sync_interval, now)
+      : isCanvasSyncDispatchDue(
+          setting.last_background_sync_at,
+          setting.auto_sync_interval,
+          supportsAttemptMarker ? setting.last_background_attempt_at : null,
+          now
+        )
+    )
+    .sort((left, right) => {
+      const parsedLeftTime = left.last_background_sync_at
+        ? new Date(left.last_background_sync_at).getTime()
+        : Number.NEGATIVE_INFINITY;
+      const parsedRightTime = right.last_background_sync_at
+        ? new Date(right.last_background_sync_at).getTime()
+        : Number.NEGATIVE_INFINITY;
+      const leftTime = Number.isFinite(parsedLeftTime) ? parsedLeftTime : Number.NEGATIVE_INFINITY;
+      const rightTime = Number.isFinite(parsedRightTime) ? parsedRightTime : Number.NEGATIVE_INFINITY;
+      return leftTime - rightTime;
+    });
+  // Production pg_cron sends one authenticated { userId } request per due
+  // account, so each feed receives an independent function budget. Keep the
+  // bounded bulk behavior only for the legacy empty-body cron.
+  const selectedSettings = target.userId
+    ? dueSettings
+    : dueSettings.slice(0, MAX_USERS_PER_RUN);
+  const results: Array<{
+    userId: string;
+    success: boolean;
+    imported?: number;
+    updated?: number;
+    removed?: number;
+    examsImported?: number;
+    examsUpdated?: number;
+    orphanCleanupSkipped?: boolean;
+    lastSyncAt?: string;
+    lastBackgroundSyncAt?: string | null;
+    error?: string;
+  }> = [];
 
   // Small batches keep feeds moving without overwhelming Canvas or Supabase.
-  for (let index = 0; index < dueSettings.length; index += 3) {
-    const batch = dueSettings.slice(index, index + 3);
+  for (let index = 0; index < selectedSettings.length; index += 3) {
+    const batch = selectedSettings.slice(index, index + 3);
     const batchResults = await Promise.all(batch.map(async setting => {
       try {
-        const counts = await syncOneUser(admin, setting);
+        // The targeted pg_cron dispatcher atomically claims the row before it
+        // queues this HTTP request. The legacy bulk path has no SQL claim, so
+        // it records its own attempt marker here.
+        if (!target.userId && supportsAttemptMarker) {
+          const { error: attemptError } = await admin
+            .from('canvas_settings')
+            .update({ last_background_attempt_at: new Date().toISOString() })
+            .eq('user_id', setting.user_id);
+          if (attemptError) {
+            throw new Error(`Could not save sync attempt time: ${attemptError.message}`);
+          }
+        }
+        const { assignments: _assignments, ...counts } = await syncCanvasUser(admin, setting, 'background');
         return { userId: setting.user_id, success: true, ...counts };
       } catch (syncError) {
         return {
@@ -231,6 +177,8 @@ export async function POST(request: NextRequest) {
   return NextResponse.json({
     checked: data?.length || 0,
     due: dueSettings.length,
+    attempted: selectedSettings.length,
+    deferred: Math.max(0, dueSettings.length - selectedSettings.length),
     synced: results.filter(result => result.success).length,
     failed: results.filter(result => !result.success).length,
     results,

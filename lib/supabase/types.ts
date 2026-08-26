@@ -212,6 +212,8 @@ export interface Database {
           preparation_progress: number;
           created_at: string;
           updated_at: string;
+          source: 'manual' | 'google_classroom' | 'canvas';
+          external_id: string | null;
         };
         Insert: {
           id?: string;
@@ -224,6 +226,8 @@ export interface Database {
           preparation_progress?: number;
           created_at?: string;
           updated_at?: string;
+          source?: 'manual' | 'google_classroom' | 'canvas';
+          external_id?: string | null;
         };
         Update: {
           subject_id?: string | null;
@@ -233,6 +237,8 @@ export interface Database {
           location?: string | null;
           preparation_progress?: number;
           updated_at?: string;
+          source?: 'manual' | 'google_classroom' | 'canvas';
+          external_id?: string | null;
         };
       };
       friendships: {

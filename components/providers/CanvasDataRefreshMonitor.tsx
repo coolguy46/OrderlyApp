@@ -5,6 +5,7 @@ import { useAppStore } from '@/lib/store';
 import * as db from '@/lib/supabase/services';
 
 const CHECK_INTERVAL_MS = 30_000;
+const VALID_SYNC_INTERVALS = new Set([5, 15, 30, 60]);
 
 /**
  * Keeps an already-open Orderly tab aligned with Canvas changes imported by
@@ -22,17 +23,49 @@ export function CanvasDataRefreshMonitor() {
 
     checkingRef.current = true;
     try {
-      const settings = await db.getCanvasSettings(userId);
+      let settings = await db.getCanvasSettings(userId);
+
+      // Older releases kept the selected interval only in localStorage. Carry
+      // it into Supabase from any Orderly page—not just Integrations—using the
+      // same compare-and-set claim as the settings screen.
+      if (settings) {
+        const legacyKey = `canvas_sync_interval_${userId}`;
+        const legacyValue = Number(localStorage.getItem(legacyKey));
+        if (
+          settings.sync_interval_migrated !== true
+          && VALID_SYNC_INTERVALS.has(legacyValue)
+        ) {
+          const migrated = await db.migrateCanvasSyncInterval(
+            userId,
+            legacyValue,
+            Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+          );
+          if (migrated?.sync_interval_migrated === true) {
+            settings = migrated;
+            localStorage.removeItem(legacyKey);
+          }
+        } else if (settings.sync_interval_migrated === true) {
+          localStorage.removeItem(legacyKey);
+        }
+      }
+
       const latestSync = settings?.last_sync_at ?? null;
 
       if (lastSeenSyncRef.current === undefined) {
+        // The first settings read can race the app's initial task load. If a
+        // server sync has ever completed, perform one coalesced refresh before
+        // accepting the baseline so a just-finished import cannot be missed.
+        if (latestSync) await refreshData();
         lastSeenSyncRef.current = latestSync;
         return;
       }
 
       if (latestSync !== lastSeenSyncRef.current) {
-        lastSeenSyncRef.current = latestSync;
         await refreshData();
+        // Advance the marker only after the refresh has been accepted. Store
+        // refreshes are queued when another load is active, so this update can
+        // no longer consume a Canvas change without reloading application data.
+        lastSeenSyncRef.current = latestSync;
       }
     } catch (error) {
       console.error('Could not check for Canvas background updates:', error);

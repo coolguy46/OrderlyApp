@@ -261,7 +261,11 @@ function ExamForm({ isOpen, onClose, exam }: ExamFormProps) {
     if (exam) {
       await updateExam(exam.id, examData);
     } else {
-      await addExam(examData);
+      await addExam({
+        ...examData,
+        source: 'manual',
+        external_id: null,
+      });
     }
 
     onClose();

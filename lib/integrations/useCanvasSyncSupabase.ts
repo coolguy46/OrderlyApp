@@ -5,13 +5,14 @@ import * as db from '@/lib/supabase/services';
 interface CanvasSettings {
   icalUrl: string;
   lastSyncAt: Date | null;
+  lastBackgroundSyncAt: Date | null;
   syncEnabled: boolean;
   autoSyncInterval: number; // in minutes
 }
 
 interface UseCanvasSyncOptions {
   userId: string | null;
-  onSyncComplete?: (assignments: CanvasAssignment[], removedCount: number) => void;
+  onSyncComplete?: (assignments: CanvasAssignment[], removedCount: number) => void | Promise<void>;
   onSyncError?: (error: Error) => void;
   defaultInterval?: number; // minutes
 }
@@ -25,12 +26,30 @@ interface UseCanvasSyncResult {
   nextSyncAt: Date | null;
   settings: CanvasSettings;
   syncNow: () => Promise<void>;
-  setIcalUrl: (url: string) => Promise<void>;
+  setIcalUrl: (url: string) => Promise<boolean>;
   toggleAutoSync: () => Promise<void>;
-  setSyncInterval: (minutes: number) => void;
+  setSyncInterval: (minutes: number) => Promise<void>;
   clearData: () => Promise<void>;
   newAssignmentsCount: number;
   removedAssignmentsCount: number;
+}
+
+const VALID_SYNC_INTERVALS = [5, 15, 30, 60] as const;
+
+function normalizeSyncInterval(value: unknown, fallback: number): number {
+  const interval = Number(value);
+  return VALID_SYNC_INTERVALS.includes(interval as (typeof VALID_SYNC_INTERVALS)[number])
+    ? interval
+    : fallback;
+}
+
+function readLegacySyncInterval(userId: string): number | null {
+  const stored = localStorage.getItem(`canvas_sync_interval_${userId}`);
+  if (stored === null) return null;
+  const interval = Number(stored);
+  return VALID_SYNC_INTERVALS.includes(interval as (typeof VALID_SYNC_INTERVALS)[number])
+    ? interval
+    : null;
 }
 
 /**
@@ -54,92 +73,134 @@ export function useCanvasSyncSupabase(options: UseCanvasSyncOptions): UseCanvasS
   const [settings, setSettings] = useState<CanvasSettings>({
     icalUrl: '',
     lastSyncAt: null,
+    lastBackgroundSyncAt: null,
     syncEnabled: true,
     autoSyncInterval: defaultInterval,
   });
   const [nextSyncAt, setNextSyncAt] = useState<Date | null>(null);
 
-  // Refs for interval management
-  const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const syncNowRef = useRef<() => Promise<void>>(async () => {});
+  // Refs for cross-request coordination
   const icalUrlRef = useRef('');
-  const lastAttemptAtRef = useRef<number | null>(null);
-  const [schedulerVersion, setSchedulerVersion] = useState(0);
+  const syncingRef = useRef(false);
+  const settingsMutationVersionRef = useRef(0);
 
-  // Load settings from Supabase on mount
+  // Supabase is the source of truth for Canvas settings. Polling keeps this
+  // page aligned with background syncs that finish while it is already open.
   useEffect(() => {
-    const loadSettings = async () => {
+    let cancelled = false;
+
+    // Do not show settings or assignments from the previously signed-in user
+    // while this user's database row is loading.
+    icalUrlRef.current = '';
+    setAssignments([]);
+    setSettings({
+      icalUrl: '',
+      lastSyncAt: null,
+      lastBackgroundSyncAt: null,
+      syncEnabled: true,
+      autoSyncInterval: defaultInterval,
+    });
+    setNextSyncAt(null);
+
+    const loadSettings = async (initialLoad = false) => {
       if (!userId) {
-        setIsLoading(false);
+        if (!cancelled) setIsLoading(false);
         return;
       }
 
+      const mutationVersion = settingsMutationVersionRef.current;
       try {
-        const canvasSettings = await db.getCanvasSettings(userId);
-        if (canvasSettings) {
-          const savedInterval = Number(localStorage.getItem(`canvas_sync_interval_${userId}`));
-          const databaseInterval = Number(canvasSettings.auto_sync_interval);
-          const autoSyncInterval = [5, 15, 30, 60].includes(savedInterval)
-            ? savedInterval
-            : [5, 15, 30, 60].includes(databaseInterval) ? databaseInterval : defaultInterval;
-          icalUrlRef.current = canvasSettings.ical_url;
-          setSettings({
-            icalUrl: canvasSettings.ical_url,
-            lastSyncAt: canvasSettings.last_sync_at ? new Date(canvasSettings.last_sync_at) : null,
-            syncEnabled: canvasSettings.sync_enabled,
-            autoSyncInterval,
-          });
+        let canvasSettings = await db.getCanvasSettings(userId);
+        if (cancelled || mutationVersion !== settingsMutationVersionRef.current) return;
+        if (!canvasSettings) return;
 
-          // Once the database migration is present, carry forward an existing
-          // browser preference and record the timezone used by background sync.
-          if (canvasSettings.auto_sync_interval !== undefined) {
-            const browserTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
-            if (databaseInterval !== autoSyncInterval || canvasSettings.time_zone !== browserTimeZone) {
-              void db.upsertCanvasSettings(userId, {
-                auto_sync_interval: autoSyncInterval,
-                time_zone: browserTimeZone,
-              });
-            }
+        const browserTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+        const legacyKey = `canvas_sync_interval_${userId}`;
+
+        const legacyInterval = readLegacySyncInterval(userId);
+        if (canvasSettings.sync_interval_migrated !== true && legacyInterval !== null) {
+          const migrated = await db.migrateCanvasSyncInterval(
+            userId,
+            legacyInterval,
+            browserTimeZone
+          );
+          if (!migrated || migrated.sync_interval_migrated !== true) {
+            throw new Error('Could not migrate the Canvas sync interval.');
           }
+          canvasSettings = migrated;
+          // The legacy value is disposable only after the database confirms
+          // that this user has completed the one-time migration.
+          localStorage.removeItem(legacyKey);
+        } else if (canvasSettings.sync_interval_migrated === true) {
+          // A true database flag means another browser may already have
+          // migrated this account. Its value wins over this browser's cache.
+          localStorage.removeItem(legacyKey);
         }
+
+        if (canvasSettings.time_zone !== browserTimeZone) {
+          const saved = await db.upsertCanvasSettings(userId, { time_zone: browserTimeZone });
+          if (!saved) throw new Error('Could not save the Canvas sync timezone.');
+          canvasSettings = saved;
+        }
+
+        if (cancelled || mutationVersion !== settingsMutationVersionRef.current) return;
+        const autoSyncInterval = normalizeSyncInterval(
+          canvasSettings.auto_sync_interval,
+          defaultInterval
+        );
+        icalUrlRef.current = canvasSettings.ical_url;
+        setSettings({
+          icalUrl: canvasSettings.ical_url,
+          lastSyncAt: canvasSettings.last_sync_at ? new Date(canvasSettings.last_sync_at) : null,
+          lastBackgroundSyncAt: canvasSettings.last_background_sync_at
+            ? new Date(canvasSettings.last_background_sync_at)
+            : null,
+          syncEnabled: canvasSettings.sync_enabled,
+          autoSyncInterval,
+        });
       } catch (err) {
         console.error('Error loading Canvas settings:', err);
+        if (initialLoad && !cancelled) {
+          setError(err instanceof Error ? err.message : 'Could not load Canvas settings.');
+        }
+      } finally {
+        if (initialLoad && !cancelled) setIsLoading(false);
       }
-      setIsLoading(false);
     };
 
-    loadSettings();
+    setIsLoading(true);
+    setError(null);
+    void loadSettings(true);
+
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void loadSettings();
+    }, 30_000);
+    const handleFocus = () => void loadSettings();
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') void loadSettings();
+    };
+    window.addEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, [userId, defaultInterval]);
-
-  // Save settings to Supabase
-  const saveSettings = useCallback(async (newSettings: Partial<CanvasSettings>) => {
-    if (!userId) return;
-
-    try {
-      await db.upsertCanvasSettings(userId, {
-        ical_url: newSettings.icalUrl ?? settings.icalUrl,
-        last_sync_at: newSettings.lastSyncAt?.toISOString() ?? settings.lastSyncAt?.toISOString() ?? null,
-        sync_enabled: newSettings.syncEnabled ?? settings.syncEnabled,
-      });
-    } catch (err) {
-      console.error('Error saving Canvas settings:', err);
-    }
-  }, [userId, settings]);
 
   // Sync function
   const syncNow = useCallback(async () => {
     const currentIcalUrl = icalUrlRef.current || settings.icalUrl;
-    if (!currentIcalUrl || isSyncing || !userId) return;
+    if (!currentIcalUrl || syncingRef.current || !userId) return;
 
+    syncingRef.current = true;
     setIsSyncing(true);
     setError(null);
 
     try {
-      const response = await fetch('/api/canvas/sync', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ icalUrl: currentIcalUrl }),
-      });
+      const response = await fetch('/api/canvas/sync', { method: 'POST' });
 
       const data = await response.json();
 
@@ -156,128 +217,203 @@ export function useCanvasSyncSupabase(options: UseCanvasSyncOptions): UseCanvasS
         endDate: a.endDate ? new Date(a.endDate) : undefined,
       }));
 
-      // Get all Canvas assignment IDs from the current sync
-      const currentCanvasIds = hydratedAssignments.map(a => a.id);
-
-      // Remove tasks that no longer exist in Canvas (submitted/deleted)
-      const removedCount = await db.removeOrphanedCanvasTasks(userId, currentCanvasIds);
+      const removedCount = Number(data.removed) || 0;
       setRemovedAssignmentsCount(removedCount);
 
       setAssignments(hydratedAssignments);
-      setNewAssignmentsCount(hydratedAssignments.length);
+      setNewAssignmentsCount(Number(data.imported) || 0);
       
-      const now = new Date();
-      const updatedSettings = {
-        ...settings,
+      // A manual sync is successful only after its assignments have actually
+      // been imported. This prevents last_sync_at from advancing on partial work.
+      await onSyncComplete?.(hydratedAssignments, removedCount);
+
+      const reportedLastSync = data.lastSyncAt ? new Date(data.lastSyncAt) : new Date();
+      const now = Number.isNaN(reportedLastSync.getTime()) ? new Date() : reportedLastSync;
+      settingsMutationVersionRef.current += 1;
+      setSettings(prev => ({
+        ...prev,
         lastSyncAt: now,
-      };
-      setSettings(updatedSettings);
-      
-      // Save to Supabase
-      await saveSettings({ lastSyncAt: now });
-
-      // Calculate next sync time
-      if (settings.syncEnabled) {
-        const next = new Date(now.getTime() + settings.autoSyncInterval * 60 * 1000);
-        setNextSyncAt(next);
-      }
-
-      onSyncComplete?.(hydratedAssignments, removedCount);
+        lastBackgroundSyncAt: data.lastBackgroundSyncAt
+          ? new Date(data.lastBackgroundSyncAt)
+          : prev.lastBackgroundSyncAt,
+      }));
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Unknown error';
       setError(errorMessage);
       onSyncError?.(err instanceof Error ? err : new Error(errorMessage));
     } finally {
+      syncingRef.current = false;
       setIsSyncing(false);
-      lastAttemptAtRef.current = Date.now();
-      setSchedulerVersion(version => version + 1);
     }
-  }, [settings, isSyncing, userId, saveSettings, onSyncComplete, onSyncError]);
+  }, [settings.icalUrl, userId, onSyncComplete, onSyncError]);
 
-  // Keep the scheduler independent from syncNow's changing React closure.
-  // Otherwise toggling isSyncing recreates syncNow and restarts the timer.
+  // Automatic synchronization is owned by the server scheduler. The client
+  // only displays the next due time and offers an explicit Sync Now action.
   useEffect(() => {
-    syncNowRef.current = syncNow;
-  }, [syncNow]);
-
-  // Schedule the next sync for the exact remaining delay. A fixed setInterval
-  // caused the countdown to reach zero before the interval actually fired.
-  useEffect(() => {
-    if (syncTimeoutRef.current) {
-      clearTimeout(syncTimeoutRef.current);
-      syncTimeoutRef.current = null;
-    }
-
-    if (settings.syncEnabled && settings.icalUrl && !isLoading && userId) {
-      const intervalMs = settings.autoSyncInterval * 60 * 1000;
-      const now = new Date();
-      const lastSuccessfulSync = settings.lastSyncAt
-        ? new Date(settings.lastSyncAt).getTime()
-        : 0;
-      const scheduleFrom = Math.max(lastSuccessfulSync, lastAttemptAtRef.current || 0);
-      const nextTimestamp = scheduleFrom > 0 ? scheduleFrom + intervalMs : now.getTime();
-      const delay = Math.max(0, nextTimestamp - now.getTime());
-
-      setNextSyncAt(new Date(now.getTime() + delay));
-      syncTimeoutRef.current = setTimeout(() => {
-        void syncNowRef.current();
-      }, delay);
-    } else {
+    if (!settings.syncEnabled || !settings.icalUrl || isLoading || !userId) {
       setNextSyncAt(null);
+      return;
     }
-
-    return () => {
-      if (syncTimeoutRef.current) {
-        clearTimeout(syncTimeoutRef.current);
-      }
-    };
-  }, [settings.syncEnabled, settings.icalUrl, settings.autoSyncInterval, settings.lastSyncAt, isLoading, userId, schedulerVersion]);
+    if (!settings.lastBackgroundSyncAt) {
+      setNextSyncAt(new Date(0));
+      return;
+    }
+    setNextSyncAt(new Date(
+      settings.lastBackgroundSyncAt.getTime() + settings.autoSyncInterval * 60 * 1000
+    ));
+  }, [settings.syncEnabled, settings.icalUrl, settings.autoSyncInterval, settings.lastBackgroundSyncAt, isLoading, userId]);
 
   // Action functions
   const setIcalUrl = useCallback(async (url: string) => {
-    icalUrlRef.current = url;
-    setSettings(prev => ({ ...prev, icalUrl: url }));
     setError(null);
-    
-    if (userId && url) {
-      await db.upsertCanvasSettings(userId, {
-        ical_url: url,
-        sync_enabled: settings.syncEnabled,
+    const normalizedUrl = url.trim();
+    if (!userId || !normalizedUrl) return false;
+
+    settingsMutationVersionRef.current += 1;
+    try {
+      const browserTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+      const legacyKey = `canvas_sync_interval_${userId}`;
+      const legacyInterval = readLegacySyncInterval(userId);
+      let persisted = await db.getCanvasSettings(userId);
+
+      if (
+        persisted &&
+        persisted.sync_interval_migrated !== true &&
+        legacyInterval !== null
+      ) {
+        persisted = await db.migrateCanvasSyncInterval(
+          userId,
+          legacyInterval,
+          browserTimeZone
+        );
+        if (!persisted || persisted.sync_interval_migrated !== true) {
+          setError('Could not migrate the Canvas sync interval. Please try again.');
+          return false;
+        }
+      }
+
+      if (!persisted) {
+        persisted = await db.initializeCanvasSettings(userId, {
+          ical_url: normalizedUrl,
+          sync_enabled: settings.syncEnabled,
+          auto_sync_interval: legacyInterval ?? settings.autoSyncInterval,
+          sync_interval_migrated: true,
+          time_zone: browserTimeZone,
+        });
+        if (!persisted) {
+          setError('Could not connect the Canvas calendar. Please try again.');
+          return false;
+        }
+      }
+
+      // If another first-time flow inserted an unmigrated row during the race,
+      // claim it now before saving the connection. The compare-and-set still
+      // ensures only one browser can choose the initial interval.
+      if (persisted.sync_interval_migrated !== true && legacyInterval !== null) {
+        persisted = await db.migrateCanvasSyncInterval(
+          userId,
+          legacyInterval,
+          browserTimeZone
+        );
+        if (!persisted || persisted.sync_interval_migrated !== true) {
+          setError('Could not migrate the Canvas sync interval. Please try again.');
+          return false;
+        }
+      }
+
+      // Existing rows keep their database interval. This is important for old
+      // browser sessions whose React state still contains the former default.
+      // The URL/timezone patch cannot overwrite the interval chosen by the
+      // browser that won the one-time migration race.
+      const saved = await db.upsertCanvasSettings(userId, {
+        ical_url: normalizedUrl,
+        time_zone: browserTimeZone,
       });
+      if (!saved) {
+        setError('Could not connect the Canvas calendar. Please try again.');
+        return false;
+      }
+
+      if (saved.sync_interval_migrated === true) {
+        localStorage.removeItem(legacyKey);
+      }
+      icalUrlRef.current = saved.ical_url;
+      setSettings(prev => ({
+        ...prev,
+        icalUrl: saved.ical_url,
+        syncEnabled: saved.sync_enabled,
+        autoSyncInterval: normalizeSyncInterval(
+          saved.auto_sync_interval,
+          prev.autoSyncInterval
+        ),
+      }));
+      return true;
+    } catch (err) {
+      console.error('Error connecting Canvas calendar:', err);
+      setError('Could not connect the Canvas calendar. Please try again.');
+      return false;
+    } finally {
+      // Invalidate a settings poll that began while this write was in flight.
+      settingsMutationVersionRef.current += 1;
     }
-  }, [userId, settings.syncEnabled]);
+  }, [userId, settings.syncEnabled, settings.autoSyncInterval]);
 
   const toggleAutoSync = useCallback(async () => {
     const newSyncEnabled = !settings.syncEnabled;
-    setSettings(prev => ({ ...prev, syncEnabled: newSyncEnabled }));
-    
-    if (userId) {
-      await db.upsertCanvasSettings(userId, {
-        sync_enabled: newSyncEnabled,
-      });
+    if (!userId) return;
+
+    setError(null);
+    settingsMutationVersionRef.current += 1;
+    const saved = await db.upsertCanvasSettings(userId, { sync_enabled: newSyncEnabled });
+    settingsMutationVersionRef.current += 1;
+    if (!saved) {
+      setError('Could not update Canvas auto-sync. Please try again.');
+      return;
     }
+    setSettings(prev => ({ ...prev, syncEnabled: saved.sync_enabled }));
   }, [userId, settings.syncEnabled]);
 
-  const setSyncInterval = useCallback((minutes: number) => {
-    const normalizedMinutes = [5, 15, 30, 60].includes(minutes) ? minutes : defaultInterval;
-    setSettings(prev => ({ ...prev, autoSyncInterval: normalizedMinutes }));
-    if (userId) {
-      localStorage.setItem(`canvas_sync_interval_${userId}`, String(normalizedMinutes));
-      void db.upsertCanvasSettings(userId, {
-        auto_sync_interval: normalizedMinutes,
-        time_zone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
-      });
+  const setSyncInterval = useCallback(async (minutes: number) => {
+    const normalizedMinutes = normalizeSyncInterval(minutes, defaultInterval);
+    if (!userId) return;
+
+    setError(null);
+    settingsMutationVersionRef.current += 1;
+    const saved = await db.upsertCanvasSettings(userId, {
+      auto_sync_interval: normalizedMinutes,
+      sync_interval_migrated: true,
+      time_zone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+    });
+    settingsMutationVersionRef.current += 1;
+    if (!saved) {
+      setError('Could not save the Canvas sync interval. Please try again.');
+      return;
     }
-    lastAttemptAtRef.current = Date.now();
-    setSchedulerVersion(version => version + 1);
+    setSettings(prev => ({
+      ...prev,
+      autoSyncInterval: normalizeSyncInterval(saved.auto_sync_interval, normalizedMinutes),
+    }));
+    localStorage.removeItem(`canvas_sync_interval_${userId}`);
   }, [defaultInterval, userId]);
 
   const clearData = useCallback(async () => {
+    if (userId) {
+      settingsMutationVersionRef.current += 1;
+      const deleted = await db.deleteCanvasSettings(userId);
+      settingsMutationVersionRef.current += 1;
+      if (!deleted) {
+        setError('Could not disconnect Canvas. Please try again.');
+        return;
+      }
+      localStorage.removeItem(`canvas_sync_interval_${userId}`);
+    }
+
     setAssignments([]);
     icalUrlRef.current = '';
     setSettings({
       icalUrl: '',
       lastSyncAt: null,
+      lastBackgroundSyncAt: null,
       syncEnabled: true,
       autoSyncInterval: defaultInterval,
     });
@@ -285,11 +421,6 @@ export function useCanvasSyncSupabase(options: UseCanvasSyncOptions): UseCanvasS
     setNextSyncAt(null);
     setNewAssignmentsCount(0);
     setRemovedAssignmentsCount(0);
-    
-    if (userId) {
-      await db.deleteCanvasSettings(userId);
-      localStorage.removeItem(`canvas_sync_interval_${userId}`);
-    }
   }, [userId, defaultInterval]);
 
   return {
@@ -319,7 +450,7 @@ export function formatTimeUntilSync(nextSyncAt: Date | null): string {
   const now = new Date();
   const diff = nextSyncAt.getTime() - now.getTime();
 
-  if (diff <= 0) return 'Syncing...';
+  if (diff <= 0) return 'Waiting for background sync…';
 
   const minutes = Math.floor(diff / 60000);
   const seconds = Math.floor((diff % 60000) / 1000);

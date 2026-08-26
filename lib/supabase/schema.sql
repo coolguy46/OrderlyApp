@@ -93,8 +93,11 @@ CREATE TABLE exams (
   exam_date TIMESTAMP WITH TIME ZONE NOT NULL,
   location TEXT,
   preparation_progress INTEGER DEFAULT 0 CHECK (preparation_progress >= 0 AND preparation_progress <= 100),
+  source TEXT NOT NULL DEFAULT 'manual' CHECK (source IN ('manual', 'google_classroom', 'canvas')),
+  external_id TEXT,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  UNIQUE(user_id, source, external_id)
 );
 
 -- Friendships table
@@ -147,10 +150,13 @@ CREATE TABLE canvas_settings (
   user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE UNIQUE,
   ical_url TEXT NOT NULL,
   last_sync_at TIMESTAMP WITH TIME ZONE,
+  last_background_sync_at TIMESTAMP WITH TIME ZONE,
+  last_background_attempt_at TIMESTAMP WITH TIME ZONE,
   sync_enabled BOOLEAN DEFAULT true,
   auto_import_assignments BOOLEAN DEFAULT true,
   auto_sync_interval INTEGER NOT NULL DEFAULT 15 CHECK (auto_sync_interval IN (5, 15, 30, 60)),
   time_zone TEXT NOT NULL DEFAULT 'UTC',
+  sync_interval_migrated BOOLEAN NOT NULL DEFAULT false,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
@@ -163,6 +169,8 @@ CREATE INDEX idx_study_sessions_user_id ON study_sessions(user_id);
 CREATE INDEX idx_study_sessions_started_at ON study_sessions(started_at);
 CREATE INDEX idx_exams_user_id ON exams(user_id);
 CREATE INDEX idx_exams_exam_date ON exams(exam_date);
+CREATE INDEX idx_exams_source ON exams(source);
+CREATE INDEX idx_exams_external_id ON exams(external_id);
 CREATE INDEX idx_goals_user_id ON goals(user_id);
 CREATE INDEX idx_friendships_user_id ON friendships(user_id);
 CREATE INDEX idx_friendships_friend_id ON friendships(friend_id);

@@ -468,9 +468,11 @@ export interface CanvasSettings {
   user_id: string;
   ical_url: string;
   last_sync_at: string | null;
+  last_background_sync_at: string | null;
   sync_enabled: boolean;
   auto_import_assignments: boolean;
   auto_sync_interval?: number;
+  sync_interval_migrated: boolean;
   time_zone?: string;
   created_at: string;
   updated_at: string;
@@ -494,29 +496,128 @@ export async function getCanvasSettings(userId: string): Promise<CanvasSettings 
 export async function upsertCanvasSettings(userId: string, settings: {
   ical_url?: string;
   last_sync_at?: string | null;
+  last_background_sync_at?: string | null;
   sync_enabled?: boolean;
   auto_import_assignments?: boolean;
   auto_sync_interval?: number;
+  sync_interval_migrated?: boolean;
   time_zone?: string;
 }): Promise<CanvasSettings | null> {
-  
-  
-  const { data, error } = await db
+  // Most callers send a partial settings patch. PostgreSQL validates NOT NULL
+  // columns before ON CONFLICT can update an existing row, so a traditional
+  // partial upsert can fail merely because `ical_url` was omitted. Update an
+  // existing row first, and only insert when this is genuinely a new user.
+  const { data: updated, error: updateError } = await db
     .from('canvas_settings')
-    .upsert({
-      user_id: userId,
-      ...settings,
-    }, {
-      onConflict: 'user_id',
-    })
-    .select()
-    .single();
-  
-  if (error) {
-    console.error('Error upserting canvas settings:', error);
+    .update(settings)
+    .eq('user_id', userId)
+    .select('*')
+    .maybeSingle();
+
+  if (updateError) {
+    console.error('Error updating canvas settings:', updateError);
     return null;
   }
-  return data as CanvasSettings | null;
+  if (updated) return updated as CanvasSettings;
+
+  if (!settings.ical_url) {
+    console.error('Cannot create Canvas settings without an iCal URL.');
+    return null;
+  }
+
+  const { data: inserted, error: insertError } = await db
+    .from('canvas_settings')
+    .insert({ user_id: userId, ...settings })
+    .select('*')
+    .single();
+
+  if (!insertError) return inserted as CanvasSettings;
+
+  // Another request may have inserted the row after our update found none.
+  // Retry the requested patch against that winning row.
+  if (insertError.code === '23505') {
+    const { data: retried, error: retryError } = await db
+      .from('canvas_settings')
+      .update(settings)
+      .eq('user_id', userId)
+      .select('*')
+      .single();
+    if (!retryError) return retried as CanvasSettings;
+    console.error('Error retrying canvas settings update:', retryError);
+    return null;
+  }
+
+  console.error('Error inserting canvas settings:', insertError);
+  return null;
+}
+
+/**
+ * Creates the initial settings row without overwriting a row created by a
+ * competing browser. This protects the first database-backed interval from a
+ * stale session during the one-time localStorage migration.
+ */
+export async function initializeCanvasSettings(userId: string, settings: {
+  ical_url: string;
+  last_sync_at?: string | null;
+  last_background_sync_at?: string | null;
+  sync_enabled?: boolean;
+  auto_import_assignments?: boolean;
+  auto_sync_interval?: number;
+  sync_interval_migrated?: boolean;
+  time_zone?: string;
+}): Promise<CanvasSettings | null> {
+  const { data, error } = await db
+    .from('canvas_settings')
+    .insert({ user_id: userId, ...settings })
+    .select('*')
+    .single();
+
+  if (!error) return data as CanvasSettings;
+  if (error.code === '23505') return getCanvasSettings(userId);
+
+  console.error('Error initializing canvas settings:', error);
+  return null;
+}
+
+/**
+ * Claims the one-time browser-to-database interval migration for a user.
+ *
+ * The `sync_interval_migrated = false` filter makes this a compare-and-set:
+ * when two old browser sessions race, only the first one may copy its legacy
+ * localStorage preference. Every later session reads the already-authoritative
+ * database value instead of overwriting it.
+ */
+export async function migrateCanvasSyncInterval(
+  userId: string,
+  legacyInterval: number,
+  timeZone: string
+): Promise<CanvasSettings | null> {
+  const updates: {
+    sync_interval_migrated: boolean;
+    time_zone: string;
+    auto_sync_interval?: number;
+  } = {
+    sync_interval_migrated: true,
+    time_zone: timeZone,
+    auto_sync_interval: legacyInterval,
+  };
+
+  const { data, error } = await db
+    .from('canvas_settings')
+    .update(updates)
+    .eq('user_id', userId)
+    .eq('sync_interval_migrated', false)
+    .select('*')
+    .maybeSingle();
+
+  if (error) {
+    console.error('Error migrating Canvas sync interval:', error);
+    return null;
+  }
+
+  // No returned row means another browser already won the migration race.
+  // Read that winner's value and keep it authoritative.
+  return (data as CanvasSettings | null) || getCanvasSettings(userId);
 }
 
 export async function deleteCanvasSettings(userId: string): Promise<boolean> {

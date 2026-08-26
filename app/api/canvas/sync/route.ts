@@ -1,39 +1,65 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { syncCanvasCalendar } from '@/lib/integrations/canvas';
+import { NextResponse } from 'next/server';
+import { createClient } from '@supabase/supabase-js';
+import { createSupabaseServerClient } from '@/lib/supabase/server';
+import {
+  syncCanvasUser,
+  type CanvasSyncSetting,
+} from '@/lib/integrations/canvas-server-sync';
+
+export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
 
 /**
  * POST /api/canvas/sync
  * Syncs Canvas calendar from iCal URL
  */
-export async function POST(request: NextRequest) {
+export async function POST() {
   try {
-    const body = await request.json();
-    const { icalUrl } = body;
-
-    if (!icalUrl || typeof icalUrl !== 'string') {
-      return NextResponse.json(
-        { error: 'iCal URL is required' },
-        { status: 400 }
-      );
+    const sessionClient = await createSupabaseServerClient();
+    const { data: { user }, error: authError } = await sessionClient.auth.getUser();
+    if (authError || !user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // Validate URL format
-    try {
-      new URL(icalUrl);
-    } catch {
-      return NextResponse.json(
-        { error: 'Invalid URL format' },
-        { status: 400 }
-      );
+    // The generated database type predates canvas_settings, so keep this query
+    // localized behind a narrow runtime shape until those types are regenerated.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: setting, error: settingError } = await (sessionClient as any)
+      .from('canvas_settings')
+      .select('user_id, ical_url, last_sync_at, last_background_sync_at, auto_sync_interval, time_zone')
+      .eq('user_id', user.id)
+      .maybeSingle();
+
+    if (settingError) {
+      return NextResponse.json({ error: settingError.message }, { status: 500 });
+    }
+    if (!setting?.ical_url) {
+      return NextResponse.json({ error: 'Connect a Canvas calendar before syncing' }, { status: 400 });
     }
 
-    // Sync calendar
-    const assignments = await syncCanvasCalendar(icalUrl);
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (!supabaseUrl || !serviceRoleKey) {
+      return NextResponse.json({ error: 'Canvas sync is not configured' }, { status: 503 });
+    }
+
+    const admin = createClient(supabaseUrl, serviceRoleKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+    const result = await syncCanvasUser(admin, setting as CanvasSyncSetting, 'manual');
 
     return NextResponse.json({
       success: true,
-      count: assignments.length,
-      assignments,
+      count: result.assignments.length,
+      assignments: result.assignments,
+      imported: result.imported,
+      updated: result.updated,
+      removed: result.removed,
+      examsImported: result.examsImported,
+      examsUpdated: result.examsUpdated,
+      orphanCleanupSkipped: result.orphanCleanupSkipped,
+      lastSyncAt: result.lastSyncAt,
+      lastBackgroundSyncAt: result.lastBackgroundSyncAt,
     });
   } catch (error) {
     console.error('Canvas sync error:', error);
@@ -55,12 +81,6 @@ export async function POST(request: NextRequest) {
 export async function GET() {
   return NextResponse.json({
     message: 'Canvas iCal sync endpoint',
-    instructions: {
-      method: 'POST',
-      body: {
-        icalUrl: 'Your Canvas calendar iCal URL'
-      },
-      example: 'https://canvas.instructure.com/feeds/calendars/user_xxx.ics'
-    }
+    instructions: 'Send an authenticated POST request after saving a Canvas feed in Integrations.',
   });
 }

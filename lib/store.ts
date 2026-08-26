@@ -45,8 +45,10 @@ function nextScheduleDate(
   }
   return currentDate;
 }
-// Guard against concurrent data loads
-let isLoadingData = false;
+// Serialize data loads instead of dropping refreshes that arrive while another
+// load is running. Each caller awaits its own queued refresh, so a Canvas sync
+// marker is never accepted before the corresponding database read completes.
+let dataLoadQueue: Promise<void> = Promise.resolve();
 // Guard against re-initializing in React Strict Mode
 let initializationDone = false;
 
@@ -263,28 +265,34 @@ export const useAppStore = create<AppState>()(
       
       // Load all user data from Supabase
       loadUserData: async (userId: string) => {
-        // Prevent concurrent loads — main cause of "signal aborted" errors
-        if (isLoadingData) return;
-        isLoadingData = true;
-        try {
-          const [tasks, goals, studySessions, exams, subjects, friends] = await Promise.all([
-            db.getTasks(userId),
-            db.getGoals(userId),
-            db.getStudySessions(userId),
-            db.getExams(userId),
-            db.getSubjects(userId),
-            db.getFriends(userId),
-          ]);
-          set({ tasks, goals, studySessions, exams, subjects, friends, dataLoaded: true });
-        } catch (error: any) {
-          if (error?.name === 'AbortError' || error?.message?.includes('signal')) {
-            console.warn('Data load aborted (retrying next interaction):', error.message);
-          } else {
-            console.error('Error loading user data:', error);
+        const requestedUserId = userId;
+        const queuedLoad = dataLoadQueue.then(async () => {
+          try {
+            const [tasks, goals, studySessions, exams, subjects, friends] = await Promise.all([
+              db.getTasks(requestedUserId),
+              db.getGoals(requestedUserId),
+              db.getStudySessions(requestedUserId),
+              db.getExams(requestedUserId),
+              db.getSubjects(requestedUserId),
+              db.getFriends(requestedUserId),
+            ]);
+
+            // A sign-out or account switch may finish while the queries are in
+            // flight. Never publish one user's data into another session.
+            if (get().user?.id === requestedUserId) {
+              set({ tasks, goals, studySessions, exams, subjects, friends, dataLoaded: true });
+            }
+          } catch (error: any) {
+            if (error?.name === 'AbortError' || error?.message?.includes('signal')) {
+              console.warn('Data load aborted (retrying next interaction):', error.message);
+            } else {
+              console.error('Error loading user data:', error);
+            }
           }
-        } finally {
-          isLoadingData = false;
-        }
+        });
+
+        dataLoadQueue = queuedLoad;
+        await queuedLoad;
       },
       
       // Refresh data from database

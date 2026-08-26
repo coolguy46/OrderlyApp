@@ -4,12 +4,11 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { MainLayout } from '@/components/layout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, Button, Badge, Input } from '@/components/ui';
-import { CanvasAssignment } from '@/lib/integrations/canvas';
+import type { CanvasAssignment } from '@/lib/integrations/canvas';
 import { GoogleClassroomService, GoogleClassroomAssignment } from '@/lib/integrations/google-classroom';
 import { useCanvasSyncSupabase, formatTimeUntilSync, formatLastSync } from '@/lib/integrations/useCanvasSyncSupabase';
 import { useAppStore } from '@/lib/store';
 import { isExamType } from '@/lib/utils';
-import * as db from '@/lib/supabase/services';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Link2,
@@ -43,24 +42,13 @@ function CanvasIcon({ className }: { className?: string }) {
   );
 }
 
-// Preset colors for auto-created Canvas subjects
-const CANVAS_SUBJECT_COLORS = [
-  '#6366f1', '#ec4899', '#f59e0b', '#10b981', '#3b82f6',
-  '#8b5cf6', '#ef4444', '#14b8a6', '#f97316', '#06b6d4',
-];
-
 const GC_SUBJECT_COLORS = [
   '#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ec4899',
   '#06b6d4', '#ef4444', '#14b8a6', '#f97316', '#6366f1',
 ];
 
-function formatCanvasDueTime(date: Date): string {
-  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
-}
-
 export default function IntegrationsPage() {
-  const { addTask, addExam, tasks, exams, subjects, addSubject, user, refreshData } = useAppStore();
-  const [removedCount, setRemovedCount] = useState(0);
+  const { addTask, addExam, tasks, exams, addSubject, user, refreshData } = useAppStore();
   const searchParams = useSearchParams();
   const router = useRouter();
 
@@ -201,7 +189,9 @@ export default function IntegrationsPage() {
 
         // Also create exam entry if applicable
         if (isExamType(assignment.title, assignment.workType)) {
-          const examExists = exams.some(e => e.title === taskTitle || e.title === assignment.title);
+          const examExists = exams.some(e =>
+            e.source === 'google_classroom' && e.external_id === taskData.external_id
+          );
           if (!examExists) {
             await addExam({
               user_id: user.id,
@@ -211,6 +201,8 @@ export default function IntegrationsPage() {
               location: null,
               subject_id: subjectId,
               preparation_progress: 0,
+              source: 'google_classroom',
+              external_id: taskData.external_id,
             });
           }
         }
@@ -271,166 +263,10 @@ export default function IntegrationsPage() {
     toggleAutoSync,
     setSyncInterval,
     clearData,
-    removedAssignmentsCount,
   } = useCanvasSyncSupabase({
     userId: user?.id || null,
     defaultInterval: 15, // 15 minutes
-    onSyncComplete: async (allAssignments, removed) => {
-      if (!user) return;
-      
-      let importedCount = 0;
-      let updatedCount = 0;
-      setRemovedCount(removed);
-
-      // Build a map of course name -> subject ID, creating new subjects as needed
-      const courseNameToSubjectId: Record<string, string> = {};
-
-      // Index existing subjects by lowercase name for case-insensitive matching
-      const existingSubjectsByName: Record<string, string> = {};
-      for (const s of subjects) {
-        existingSubjectsByName[s.name.toLowerCase()] = s.id;
-      }
-
-      // Collect unique course names from assignments
-      const uniqueCourseNames = new Set<string>();
-      for (const a of allAssignments) {
-        if (a.courseName && a.courseName !== 'Unknown Course') uniqueCourseNames.add(a.courseName);
-      }
-
-      // Create subjects for new courses
-      let colorIndex = subjects.length; // start from next color
-      for (const courseName of uniqueCourseNames) {
-        const existing = existingSubjectsByName[courseName.toLowerCase()];
-        if (existing) {
-          courseNameToSubjectId[courseName] = existing;
-        } else {
-          const color = CANVAS_SUBJECT_COLORS[colorIndex % CANVAS_SUBJECT_COLORS.length];
-          colorIndex++;
-          await addSubject({
-            user_id: user.id,
-            name: courseName,
-            color,
-          });
-          // After addSubject the store is updated; get the new subject ID
-          const updatedSubjects = useAppStore.getState().subjects;
-          const created = updatedSubjects.find(
-            (s) => s.name.toLowerCase() === courseName.toLowerCase()
-          );
-          if (created) {
-            courseNameToSubjectId[courseName] = created.id;
-            existingSubjectsByName[courseName.toLowerCase()] = created.id;
-          }
-        }
-      }
-      
-      // Existing items must be updated as Canvas changes. The previous importer
-      // skipped them entirely, which left bad dates and missing subjects stuck.
-      const existingCanvasTasks = new Map(
-        useAppStore.getState().tasks
-          .filter(t => t.source === 'canvas' && t.external_id)
-          .map(t => [t.external_id!, t] as const)
-      );
-      
-      for (const assignment of allAssignments) {
-        if (!assignment.dueDate) continue;
-        const dueDate = new Date(assignment.dueDate);
-        const taskTitle = `[Canvas] ${assignment.title}`;
-        const existingTask = existingCanvasTasks.get(assignment.id);
-        const resolvedCourseName = assignment.courseName !== 'Unknown Course'
-          ? assignment.courseName
-          : existingTask?.course_name || null;
-        const subjectId = resolvedCourseName
-          ? courseNameToSubjectId[resolvedCourseName] || existingTask?.subject_id || null
-          : existingTask?.subject_id || null;
-        const description = assignment.description || `Course: ${resolvedCourseName || 'Canvas'}`;
-        const dueTime = assignment.dueDateOnly
-          ? '23:59'
-          : assignment.hasDueTime ? formatCanvasDueTime(dueDate) : null;
-
-        if (existingTask) {
-          const existingDueTime = existingTask.due_time || null;
-          const existingDueDate = existingTask.due_date ? new Date(existingTask.due_date).getTime() : null;
-          const hasChanges =
-            existingTask.title !== taskTitle ||
-            existingTask.description !== description ||
-            existingDueDate !== dueDate.getTime() ||
-            existingDueTime !== dueTime ||
-            existingTask.subject_id !== subjectId ||
-            existingTask.external_url !== (assignment.url || null) ||
-            existingTask.course_name !== resolvedCourseName ||
-            existingTask.assignment_type !== (assignment.type || 'assignment');
-
-          if (hasChanges) {
-            await db.updateTask(existingTask.id, {
-              title: taskTitle,
-              description,
-              due_date: dueDate.toISOString(),
-              due_time: dueTime,
-              subject_id: subjectId,
-              external_url: assignment.url || null,
-              course_name: resolvedCourseName,
-              assignment_type: assignment.type || 'assignment',
-            });
-            updatedCount++;
-          }
-        } else {
-          // Don't import already-expired historical events as brand-new tasks.
-          if (dueDate < new Date()) continue;
-
-          // Create task in Supabase
-          await addTask({
-            user_id: user.id,
-            title: taskTitle,
-            description,
-            priority: assignment.type === 'exam' ? 'high' : 'medium',
-            status: 'pending',
-            due_date: dueDate.toISOString(),
-            due_time: dueTime,
-            recurrence: 'none',
-            recurrence_days: null,
-            subject_id: subjectId,
-            completed_at: null,
-            source: 'canvas',
-            external_id: assignment.id,
-            external_url: assignment.url || null,
-            course_name: resolvedCourseName,
-            assignment_type: assignment.type || 'assignment',
-          });
-          importedCount++;
-        }
-
-        // Keep the corresponding exam entry aligned with Canvas too.
-        if (isExamType(assignment.title, assignment.type)) {
-          const existingExam = useAppStore.getState().exams.find(
-            (e) => e.title === taskTitle || e.title === assignment.title
-          );
-          if (existingExam) {
-            await db.updateExam(existingExam.id, {
-              title: taskTitle,
-              description,
-              exam_date: dueDate.toISOString(),
-              subject_id: subjectId,
-            });
-          } else if (dueDate >= new Date()) {
-            await addExam({
-              user_id: user.id,
-              title: taskTitle,
-              description,
-              exam_date: dueDate.toISOString(),
-              location: null,
-              subject_id: subjectId,
-              preparation_progress: 0,
-            });
-          }
-        }
-      }
-      
-      if (importedCount > 0 || updatedCount > 0 || removed > 0) {
-        console.log(`Canvas sync: imported ${importedCount}, updated ${updatedCount}, removed ${removed}`);
-        // Refresh data to reflect changes
-        await refreshData();
-      }
-    },
+    onSyncComplete: refreshData,
   });
 
   // Live countdown display
@@ -459,11 +295,13 @@ export default function IntegrationsPage() {
     }
   }, [canvasSettings.icalUrl]);
 
-  const handleCanvasConnect = () => {
+  const handleCanvasConnect = async () => {
     if (!canvasUrlInput.trim()) return;
-    setIcalUrl(canvasUrlInput);
-    // Trigger initial sync after setting URL
-    setTimeout(() => syncNow(), 100);
+    const connected = await setIcalUrl(canvasUrlInput);
+    if (!connected) return;
+    // The first import is explicit; subsequent automatic imports are handled
+    // by the server scheduler even when this page or the browser is closed.
+    await syncNow();
   };
 
 
@@ -520,14 +358,28 @@ export default function IntegrationsPage() {
                     )}
                   </Badge>
                 )}
-                <Badge variant={canvasAssignments.length > 0 ? 'default' : 'secondary'} 
-                  className={canvasAssignments.length > 0 ? 'bg-orange-500' : ''}>
-                  {canvasAssignments.length > 0 ? 'Connected' : 'Not Connected'}
+                <Badge variant={canvasSettings.icalUrl ? 'default' : 'secondary'}
+                  className={canvasSettings.icalUrl ? 'bg-orange-500' : ''}>
+                  {canvasSettings.icalUrl ? 'Connected' : 'Not Connected'}
                 </Badge>
               </div>
             </div>
           </CardHeader>
           <CardContent className="space-y-6">
+            <AnimatePresence>
+              {canvasError && (
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  className="flex items-center gap-3 p-4 rounded-xl bg-red-500/10 border border-red-500/30"
+                >
+                  <AlertCircle className="w-5 h-5 text-red-400" />
+                  <span className="text-red-400">{canvasError}</span>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
             {isCanvasLoading ? (
               <div className="flex items-center justify-center py-8">
                 <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
@@ -550,7 +402,7 @@ export default function IntegrationsPage() {
                               Syncing...
                             </span>
                           ) : canvasSettings.syncEnabled ? (
-                            countdown
+                            lastSyncAt ? countdown : 'Waiting for first background sync…'
                           ) : (
                             'Auto-sync paused'
                           )}
@@ -607,21 +459,6 @@ export default function IntegrationsPage() {
                       ))}
                     </div>
                   </div>
-
-                  {/* Error Display */}
-                  <AnimatePresence>
-                    {canvasError && (
-                      <motion.div
-                        initial={{ opacity: 0, y: -10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -10 }}
-                        className="flex items-center gap-3 p-4 rounded-xl bg-red-500/10 border border-red-500/30"
-                      >
-                        <AlertCircle className="w-5 h-5 text-red-400" />
-                        <span className="text-red-400">{canvasError}</span>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
 
                   {/* Assignment Summary */}
                   {canvasAssignments.length > 0 && (
