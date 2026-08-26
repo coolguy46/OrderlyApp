@@ -152,7 +152,7 @@ export default function SetupPage() {
     { icon: Timer, label: 'Pomodoro Timer', desc: 'Focus sessions with gamified progress' },
     { icon: Users, label: 'Social', desc: 'Study with friends & compete on leaderboards' },
     { icon: GraduationCap, label: 'Exam Tracking', desc: 'Track preparation for upcoming exams' },
-    { icon: BookOpen, label: 'LMS Sync', desc: 'Import from Canvas & Google Classroom' },
+    { icon: BookOpen, label: 'LMS Sync', desc: 'Import assignments from Canvas' },
   ];
 
   return (
@@ -374,7 +374,7 @@ export default function SetupPage() {
                       </div>
                       <h2 className="text-2xl font-bold">Connect your LMS</h2>
                       <p className="text-muted-foreground mt-1">
-                        Import assignments automatically from Canvas or Google Classroom. You can always set this up later in Settings &rarr; Integrations.
+                        Import assignments automatically from Canvas. You can always set this up later in Settings &rarr; Integrations.
                       </p>
                     </div>
 
@@ -404,22 +404,6 @@ export default function SetupPage() {
                           Find this in Canvas &rarr; Calendar &rarr; Calendar Feed (link at the bottom)
                         </p>
                       </div>
-                    </div>
-
-                    {/* Google Classroom */}
-                    <div className="p-4 rounded-xl border border-border/50 bg-muted/30 space-y-3">
-                      <div className="flex items-center gap-3">
-                        <div className="p-2 rounded-lg bg-blue-500/10">
-                          <GraduationCap className="w-5 h-5 text-blue-500" />
-                        </div>
-                        <div className="flex-1">
-                          <p className="font-medium text-sm">Google Classroom</p>
-                          <p className="text-xs text-muted-foreground">Connect your Google account to sync courses and assignments</p>
-                        </div>
-                      </div>
-                      <p className="text-xs text-muted-foreground">
-                        Connect Google Classroom in Settings &rarr; Integrations after setup to import your courses and assignments automatically.
-                      </p>
                     </div>
 
                     <div className="text-center">

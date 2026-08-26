@@ -41,7 +41,7 @@ const TUTORIAL_STEPS: TutorialStep[] = [
   {
     id: 'tasks',
     title: 'Tasks',
-    description: 'Manage all your assignments and to-dos. Add tasks with due dates, priorities, and subjects. Tasks can be imported from Canvas or Google Classroom.',
+    description: 'Manage all your assignments and to-dos. Add tasks with due dates, priorities, and subjects. Tasks can also be imported from Canvas.',
     icon: CheckSquare,
     color: 'green',
     page: '/tasks',

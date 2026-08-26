@@ -476,7 +476,7 @@ export default function LandingPage() {
                 step: '02',
                 icon: Plug,
                 title: 'Connect Your Tools',
-                description: 'Import assignments automatically from Google Classroom or Canvas LMS. Your coursework syncs in seconds.',
+                description: 'Connect your Canvas calendar feed to import assignments and keep deadlines synchronized.',
                 color: 'from-purple-500 to-pink-600',
               },
               {
@@ -523,39 +523,17 @@ export default function LandingPage() {
           >
             <h2 className="text-4xl md:text-5xl font-bold mb-4 font-display">
               Works With Your
-              <span className="bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent"> Favorite Tools</span>
+              <span className="bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent"> School Calendar</span>
             </h2>
             <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
-              Seamlessly connect with the platforms your school already uses
+              Keep Canvas assignments and deadlines synchronized with Orderly
             </p>
           </motion.div>
 
-          <div className="grid md:grid-cols-2 gap-8 max-w-4xl mx-auto">
+          <div className="max-w-2xl mx-auto">
             <motion.div
-              initial={{ opacity: 0, x: -20 }}
-              whileInView={{ opacity: 1, x: 0 }}
-              viewport={{ once: true }}
-              whileHover={{ y: -4 }}
-              className="p-8 rounded-2xl border border-border/50 bg-card/50 hover:bg-card transition-all hover:shadow-xl hover:shadow-indigo-500/5"
-            >
-              <div className="w-14 h-14 rounded-xl bg-green-500/10 flex items-center justify-center mb-5">
-                <GraduationCap className="w-7 h-7 text-green-400" />
-              </div>
-              <h3 className="text-2xl font-bold mb-3">Google Classroom</h3>
-              <p className="text-muted-foreground mb-4">
-                Connect your Google Classroom account to automatically import all your courses, 
-                assignments, and due dates. Stay in sync with one click.
-              </p>
-              <div className="flex flex-wrap gap-2">
-                <span className="px-3 py-1 rounded-full bg-green-500/10 text-green-400 text-xs font-medium">Auto-sync</span>
-                <span className="px-3 py-1 rounded-full bg-green-500/10 text-green-400 text-xs font-medium">Read-only</span>
-                <span className="px-3 py-1 rounded-full bg-green-500/10 text-green-400 text-xs font-medium">OAuth 2.0</span>
-              </div>
-            </motion.div>
-
-            <motion.div
-              initial={{ opacity: 0, x: 20 }}
-              whileInView={{ opacity: 1, x: 0 }}
+              initial={{ opacity: 0, y: 20 }}
+              whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true }}
               whileHover={{ y: -4 }}
               className="p-8 rounded-2xl border border-border/50 bg-card/50 hover:bg-card transition-all hover:shadow-xl hover:shadow-indigo-500/5"

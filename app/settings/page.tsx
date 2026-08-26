@@ -354,7 +354,7 @@ export default function SettingsPage() {
                     </div>
                     <div>
                       <p className="font-medium">Integrations</p>
-                      <p className="text-sm text-muted-foreground">Connect with Canvas LMS, Google Classroom, and more</p>
+                      <p className="text-sm text-muted-foreground">Connect and sync assignments from Canvas LMS</p>
                     </div>
                   </div>
                   <ChevronRight className="w-5 h-5 text-muted-foreground group-hover:translate-x-1 transition-transform" />

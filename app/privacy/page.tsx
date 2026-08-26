@@ -48,30 +48,13 @@ export default function PrivacyPolicyPage() {
               <ul className="list-disc list-inside space-y-2 text-muted-foreground">
                 <li>Create an account (email address, name, profile information)</li>
                 <li>Use our study management features (tasks, goals, study sessions, exam schedules)</li>
-                <li>Connect third-party integrations (Google Classroom, Canvas LMS)</li>
+                <li>Connect third-party integrations such as Canvas LMS</li>
                 <li>Interact with social features (study groups, leaderboards)</li>
               </ul>
             </div>
 
             <div>
-              <h2 className="text-2xl font-semibold mb-3">3. Google Classroom Integration</h2>
-              <p className="text-muted-foreground leading-relaxed mb-3">
-                When you connect your Google Classroom account, we request access to:
-              </p>
-              <ul className="list-disc list-inside space-y-2 text-muted-foreground">
-                <li><strong>Google Classroom courses (read-only)</strong> — to display your enrolled classes and import course information</li>
-                <li><strong>Google Classroom coursework (read-only)</strong> — to import assignments, due dates, and course materials as tasks in Orderly</li>
-              </ul>
-              <p className="text-muted-foreground leading-relaxed mt-3">
-                We only access data necessary to provide the integration features you have explicitly enabled. 
-                We do not modify, delete, or write any data to your Google Classroom account. 
-                Your Google Classroom data is used solely to sync your assignments and courses 
-                within the Orderly application and is not shared with any third parties.
-              </p>
-            </div>
-
-            <div>
-              <h2 className="text-2xl font-semibold mb-3">4. Canvas LMS Integration</h2>
+              <h2 className="text-2xl font-semibold mb-3">3. Canvas LMS Integration</h2>
               <p className="text-muted-foreground leading-relaxed">
                 When you connect your Canvas LMS account via iCal feed URL, we access your calendar 
                 data (assignment names, due dates, and course information) to sync your Canvas assignments 
@@ -80,7 +63,7 @@ export default function PrivacyPolicyPage() {
             </div>
 
             <div>
-              <h2 className="text-2xl font-semibold mb-3">5. How We Use Your Information</h2>
+              <h2 className="text-2xl font-semibold mb-3">4. How We Use Your Information</h2>
               <ul className="list-disc list-inside space-y-2 text-muted-foreground">
                 <li>To provide, maintain, and improve our services</li>
                 <li>To manage your account and provide customer support</li>
@@ -92,18 +75,18 @@ export default function PrivacyPolicyPage() {
             </div>
 
             <div>
-              <h2 className="text-2xl font-semibold mb-3">6. Data Storage and Security</h2>
+              <h2 className="text-2xl font-semibold mb-3">5. Data Storage and Security</h2>
               <p className="text-muted-foreground leading-relaxed">
                 Your data is stored securely using Supabase infrastructure with PostgreSQL databases. 
                 We implement row-level security (RLS) policies to ensure that users can only access 
                 their own data. All data transmission is encrypted using TLS/SSL protocols. 
-                OAuth tokens for third-party integrations are stored securely and used only 
+                Third-party integration credentials are stored securely and used only
                 for the purposes described in this policy.
               </p>
             </div>
 
             <div>
-              <h2 className="text-2xl font-semibold mb-3">7. Data Sharing</h2>
+              <h2 className="text-2xl font-semibold mb-3">6. Data Sharing</h2>
               <p className="text-muted-foreground leading-relaxed">
                 We do not sell, trade, or rent your personal information to third parties. 
                 We may share your information only in the following circumstances:
@@ -117,7 +100,7 @@ export default function PrivacyPolicyPage() {
             </div>
 
             <div>
-              <h2 className="text-2xl font-semibold mb-3">8. Data Retention and Deletion</h2>
+              <h2 className="text-2xl font-semibold mb-3">7. Data Retention and Deletion</h2>
               <p className="text-muted-foreground leading-relaxed">
                 We retain your personal data for as long as your account is active. You may request 
                 deletion of your account and all associated data at any time by contacting us. 
@@ -127,19 +110,18 @@ export default function PrivacyPolicyPage() {
             </div>
 
             <div>
-              <h2 className="text-2xl font-semibold mb-3">9. Your Rights</h2>
+              <h2 className="text-2xl font-semibold mb-3">8. Your Rights</h2>
               <p className="text-muted-foreground leading-relaxed">You have the right to:</p>
               <ul className="list-disc list-inside space-y-2 text-muted-foreground mt-3">
                 <li>Access, update, or delete your personal information</li>
                 <li>Disconnect third-party integrations at any time</li>
-                <li>Revoke Google Classroom access through your Google Account settings</li>
                 <li>Request a copy of your data</li>
                 <li>Opt out of non-essential communications</li>
               </ul>
             </div>
 
             <div>
-              <h2 className="text-2xl font-semibold mb-3">10. Children&apos;s Privacy</h2>
+              <h2 className="text-2xl font-semibold mb-3">9. Children&apos;s Privacy</h2>
               <p className="text-muted-foreground leading-relaxed">
                 Orderly is designed for students aged 13 and older. We do not knowingly collect 
                 personal information from children under 13. If you believe we have collected 
@@ -148,7 +130,7 @@ export default function PrivacyPolicyPage() {
             </div>
 
             <div>
-              <h2 className="text-2xl font-semibold mb-3">11. Changes to This Policy</h2>
+              <h2 className="text-2xl font-semibold mb-3">10. Changes to This Policy</h2>
               <p className="text-muted-foreground leading-relaxed">
                 We may update this Privacy Policy from time to time. We will notify you of any 
                 changes by updating the &quot;Last updated&quot; date and, for significant changes, 
@@ -157,7 +139,7 @@ export default function PrivacyPolicyPage() {
             </div>
 
             <div>
-              <h2 className="text-2xl font-semibold mb-3">12. Contact Us</h2>
+              <h2 className="text-2xl font-semibold mb-3">11. Contact Us</h2>
               <p className="text-muted-foreground leading-relaxed">
                 If you have questions about this Privacy Policy or our data practices, 
                 please contact us at <a href="mailto:support@orderly.app" className="text-indigo-400 hover:text-indigo-300">support@orderly.app</a>.
