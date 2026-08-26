@@ -3,7 +3,6 @@
 import { useState, useEffect } from 'react';
 import { MainLayout } from '@/components/layout';
 import { Card, CardContent, Button, Input } from '@/components/ui';
-import type { CanvasAssignment } from '@/lib/integrations/canvas';
 import { useCanvasSyncSupabase, formatTimeUntilSync, formatLastSync } from '@/lib/integrations/useCanvasSyncSupabase';
 import { useAppStore } from '@/lib/store';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -39,11 +38,10 @@ function CanvasIcon({ className }: { className?: string }) {
 }
 
 export default function IntegrationsPage() {
-  const { user, refreshData } = useAppStore();
+  const { user, tasks, exams, refreshData } = useAppStore();
 
   // Canvas live sync hook with Supabase
   const {
-    assignments: canvasAssignments,
     isLoading: isCanvasLoading,
     isSyncing: isCanvasSyncing,
     error: canvasError,
@@ -77,6 +75,14 @@ export default function IntegrationsPage() {
     return () => clearInterval(interval);
   }, [nextSyncAt, lastSyncAt]);
 
+  // A background sync writes directly to the persisted tasks/exams tables.
+  // Refresh the app store whenever the server reports a newer completed sync
+  // so the overview stays accurate without requiring a manual Sync Now click.
+  const lastSyncTimestamp = lastSyncAt?.getTime() ?? 0;
+  useEffect(() => {
+    if (lastSyncTimestamp > 0) void refreshData();
+  }, [lastSyncTimestamp, refreshData]);
+
   // Canvas URL input state (separate from saved settings)
   const [canvasUrlInput, setCanvasUrlInput] = useState('');
 
@@ -96,21 +102,35 @@ export default function IntegrationsPage() {
     await syncNow();
   };
 
+  const canvasTasks = tasks.filter((task) => task.source === 'canvas');
+  const canvasExams = exams.filter((exam) => exam.source === 'canvas');
+  const now = Date.now();
+  const upcomingCanvasTasks = canvasTasks.filter((task) => {
+    if (task.status === 'completed' || !task.due_date) return false;
+    const dueAt = new Date(task.due_date).getTime();
+    return Number.isFinite(dueAt) && dueAt >= now;
+  });
+  const canvasCourseCount = new Set(
+    canvasTasks
+      .map((task) => task.course_name?.trim())
+      .filter((courseName): courseName is string => Boolean(courseName))
+  ).size;
+
   const assignmentSummary = [
-    { label: 'Assignments', value: canvasAssignments.length, tone: 'text-sky-400' },
+    { label: 'Assignments', value: canvasTasks.length, tone: 'text-sky-400' },
     {
       label: 'Upcoming',
-      value: canvasAssignments.filter((assignment: CanvasAssignment) => assignment.status === 'upcoming').length,
+      value: upcomingCanvasTasks.length,
       tone: 'text-emerald-400',
     },
     {
       label: 'Exams',
-      value: canvasAssignments.filter((assignment: CanvasAssignment) => assignment.type === 'exam').length,
+      value: canvasExams.length,
       tone: 'text-amber-400',
     },
     {
       label: 'Courses',
-      value: new Set(canvasAssignments.map((assignment: CanvasAssignment) => assignment.courseName)).size,
+      value: canvasCourseCount,
       tone: 'text-violet-400',
     },
   ];
@@ -231,7 +251,7 @@ export default function IntegrationsPage() {
                       <BookOpen className="h-4 w-4" />
                     </div>
                     <p className="text-xs text-muted-foreground">Imported</p>
-                    <p className="mt-1 text-sm font-semibold">{canvasAssignments.length} assignments</p>
+                    <p className="mt-1 text-sm font-semibold">{canvasTasks.length} assignments</p>
                   </div>
                 </div>
 
