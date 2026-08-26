@@ -647,6 +647,7 @@ export function WeekTimeGrid({
 
       <DndContext
         sensors={sensors}
+        autoScroll={false}
         collisionDetection={(args) => {
           const pointerCollisions = pointerWithin(args);
           if (args.pointerCoordinates) {
