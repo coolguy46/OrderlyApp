@@ -289,8 +289,15 @@ export async function getCanvasFeedSummary(icalUrl: string): Promise<CanvasFeedS
   const { assignments } = await loadCanvasAssignments(icalUrl);
   const courses = new Set(
     assignments
-      .map(assignment => assignment.courseName.trim().toLowerCase())
-      .filter(courseName => courseName && courseName !== 'unknown course')
+      .map(assignment => {
+        if (assignment.courseId) return `id:${assignment.courseId}`;
+        const courseName = assignment.courseName.trim().toLowerCase();
+        // Canvas can omit the readable course label while still providing a
+        // real course through the event URL. Keep one unknown identity as the
+        // final fallback instead of silently dropping that course.
+        return courseName ? `name:${courseName}` : null;
+      })
+      .filter((courseIdentity): courseIdentity is string => Boolean(courseIdentity))
   ).size;
 
   return { courses };

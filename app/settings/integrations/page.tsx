@@ -144,6 +144,8 @@ export default function IntegrationsPage() {
   const canvasCourseCount = new Set(
     canvasTasks
       .map((task) => {
+        const canvasCourseId = task.external_url?.match(/\/courses?\/(\d+)/i)?.[1];
+        if (canvasCourseId) return `canvas:${canvasCourseId}`;
         // The subject relation is the persisted course identity. Older Canvas
         // rows can have a valid subject_id even when course_name is blank.
         if (task.subject_id) return `subject:${task.subject_id}`;
