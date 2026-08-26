@@ -3,6 +3,7 @@ import { Inter, Plus_Jakarta_Sans } from "next/font/google";
 import "./globals.css";
 import { AuthGuard } from "@/components/auth/AuthGuard";
 import { ThemeProvider } from "@/components/providers/ThemeProvider";
+import { CanvasDataRefreshMonitor } from "@/components/providers/CanvasDataRefreshMonitor";
 import { Toaster } from "sonner";
 
 const inter = Inter({
@@ -37,6 +38,7 @@ export default function RootLayout({
       <body className={`${inter.variable} ${jakarta.variable} font-sans antialiased`}>
         <ThemeProvider>
           <AuthGuard>
+            <CanvasDataRefreshMonitor />
             {children}
           </AuthGuard>
           <Toaster richColors position="top-center" toastOptions={{ className: 'sm:!bottom-auto' }} />
