@@ -27,7 +27,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/Input';
-import { isTaskMissing, taskDueAt } from '@/lib/task-status';
+import { isTaskMissingFromPriorDay, taskDueAt } from '@/lib/task-status';
 import { useCurrentTime } from '@/lib/use-current-time';
 import { usePlannerStore } from '@/lib/planner/store';
 
@@ -50,7 +50,7 @@ const itemVariants = {
   }
 };
 
-export function TaskList() {
+export function TaskList({ initialFilter = 'pending' }: { initialFilter?: FilterOption }) {
   const { tasks, subjects, user } = useAppStore();
   const plannerUsers = usePlannerStore(state => state.users);
   const now = useCurrentTime();
@@ -60,7 +60,7 @@ export function TaskList() {
   const [showForm, setShowForm] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [sortBy, setSortBy] = useState<SortOption>('due_date');
-  const [filterBy, setFilterBy] = useState<FilterOption>('pending');
+  const [filterBy, setFilterBy] = useState<FilterOption>(initialFilter);
   const [filterSubject, setFilterSubject] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [showFilters, setShowFilters] = useState(false);
@@ -72,10 +72,10 @@ export function TaskList() {
     if (filterBy === 'pending') {
       filtered = filtered.filter((t) =>
         (t.status === 'pending' || t.status === 'in_progress')
-        && !isTaskMissing(t, now, timeZone)
+        && !isTaskMissingFromPriorDay(t, now, timeZone)
       );
     } else if (filterBy === 'missing') {
-      filtered = filtered.filter((t) => isTaskMissing(t, now, timeZone));
+      filtered = filtered.filter((t) => isTaskMissingFromPriorDay(t, now, timeZone));
     } else if (filterBy === 'completed') {
       filtered = filtered.filter((t) => t.status === 'completed');
     }
@@ -121,7 +121,7 @@ export function TaskList() {
   const stats = useMemo(() => {
     const total = tasks.length;
     const incomplete = tasks.filter((t) => t.status === 'pending' || t.status === 'in_progress').length;
-    const missing = tasks.filter((t) => isTaskMissing(t, now, timeZone)).length;
+    const missing = tasks.filter((t) => isTaskMissingFromPriorDay(t, now, timeZone)).length;
     const pending = incomplete - missing;
     const completed = tasks.filter((t) => t.status === 'completed').length;
     return { total, incomplete, pending, missing, completed };

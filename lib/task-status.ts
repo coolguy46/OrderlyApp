@@ -86,3 +86,17 @@ export function taskDueDayDistance(
       / 86_400_000,
   );
 }
+
+/**
+ * An unfinished task belongs in Missing only after its deadline date is
+ * before the current local date. Same-day overdue tasks stay in Today's Tasks.
+ */
+export function isTaskMissingFromPriorDay(
+  task: Task,
+  now: Date | number = Date.now(),
+  timeZone?: string,
+): boolean {
+  if (task.status === 'completed') return false;
+  const dayDistance = taskDueDayDistance(task, now, timeZone);
+  return dayDistance !== null && dayDistance < 0;
+}

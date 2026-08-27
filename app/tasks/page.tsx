@@ -1,12 +1,17 @@
-'use client';
-
 import { MainLayout } from '@/components/layout';
 import { TaskList } from '@/components/tasks';
 
-export default function TasksPage() {
+interface TasksPageProps {
+  searchParams: Promise<{ view?: string | string[] }>;
+}
+
+export default async function TasksPage({ searchParams }: TasksPageProps) {
+  const query = await searchParams;
+  const initialFilter = query.view === 'missing' ? 'missing' : 'pending';
+
   return (
     <MainLayout>
-      <TaskList />
+      <TaskList initialFilter={initialFilter} />
     </MainLayout>
   );
 }
