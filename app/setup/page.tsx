@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from '@/components/ui/Button';
@@ -8,13 +8,8 @@ import { Input } from '@/components/ui/Input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent } from '@/components/ui/Card';
 import {
-  Sparkles,
   ArrowRight,
   ArrowLeft,
-  CheckSquare,
-  Timer,
-  Users,
-  GraduationCap,
   User,
   BookOpen,
   Plus,
@@ -25,10 +20,16 @@ import {
   Check,
   Rocket,
   Link2,
-  ExternalLink,
+  AlertCircle,
 } from 'lucide-react';
 import { useAppStore } from '@/lib/store';
 import type { Theme } from '@/lib/store';
+import {
+  canvasFeedUrlValidationMessage,
+  normalizeCanvasFeedUrl,
+} from '@/lib/integrations/canvas-feed-url';
+import { SETUP_COMPLETED_STORAGE_NAMESPACE } from '@/lib/setup-completion';
+import { userScopedStorageKey } from '@/lib/user-scoped-storage';
 import * as db from '@/lib/supabase/services';
 
 const SUBJECT_COLORS = [
@@ -38,17 +39,60 @@ const SUBJECT_COLORS = [
   '#3b82f6', '#2563eb',
 ];
 
-const STEPS = ['welcome', 'profile', 'subjects', 'integrations', 'preferences', 'complete'] as const;
+const STEPS = ['profile', 'subjects', 'integrations', 'preferences', 'complete'] as const;
 type Step = typeof STEPS[number];
+
+class CanvasSetupValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'CanvasSetupValidationError';
+  }
+}
+
+async function validateCanvasFeedForSetup(rawUrl: string): Promise<string> {
+  let normalizedUrl: string;
+  try {
+    normalizedUrl = normalizeCanvasFeedUrl(rawUrl);
+  } catch (error) {
+    throw new CanvasSetupValidationError(
+      error instanceof Error ? error.message : 'Enter a valid Canvas calendar feed URL.',
+    );
+  }
+  let response: Response;
+  try {
+    response = await fetch('/api/canvas/validate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ icalUrl: normalizedUrl }),
+    });
+  } catch {
+    throw new CanvasSetupValidationError('Orderly could not validate Canvas right now. Check your connection and retry.');
+  }
+
+  const payload = await response.json().catch(() => null) as { valid?: boolean; error?: string } | null;
+  if (!response.ok || payload?.valid !== true) {
+    throw new CanvasSetupValidationError(
+      payload?.error || 'Orderly could not read that Canvas feed. Copy a fresh Calendar Feed URL and try again.',
+    );
+  }
+
+  return normalizedUrl;
+}
 
 export default function SetupPage() {
   const router = useRouter();
   const { user, updateUserProfile, addSubject, setTheme, theme, subjects } = useAppStore();
-  const [currentStep, setCurrentStep] = useState<Step>('welcome');
+  const [currentStep, setCurrentStep] = useState<Step>('profile');
   const [direction, setDirection] = useState(1);
 
   // Profile state
   const [displayName, setDisplayName] = useState('');
+  const userProfileSource = user ? `${user.id}:${user.full_name || ''}` : '';
+  const [displayNameSource, setDisplayNameSource] = useState(userProfileSource);
+  if (displayNameSource !== userProfileSource) {
+    setDisplayNameSource(userProfileSource);
+    setDisplayName(user?.full_name || '');
+  }
 
   // Subjects state
   const [newSubjectName, setNewSubjectName] = useState('');
@@ -57,17 +101,13 @@ export default function SetupPage() {
 
   // Integrations state
   const [canvasUrl, setCanvasUrl] = useState('');
+  const [canvasUrlError, setCanvasUrlError] = useState('');
 
   // Preferences state
   const [selectedTheme, setSelectedTheme] = useState<Theme>(theme);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
-
-  useEffect(() => {
-    if (user?.full_name) {
-      setDisplayName(user.full_name);
-    }
-  }, [user]);
+  const [setupError, setSetupError] = useState('');
 
   const stepIndex = STEPS.indexOf(currentStep);
   const progress = ((stepIndex) / (STEPS.length - 1)) * 100;
@@ -82,6 +122,16 @@ export default function SetupPage() {
     setDirection(-1);
     const prev = STEPS[stepIndex - 1];
     if (prev) setCurrentStep(prev);
+  };
+
+  const handleIntegrationContinue = () => {
+    const error = canvasUrl.trim() ? canvasFeedUrlValidationMessage(canvasUrl) : null;
+    if (error) {
+      setCanvasUrlError(error);
+      return;
+    }
+    setCanvasUrlError('');
+    goNext();
   };
 
   const handleAddSubject = () => {
@@ -100,42 +150,88 @@ export default function SetupPage() {
   };
 
   const handleFinish = async () => {
-    if (!user) return;
+    if (!user) {
+      setSetupError('Your session is no longer available. Sign in again, then retry setup.');
+      return;
+    }
     setIsSubmitting(true);
+    setSetupError('');
 
     try {
+      // Save Canvas first so a retryable connection failure cannot leave
+      // duplicated subjects from a partially completed setup attempt.
+      if (canvasUrl.trim()) {
+        const validatedCanvasUrl = await validateCanvasFeedForSetup(canvasUrl);
+        const browserTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+        const savedCanvasSettings = await db.upsertCanvasSettings(user.id, {
+          ical_url: validatedCanvasUrl,
+          last_sync_at: null,
+          sync_enabled: true,
+          // Date-only Canvas assignments are due at 11:59 PM in the user's
+          // timezone. Save that zone atomically with the connection so the
+          // first background sync cannot hydrate them as UTC.
+          time_zone: browserTimeZone,
+        });
+        if (!savedCanvasSettings) {
+          throw new Error('We could not save your Canvas connection. Check the feed URL and try again.');
+        }
+      }
+
       // Save profile name if changed
       if (displayName.trim() && displayName.trim() !== user.full_name) {
-        await updateUserProfile({ full_name: displayName.trim() });
+        const updatedProfile = await updateUserProfile({ full_name: displayName.trim() });
+        if (!updatedProfile) {
+          throw new Error('We could not save your profile. Please try again.');
+        }
       }
 
       // Save subjects
+      const savedSubjectNames = new Set(subjects.map(subject => subject.name.trim().toLowerCase()));
       for (const subject of addedSubjects) {
-        await addSubject({ user_id: user.id, name: subject.name, color: subject.color });
-      }
+        const normalizedName = subject.name.trim().toLowerCase();
+        if (savedSubjectNames.has(normalizedName)) continue;
 
-      // Save Canvas integration if URL provided
-      if (canvasUrl.trim()) {
-        try {
-          await db.upsertCanvasSettings(user.id, {
-            ical_url: canvasUrl.trim(),
-            last_sync_at: null,
-            sync_enabled: true,
-          });
-        } catch (err) {
-          console.error('Error saving Canvas settings:', err);
+        const createdSubject = await addSubject({
+          user_id: user.id,
+          name: subject.name,
+          color: subject.color,
+        });
+        if (!createdSubject) {
+          throw new Error(`We could not save ${subject.name}. Please try again.`);
         }
+        savedSubjectNames.add(normalizedName);
       }
 
       // Save theme
       setTheme(selectedTheme);
 
-      // Mark setup as complete
-      localStorage.setItem('orderly-setup-complete', 'true');
+      // Supabase Auth metadata is the durable source of truth. The scoped
+      // browser marker is only a fast cache and a compatibility bridge for
+      // accounts that completed setup in an older release.
+      const setupMarked = await db.markSetupComplete(user.id);
+      if (!setupMarked) {
+        throw new Error('We could not confirm setup completion. Please retry.');
+      }
+      const setupStorageKey = userScopedStorageKey(SETUP_COMPLETED_STORAGE_NAMESPACE, user.id);
+      try {
+        if (setupStorageKey) localStorage.setItem(setupStorageKey, 'true');
+      } catch {
+        // Auth metadata is the durable source of truth. A blocked browser
+        // cache must not trap a successfully completed account in setup.
+      }
 
-      router.push('/');
+      router.replace('/');
     } catch (error) {
       console.error('Error completing setup:', error);
+      if (error instanceof CanvasSetupValidationError) {
+        setCanvasUrlError(error.message);
+        setDirection(-1);
+        setCurrentStep('integrations');
+        return;
+      }
+      setSetupError(error instanceof Error
+        ? error.message
+        : 'We could not finish setup. Your details are still here, so you can retry.');
     } finally {
       setIsSubmitting(false);
     }
@@ -146,14 +242,6 @@ export default function SetupPage() {
     center: { x: 0, opacity: 1 },
     exit: (dir: number) => ({ x: dir > 0 ? -300 : 300, opacity: 0 }),
   };
-
-  const features = [
-    { icon: CheckSquare, label: 'Smart Tasks', desc: 'Manage assignments with priorities & due dates' },
-    { icon: Timer, label: 'Pomodoro Timer', desc: 'Focus sessions with gamified progress' },
-    { icon: Users, label: 'Social', desc: 'Study with friends & compete on leaderboards' },
-    { icon: GraduationCap, label: 'Exam Tracking', desc: 'Track preparation for upcoming exams' },
-    { icon: BookOpen, label: 'LMS Sync', desc: 'Import assignments from Canvas' },
-  ];
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-background via-background to-indigo-500/10">
@@ -195,37 +283,6 @@ export default function SetupPage() {
                 exit="exit"
                 transition={{ duration: 0.3, ease: 'easeInOut' }}
               >
-                {/* Step: Welcome */}
-                {currentStep === 'welcome' && (
-                  <div className="text-center space-y-8">
-                    <div className="mx-auto w-16 h-16 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center">
-                      <Sparkles className="w-8 h-8 text-white" />
-                    </div>
-                    <div>
-                      <h1 className="text-3xl font-bold mb-2">Welcome to Orderly!</h1>
-                      <p className="text-muted-foreground text-lg">
-                        Let&apos;s get you set up in just a few steps.
-                      </p>
-                    </div>
-
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 text-left">
-                      {features.map((feature, i) => (
-                        <motion.div
-                          key={feature.label}
-                          initial={{ opacity: 0, y: 20 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          transition={{ delay: 0.1 + i * 0.08 }}
-                          className="p-4 rounded-xl border border-border/50 bg-muted/30 space-y-2"
-                        >
-                          <feature.icon className="w-5 h-5 text-indigo-400" />
-                          <p className="font-medium text-sm">{feature.label}</p>
-                          <p className="text-xs text-muted-foreground">{feature.desc}</p>
-                        </motion.div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
                 {/* Step: Profile */}
                 {currentStep === 'profile' && (
                   <div className="space-y-6">
@@ -235,7 +292,7 @@ export default function SetupPage() {
                       </div>
                       <h2 className="text-2xl font-bold">What should we call you?</h2>
                       <p className="text-muted-foreground mt-1">
-                        This is how you&apos;ll appear to friends and on leaderboards.
+                        This is how your name will appear across Orderly.
                       </p>
                     </div>
 
@@ -292,11 +349,13 @@ export default function SetupPage() {
                         />
                       </div>
                       <div className="space-y-2">
-                        <Label>Color</Label>
+                        <Label htmlFor="subjectColorCycle">Color</Label>
                         <div className="relative">
                           <button
+                            id="subjectColorCycle"
                             type="button"
-                            className="w-10 h-10 rounded-lg border border-border shadow-sm"
+                            aria-label={`Current subject color ${newSubjectColor}. Select the next color.`}
+                            className="w-10 h-10 rounded-lg border border-border shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                             style={{ backgroundColor: newSubjectColor }}
                             onClick={() => {
                               const currentIndex = SUBJECT_COLORS.indexOf(newSubjectColor);
@@ -309,6 +368,7 @@ export default function SetupPage() {
                         onClick={handleAddSubject}
                         disabled={!newSubjectName.trim()}
                         size="icon"
+                        aria-label="Add subject"
                         className="h-10 w-10 shrink-0"
                       >
                         <Plus className="w-4 h-4" />
@@ -322,6 +382,8 @@ export default function SetupPage() {
                           key={color}
                           type="button"
                           onClick={() => setNewSubjectColor(color)}
+                          aria-label={`Use subject color ${color}`}
+                          aria-pressed={newSubjectColor === color}
                           className={`w-6 h-6 rounded-full transition-all ${
                             newSubjectColor === color ? 'ring-2 ring-offset-2 ring-offset-background ring-indigo-500 scale-110' : 'hover:scale-110'
                           }`}
@@ -349,7 +411,8 @@ export default function SetupPage() {
                             <button
                               type="button"
                               onClick={() => handleRemoveSubject(subject.name)}
-                              className="text-muted-foreground hover:text-destructive transition-colors"
+                              aria-label={`Remove ${subject.name}`}
+                              className="text-muted-foreground hover:text-destructive transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
                             >
                               <X className="w-4 h-4" />
                             </button>
@@ -398,11 +461,26 @@ export default function SetupPage() {
                           type="url"
                           placeholder="https://canvas.instructure.com/feeds/calendars/user_xxx.ics"
                           value={canvasUrl}
-                          onChange={(e) => setCanvasUrl(e.target.value)}
+                          onChange={(e) => {
+                            setCanvasUrl(e.target.value);
+                            if (canvasUrlError) setCanvasUrlError('');
+                          }}
+                          onBlur={() => {
+                            if (canvasUrl.trim()) {
+                              setCanvasUrlError(canvasFeedUrlValidationMessage(canvasUrl) || '');
+                            }
+                          }}
+                          aria-invalid={Boolean(canvasUrlError)}
+                          aria-describedby={canvasUrlError ? 'canvasUrlHelp canvasUrlError' : 'canvasUrlHelp'}
                         />
-                        <p className="text-xs text-muted-foreground">
+                        <p id="canvasUrlHelp" className="text-xs text-muted-foreground">
                           Find this in Canvas &rarr; Calendar &rarr; Calendar Feed (link at the bottom)
                         </p>
+                        {canvasUrlError && (
+                          <p id="canvasUrlError" role="alert" className="text-xs text-red-400">
+                            {canvasUrlError}
+                          </p>
+                        )}
                       </div>
                     </div>
 
@@ -437,6 +515,7 @@ export default function SetupPage() {
                           key={option.value}
                           type="button"
                           onClick={() => setSelectedTheme(option.value)}
+                          aria-pressed={selectedTheme === option.value}
                           className={`p-4 rounded-xl border-2 transition-all flex flex-col items-center gap-2 ${
                             selectedTheme === option.value
                               ? 'border-indigo-500 bg-indigo-500/10'
@@ -473,7 +552,7 @@ export default function SetupPage() {
                       <Rocket className="w-10 h-10 text-white" />
                     </motion.div>
                     <div>
-                      <h2 className="text-3xl font-bold mb-2">You&apos;re all set!</h2>
+                      <h2 className="text-3xl font-bold mb-2">Ready to finish?</h2>
                       <p className="text-muted-foreground text-lg">
                         Welcome aboard{displayName ? `, ${displayName}` : ''}. Time to ace your studies.
                       </p>
@@ -484,10 +563,21 @@ export default function SetupPage() {
                         <p>{addedSubjects.length} subject{addedSubjects.length !== 1 ? 's' : ''} ready to go</p>
                       )}
                       {canvasUrl.trim() && (
-                        <p>Canvas integration connected</p>
+                        <p>Canvas integration ready to connect</p>
                       )}
                       <p>Theme: {selectedTheme.charAt(0).toUpperCase() + selectedTheme.slice(1)}</p>
                     </div>
+
+                    {setupError && (
+                      <div
+                        role="alert"
+                        aria-live="assertive"
+                        className="mx-auto flex max-w-lg items-start gap-2 rounded-lg border border-red-500/25 bg-red-500/10 p-3 text-left text-sm text-red-300"
+                      >
+                        <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                        <span>{setupError} Your setup details are still here.</span>
+                      </div>
+                    )}
                   </div>
                 )}
               </motion.div>
@@ -496,7 +586,7 @@ export default function SetupPage() {
             {/* Navigation buttons */}
             <div className="flex items-center justify-between mt-8 pt-6 border-t border-border/50">
               <div>
-                {stepIndex > 0 && currentStep !== 'complete' && (
+                {stepIndex > 0 && (
                   <Button variant="ghost" onClick={goBack}>
                     <ArrowLeft className="w-4 h-4" />
                     Back
@@ -504,15 +594,6 @@ export default function SetupPage() {
                 )}
               </div>
               <div>
-                {currentStep === 'welcome' && (
-                  <Button
-                    onClick={goNext}
-                    className="bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700"
-                  >
-                    Get Started
-                    <ArrowRight className="w-4 h-4" />
-                  </Button>
-                )}
                 {currentStep === 'profile' && (
                   <Button
                     onClick={goNext}
@@ -534,7 +615,7 @@ export default function SetupPage() {
                 )}
                 {currentStep === 'integrations' && (
                   <Button
-                    onClick={goNext}
+                    onClick={handleIntegrationContinue}
                     className="bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700"
                   >
                     {canvasUrl.trim() ? 'Continue' : 'Skip'}
@@ -560,7 +641,7 @@ export default function SetupPage() {
                       <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                     ) : (
                       <>
-                        Go to Dashboard
+                        {setupError ? 'Retry setup' : 'Go to Dashboard'}
                         <ArrowRight className="w-4 h-4" />
                       </>
                     )}

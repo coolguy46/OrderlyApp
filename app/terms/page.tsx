@@ -43,8 +43,8 @@ export default function TermsOfServicePage() {
             <div>
               <h2 className="text-2xl font-semibold mb-3">2. Description of Service</h2>
               <p className="text-muted-foreground leading-relaxed">
-                Orderly is a web-based student productivity platform that provides task management, 
-                study timer, goal tracking, exam preparation tools, analytics, and social learning features. 
+                Orderly is a web-based student productivity platform that provides task management,
+                calendar and schedule planning, a study timer, goal tracking, and exam tracking.
                 The Service also offers an integration with Canvas LMS to help students sync academic data.
               </p>
             </div>

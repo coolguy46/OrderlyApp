@@ -49,7 +49,7 @@ export default function PrivacyPolicyPage() {
                 <li>Create an account (email address, name, profile information)</li>
                 <li>Use our study management features (tasks, goals, study sessions, exam schedules)</li>
                 <li>Connect third-party integrations such as Canvas LMS</li>
-                <li>Interact with social features (study groups, leaderboards)</li>
+                <li>Interact with friends and the study-time leaderboard</li>
               </ul>
             </div>
 
@@ -68,8 +68,8 @@ export default function PrivacyPolicyPage() {
                 <li>To provide, maintain, and improve our services</li>
                 <li>To manage your account and provide customer support</li>
                 <li>To sync your academic data from connected integrations</li>
-                <li>To display your study analytics and progress tracking</li>
-                <li>To enable social features like leaderboards and study groups</li>
+                <li>To display task, goal, exam, and study progress</li>
+                <li>To enable friend connections and the study-time leaderboard</li>
                 <li>To send important updates about our services (with your consent)</li>
               </ul>
             </div>

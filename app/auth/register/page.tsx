@@ -10,20 +10,20 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Separator } from '@/components/ui/separator';
-import { Sparkles, Mail, Lock, User, ArrowRight, Github, Chrome, Check } from 'lucide-react';
+import { Sparkles, Mail, Lock, User, ArrowRight, Chrome, Check, AlertCircle } from 'lucide-react';
 import { useAppStore } from '@/lib/store';
 import { signInWithGoogle } from '@/lib/supabase/services';
 
 const features = [
-  'Smart task management with priorities',
-  'Pomodoro timer with gamification',
-  'Visual progress tracking',
-  'Social study competitions',
+  'Tasks with exact due dates and times',
+  'Background Canvas assignment sync',
+  'A flexible hour-by-hour schedule',
+  'Goals, exams, and a focus timer',
 ];
 
 export default function RegisterPage() {
   const router = useRouter();
-  const { register, login } = useAppStore();
+  const { register } = useAppStore();
   const [isLoading, setIsLoading] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
@@ -33,9 +33,11 @@ export default function RegisterPage() {
   });
   const [acceptTerms, setAcceptTerms] = useState(false);
   const [error, setError] = useState('');
+  const [confirmationRequired, setConfirmationRequired] = useState(false);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFormData({ ...formData, [e.target.id]: e.target.value });
+    if (error) setError('');
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -54,12 +56,18 @@ export default function RegisterPage() {
     setIsLoading(true);
     
     try {
-      const success = await register(formData.email, formData.password, formData.name);
-      if (success) {
+      const outcome = await register(formData.email, formData.password, formData.name);
+      if (outcome === 'authenticated') {
         router.push('/');
+      } else if (outcome === 'confirmation-required') {
+        setConfirmationRequired(true);
+      } else {
+        setError('We could not create your account. Please check your details and try again.');
       }
-    } catch (err: any) {
-      setError(err?.message || 'Registration failed. Please try again.');
+    } catch (caughtError) {
+      setError(caughtError instanceof Error
+        ? caughtError.message
+        : 'Registration failed. Please try again.');
     } finally {
       setIsLoading(false);
     }
@@ -70,7 +78,7 @@ export default function RegisterPage() {
     setError('');
     try {
       await signInWithGoogle();
-    } catch (err) {
+    } catch {
       setError('Google sign-in failed. Please try again.');
       setIsLoading(false);
     }
@@ -101,7 +109,7 @@ export default function RegisterPage() {
             </div>
             <h1 className="text-3xl font-bold mb-2">Start your learning journey</h1>
             <p className="text-muted-foreground">
-              Join thousands of students who are mastering their academic goals with Orderly.
+              Bring assignments, plans, goals, and focus time together in one clear workspace.
             </p>
           </div>
 
@@ -156,7 +164,30 @@ export default function RegisterPage() {
               </span>
             </div>
 
+            {error && (
+              <div
+                role="alert"
+                aria-live="assertive"
+                className="flex items-start gap-2 rounded-lg border border-red-500/25 bg-red-500/10 p-3 text-sm text-red-300"
+              >
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>{error}</span>
+              </div>
+            )}
+
             {/* Registration Form */}
+            {confirmationRequired ? (
+              <div
+                role="status"
+                aria-live="polite"
+                className="space-y-3 rounded-lg border border-green-500/25 bg-green-500/10 p-4 text-sm text-green-200"
+              >
+                <p>Check your email to finish creating or accessing your account.</p>
+                <Link href="/auth/login" className="inline-flex font-medium text-green-100 underline underline-offset-4">
+                  Return to sign in
+                </Link>
+              </div>
+            ) : (
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="name">Full name</Label>
@@ -256,6 +287,7 @@ export default function RegisterPage() {
                 )}
               </Button>
             </form>
+            )}
           </CardContent>
 
           <CardFooter className="justify-center">
