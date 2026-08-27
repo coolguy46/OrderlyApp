@@ -199,7 +199,7 @@ export function ScheduleCalendar() {
   }, [setActiveUser, userId]);
 
   useEffect(() => {
-    const refresh = () => setStoredEvents(readStoredCalendarEvents());
+    const refresh = () => setStoredEvents(readStoredCalendarEvents(userId));
     refresh();
     window.addEventListener('storage', refresh);
     window.addEventListener('orderly-calendar-events-changed', refresh);
@@ -207,7 +207,7 @@ export function ScheduleCalendar() {
       window.removeEventListener('storage', refresh);
       window.removeEventListener('orderly-calendar-events-changed', refresh);
     };
-  }, []);
+  }, [userId]);
 
   const plannerRecord = userId ? plannerUsers[userId] : null;
   const timeZone = plannerRecord?.settings.timeZone
@@ -215,8 +215,13 @@ export function ScheduleCalendar() {
     || 'UTC';
   useEffect(() => {
     const today = dateCarrierInTimeZone(timeZone);
-    setWeekStart(startOfWeek(today, { weekStartsOn: WEEK_STARTS_ON }));
-    setSelectedDate(today);
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      setWeekStart(startOfWeek(today, { weekStartsOn: WEEK_STARTS_ON }));
+      setSelectedDate(today);
+    });
+    return () => { cancelled = true; };
   }, [timeZone]);
   const entries = useMemo(
     () => selectScheduleEntriesForUser(entriesByUser, userId),
@@ -334,7 +339,7 @@ export function ScheduleCalendar() {
         ? { ...event, occurrenceOverrides: updated.occurrenceOverrides }
         : event);
       setStoredEvents(nextEvents);
-      writeStoredCalendarEvents(nextEvents);
+      writeStoredCalendarEvents(userId, nextEvents);
     } else {
       upsertCommitment(userId, updated);
     }

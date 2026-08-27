@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Subject, Task, TaskPriority, TaskStatus } from '@/lib/supabase/types';
 import { useAppStore } from '@/lib/store';
 import { Button } from '@/components/ui/Button';
@@ -37,6 +37,7 @@ import {
   parseDurationInput,
   scheduledEndAt,
 } from '@/lib/schedule/selectors';
+import { saveExistingTaskInOrder } from '@/lib/task-form-save-sequence';
 
 interface TaskFormProps {
   isOpen: boolean;
@@ -48,9 +49,15 @@ const SUBJECT_COLORS = [
   '#6366f1', '#8b5cf6', '#ec4899', '#f43f5e', '#f97316',
   '#eab308', '#22c55e', '#14b8a6', '#06b6d4', '#3b82f6'
 ];
+const SUBJECT_COLOR_NAMES: Record<string, string> = {
+  '#6366f1': 'indigo', '#8b5cf6': 'violet', '#ec4899': 'pink',
+  '#f43f5e': 'rose', '#f97316': 'orange', '#eab308': 'yellow',
+  '#22c55e': 'green', '#14b8a6': 'teal', '#06b6d4': 'cyan',
+  '#3b82f6': 'blue',
+};
 
 export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
-  const { addTask, updateTask, subjects, addSubject, deleteSubject, user } = useAppStore();
+  const { addTask, updateTask, completeTask, subjects, addSubject, deleteSubject, user } = useAppStore();
   const plannerUsers = usePlannerStore(state => state.users);
   const timeZone = (user?.id ? plannerUsers[user.id]?.settings.timeZone : null)
     || Intl.DateTimeFormat().resolvedOptions().timeZone
@@ -81,20 +88,36 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
   const [scheduleDate, setScheduleDate] = useState('');
   const [scheduleStartTime, setScheduleStartTime] = useState('');
   const [durationInput, setDurationInput] = useState('');
+  const [titleError, setTitleError] = useState('');
   const [scheduleError, setScheduleError] = useState('');
+  const [saveError, setSaveError] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [recurrence, setRecurrence] = useState<'none' | 'daily' | 'weekly' | 'monthly'>('none');
   const [recurrenceDays, setRecurrenceDays] = useState<number[]>([]);
   
   const [showNewSubject, setShowNewSubject] = useState(false);
   const [newSubjectName, setNewSubjectName] = useState('');
   const [newSubjectColor, setNewSubjectColor] = useState(SUBJECT_COLORS[0]);
+  const [subjectCreateError, setSubjectCreateError] = useState('');
+  const [isCreatingSubject, setIsCreatingSubject] = useState(false);
   const [subjectSelectOpen, setSubjectSelectOpen] = useState(false);
   const [subjectToDelete, setSubjectToDelete] = useState<Subject | null>(null);
+  const formSessionRef = useRef(0);
+
+  // Closing/reopening the form (including reopening another record) invalidates
+  // every async continuation started by the previous form session.
+  useEffect(() => {
+    formSessionRef.current += 1;
+  }, [isOpen, task?.id]);
 
   useEffect(() => {
     if (!manualPriority && dueDate && !task) {
       const suggestedPriority = calculateSuggestedPriority(dueDate);
-      setPriority(suggestedPriority);
+      let cancelled = false;
+      queueMicrotask(() => {
+        if (!cancelled) setPriority(suggestedPriority);
+      });
+      return () => { cancelled = true; };
     }
   }, [dueDate, manualPriority, task]);
 
@@ -104,44 +127,68 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
   };
 
   useEffect(() => {
-    if (task) {
-      setTitle(task.title);
-      setDescription(task.description || '');
-      setPriority(task.priority);
-      setStatus(task.status);
-      setSubjectId(task.subject_id || 'none');
-      setDueDate(task.due_date
-        ? localDateFromIso(
-          task.due_date,
-            timeZone,
-          ) || ''
-        : '');
-      setDueTime(task.due_time || '');
-      setScheduleDate(scheduleEntry?.scheduledDate || '');
-      setScheduleStartTime(scheduleEntry?.startAt
-        ? localTimeFromIso(scheduleEntry.startAt, timeZone) || ''
-        : '');
-      setDurationInput(formatDurationInput(scheduleEntry?.durationSeconds));
-      setScheduleError('');
-      setRecurrence(task.recurrence || 'none');
-      setRecurrenceDays(task.recurrence_days || []);
-    } else {
-      resetForm();
-    }
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      if (task) {
+        setTitle(task.title);
+        setDescription(task.description || '');
+        setPriority(task.priority);
+        setStatus(task.status);
+        setSubjectId(task.subject_id || 'none');
+        setDueDate(task.due_date
+          ? localDateFromIso(task.due_date, timeZone) || ''
+          : '');
+        setDueTime(task.due_time || '');
+        setScheduleDate(scheduleEntry?.scheduledDate || '');
+        setScheduleStartTime(scheduleEntry?.startAt
+          ? localTimeFromIso(scheduleEntry.startAt, timeZone) || ''
+          : '');
+        setDurationInput(formatDurationInput(scheduleEntry?.durationSeconds));
+        setTitleError('');
+        setScheduleError('');
+        setSaveError('');
+        setRecurrence(task.recurrence || 'none');
+        setRecurrenceDays(task.recurrence_days || []);
+      } else {
+        resetForm();
+      }
+    });
+    return () => { cancelled = true; };
   }, [task, isOpen, scheduleEntry, timeZone]);
 
   const handleCreateSubject = async () => {
-    if (!newSubjectName.trim()) return;
+    const subjectName = newSubjectName.trim();
+    if (!subjectName) {
+      setSubjectCreateError('Enter a subject name.');
+      return;
+    }
+
+    setSubjectCreateError('');
+    setIsCreatingSubject(true);
+    const submitSession = formSessionRef.current;
     try {
-      await addSubject({
+      const createdSubject = await addSubject({
         user_id: user?.id || '',
-        name: newSubjectName.trim(),
+        name: subjectName,
         color: newSubjectColor,
       });
+      if (formSessionRef.current !== submitSession) return;
+      if (!createdSubject) {
+        setSubjectCreateError('Could not create this subject. Your name and color are still here—please try again.');
+        return;
+      }
+
+      setSubjectId(createdSubject.id);
       setNewSubjectName('');
       setShowNewSubject(false);
     } catch (error) {
       console.error('Failed to create subject:', error);
+      if (formSessionRef.current === submitSession) {
+        setSubjectCreateError('Could not create this subject. Your name and color are still here—please try again.');
+      }
+    } finally {
+      if (formSessionRef.current === submitSession) setIsCreatingSubject(false);
     }
   };
 
@@ -166,7 +213,11 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!title.trim()) return;
+    if (!title.trim()) {
+      setTitleError('Enter a title before saving this task.');
+      return;
+    }
+    setTitleError('');
 
     let durationSeconds: number | null = null;
     if (durationInput.trim()) {
@@ -223,14 +274,21 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
       return;
     }
     setScheduleError('');
+    setSaveError('');
+    setIsSubmitting(true);
+    const submitSession = formSessionRef.current;
+    const isCurrentSubmission = () => formSessionRef.current === submitSession;
 
     try {
+      const completingFromForm = Boolean(task && task.status !== 'completed' && status === 'completed');
       const taskData = {
         user_id: user?.id || '',
-        title,
+        title: title.trim(),
         description: description || null,
         priority,
-        status,
+        // Completion has side effects (recurrence and statistics), so preserve
+        // the current state until the guarded completion action runs below.
+        status: completingFromForm && task ? task.status : status,
         subject_id: subjectId === 'none' ? null : subjectId,
         // Store the real deadline instant. Previously this discarded
         // `deadlineAt` and saved local midnight, so a 3 PM task could not
@@ -239,21 +297,18 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
         due_time: dueTime || null,
         recurrence,
         recurrence_days: recurrence === 'weekly' && recurrenceDays.length > 0 ? recurrenceDays : null,
-        completed_at: status === 'completed' ? task?.completed_at || new Date().toISOString() : null,
+        completed_at: completingFromForm
+          ? task?.completed_at || null
+          : status === 'completed'
+            ? task?.completed_at || new Date().toISOString()
+            : null,
       };
 
-      let savedTask: Task | null = task || null;
-      if (task) {
-        await updateTask(task.id, taskData);
-      } else {
-        savedTask = await addTask(taskData);
-        if (!savedTask) return;
-      }
-
-      if (savedTask && user?.id) {
+      const persistSchedule = (taskId: string) => {
+        if (!user?.id) return;
         const hasScheduleMetadata = Boolean(scheduleDate || startAt || durationSeconds);
         if (hasScheduleMetadata) {
-          upsertTaskSchedule(user.id, savedTask.id, {
+          upsertTaskSchedule(user.id, taskId, {
             scheduledDate: scheduleDate || null,
             startAt,
             durationSeconds,
@@ -262,18 +317,50 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
             recurrenceEndDate: scheduleEntry?.recurrenceEndDate || null,
           });
         } else {
-          removeTaskSchedule(user.id, savedTask.id);
+          removeTaskSchedule(user.id, taskId);
         }
+      };
+
+      if (task) {
+        const saveResult = await saveExistingTaskInOrder({
+          saveDetails: () => updateTask(task.id, taskData),
+          persistSchedule: () => persistSchedule(task.id),
+          completeTask: () => completeTask(task.id),
+          shouldComplete: completingFromForm,
+          isCurrent: isCurrentSubmission,
+        });
+        if (saveResult === 'cancelled') return;
+        if (saveResult === 'details-failed') {
+          setSaveError('Orderly could not save this task. Your changes are still here—please try again.');
+          return;
+        }
+        if (saveResult === 'completion-failed') {
+          setSaveError('The task details were saved, but completion did not finish. Please try the checkbox again.');
+          return;
+        }
+      } else {
+        const savedTask = await addTask(taskData);
+        if (!isCurrentSubmission()) return;
+        if (!savedTask) {
+          setSaveError('Orderly could not create this task. Your changes are still here—please try again.');
+          return;
+        }
+        persistSchedule(savedTask.id);
       }
     } catch (error) {
       console.error('Task submit error:', error);
+      if (isCurrentSubmission()) {
+        setSaveError('Orderly could not save this task. Your changes are still here—please try again.');
+      }
+      return;
+    } finally {
+      if (isCurrentSubmission()) setIsSubmitting(false);
     }
 
-    onClose();
-    resetForm();
+    if (isCurrentSubmission()) closeForm();
   };
 
-  const resetForm = () => {
+  function resetForm() {
     setTitle('');
     setDescription('');
     setPriority('medium');
@@ -285,18 +372,29 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
     setScheduleDate('');
     setScheduleStartTime('');
     setDurationInput('');
+    setTitleError('');
     setScheduleError('');
+    setSaveError('');
     setRecurrence('none');
     setRecurrenceDays([]);
     setShowNewSubject(false);
     setNewSubjectName('');
+    setSubjectCreateError('');
+    setIsCreatingSubject(false);
+    setIsSubmitting(false);
     setSubjectSelectOpen(false);
     setSubjectToDelete(null);
-  };
+  }
+
+  function closeForm() {
+    formSessionRef.current += 1;
+    onClose();
+    resetForm();
+  }
 
   return (
     <>
-      <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+      <Dialog open={isOpen} onOpenChange={(open) => !open && closeForm()}>
         <DialogContent className="max-h-[92vh] overflow-y-auto p-0 sm:max-w-[540px]">
         {/* Header */}
         <div className="px-6 pt-6 pb-4 bg-gradient-to-b from-indigo-500/5 to-transparent">
@@ -335,9 +433,19 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
               id="title"
               placeholder="What needs to be done?"
               value={title}
-              onChange={(e) => setTitle(e.target.value)}
+              onChange={(e) => {
+                setTitle(e.target.value);
+                if (titleError) setTitleError('');
+              }}
+              aria-invalid={Boolean(titleError)}
+              aria-describedby={titleError ? 'task-title-error' : undefined}
               className="h-10 bg-muted/30 border-border/50 focus:bg-background"
             />
+            {titleError && (
+              <p id="task-title-error" role="alert" className="text-xs text-red-400">
+                {titleError}
+              </p>
+            )}
           </div>
 
           {/* Description */}
@@ -360,7 +468,7 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
           {/* Priority & Status row */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+              <Label htmlFor="task-priority" className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
                 <Flag className="w-3 h-3" />
                 Priority
                 {!manualPriority && dueDate && (
@@ -371,7 +479,7 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
                 )}
               </Label>
               <Select value={priority} onValueChange={handlePriorityChange}>
-                <SelectTrigger className="h-9 bg-muted/30 border-border/50">
+                <SelectTrigger id="task-priority" className="h-9 bg-muted/30 border-border/50">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -398,12 +506,12 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
             </div>
 
             <div className="space-y-1.5">
-              <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+              <Label htmlFor="task-status" className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
                 <Tag className="w-3 h-3" />
                 Status
               </Label>
               <Select value={status} onValueChange={(v) => setStatus(v as TaskStatus)}>
-                <SelectTrigger className="h-9 bg-muted/30 border-border/50">
+                <SelectTrigger id="task-status" className="h-9 bg-muted/30 border-border/50">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -418,7 +526,7 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
           {/* Subject & Due Date row */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+              <Label htmlFor={showNewSubject ? 'new-subject-name' : 'task-subject'} className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
                 <BookOpen className="w-3 h-3" />
                 Subject
               </Label>
@@ -432,9 +540,15 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
                     className="space-y-2 overflow-hidden"
                   >
                     <Input
+                      id="new-subject-name"
                       placeholder="Subject name..."
                       value={newSubjectName}
-                      onChange={(e) => setNewSubjectName(e.target.value)}
+                      onChange={(e) => {
+                        setNewSubjectName(e.target.value);
+                        if (subjectCreateError) setSubjectCreateError('');
+                      }}
+                      aria-invalid={Boolean(subjectCreateError)}
+                      aria-describedby={subjectCreateError ? 'new-subject-error' : undefined}
                       className="h-9 bg-muted/30 border-border/50"
                     />
                     <div className="flex items-center gap-1">
@@ -443,6 +557,8 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
                           key={color}
                           type="button"
                           onClick={() => setNewSubjectColor(color)}
+                          aria-label={`Use ${SUBJECT_COLOR_NAMES[color] || color} for the new subject`}
+                          aria-pressed={newSubjectColor === color}
                           className={cn(
                             'w-5 h-5 rounded-full transition-all',
                             newSubjectColor === color ? 'scale-125 ring-2 ring-offset-1 ring-offset-background ring-white/50' : 'hover:scale-110'
@@ -456,7 +572,11 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
                         type="button"
                         size="sm"
                         variant="outline"
-                        onClick={() => setShowNewSubject(false)}
+                        onClick={() => {
+                          setSubjectCreateError('');
+                          setShowNewSubject(false);
+                        }}
+                        disabled={isCreatingSubject}
                         className="flex-1 h-7 text-xs"
                       >
                         Cancel
@@ -465,12 +585,17 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
                         type="button"
                         size="sm"
                         onClick={handleCreateSubject}
-                        disabled={!newSubjectName.trim()}
+                        disabled={!newSubjectName.trim() || isCreatingSubject}
                         className="flex-1 h-7 text-xs"
                       >
-                        Create
+                        {isCreatingSubject ? 'Creating…' : 'Create'}
                       </Button>
                     </div>
+                    {subjectCreateError && (
+                      <p id="new-subject-error" role="alert" className="text-xs text-red-400">
+                        {subjectCreateError}
+                      </p>
+                    )}
                   </motion.div>
                 ) : (
                   <motion.div
@@ -480,7 +605,7 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
                     className="space-y-1.5"
                   >
                     <Select open={subjectSelectOpen} onOpenChange={setSubjectSelectOpen} value={subjectId} onValueChange={setSubjectId}>
-                      <SelectTrigger className="h-9 bg-muted/30 border-border/50">
+                      <SelectTrigger id="task-subject" className="h-9 bg-muted/30 border-border/50">
                         <SelectValue placeholder="No Subject" />
                       </SelectTrigger>
                       <SelectContent>
@@ -569,12 +694,12 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
             </div>
 
             <div className="space-y-1.5">
-              <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+              <Label htmlFor="task-recurrence" className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
                 <Repeat className="w-3 h-3" />
                 Repeat
               </Label>
               <Select value={recurrence} onValueChange={(v) => { setRecurrence(v as 'none' | 'daily' | 'weekly' | 'monthly'); if (v !== 'weekly') setRecurrenceDays([]); }}>
-                <SelectTrigger className="h-9 bg-muted/30 border-border/50">
+                <SelectTrigger id="task-recurrence" className="h-9 bg-muted/30 border-border/50">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -589,24 +714,26 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
 
           {importedDeadlineLocked && (
             <p className="-mt-1 text-[11px] text-muted-foreground">
-              This deadline is kept in sync with {task?.source === 'canvas' ? 'Canvas' : 'Google Classroom'}. You can schedule the work separately below.
+              This deadline is kept in sync with {task?.source === 'canvas' ? 'Canvas' : 'the original source'}. You can schedule the work separately below.
             </p>
           )}
 
           {/* Weekday picker for weekly recurrence */}
           {recurrence === 'weekly' && (
             <div className="space-y-1.5">
-              <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+              <Label id="task-recurrence-days-label" className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
                 <Calendar className="w-3 h-3" />
                 Repeat On
                 <span className="text-muted-foreground/50 normal-case tracking-normal font-normal">(select days)</span>
               </Label>
-              <div className="flex gap-1.5">
+              <div className="flex gap-1.5" role="group" aria-labelledby="task-recurrence-days-label">
                 {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day, i) => (
                   <button
                     key={day}
                     type="button"
                     onClick={() => setRecurrenceDays(prev => prev.includes(i) ? prev.filter(d => d !== i) : [...prev, i].sort())}
+                    aria-label={`Repeat on ${['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][i]}`}
+                    aria-pressed={recurrenceDays.includes(i)}
                     className={cn(
                       'flex-1 h-8 rounded-md text-xs font-medium transition-all',
                       recurrenceDays.includes(i)
@@ -727,6 +854,9 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
             {scheduleError && (
               <p role="alert" className="text-xs text-red-400">{scheduleError}</p>
             )}
+            {saveError && (
+              <p role="alert" aria-live="polite" className="text-xs text-red-400">{saveError}</p>
+            )}
           </div>
 
           {/* Actions */}
@@ -734,21 +864,21 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
             <Button
               type="button"
               variant="outline"
-              onClick={() => { onClose(); resetForm(); }}
+              onClick={closeForm}
               className="flex-1 h-10"
             >
               Cancel
             </Button>
-            <Button type="submit" className="flex-1 h-10 gap-1.5 shadow-md shadow-primary/20">
+            <Button type="submit" disabled={isSubmitting} aria-busy={isSubmitting} className="flex-1 h-10 gap-1.5 shadow-md shadow-primary/20">
               {task ? (
                 <>
                   <Save className="w-4 h-4" />
-                  Update Task
+                  {isSubmitting ? 'Saving…' : 'Update Task'}
                 </>
               ) : (
                 <>
                   <Plus className="w-4 h-4" />
-                  Create Task
+                  {isSubmitting ? 'Saving…' : 'Create Task'}
                 </>
               )}
             </Button>

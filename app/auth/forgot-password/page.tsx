@@ -7,22 +7,30 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/Card';
-import { Sparkles, Mail, ArrowLeft, ArrowRight, CheckCircle2 } from 'lucide-react';
+import { Sparkles, Mail, ArrowLeft, ArrowRight, CheckCircle2, AlertCircle } from 'lucide-react';
+import { resetPassword } from '@/lib/supabase/services';
 
 export default function ForgotPasswordPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [email, setEmail] = useState('');
   const [isSubmitted, setIsSubmitted] = useState(false);
+  const [error, setError] = useState('');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
-    
-    // Simulate password reset - replace with actual Supabase auth
-    setTimeout(() => {
-      setIsLoading(false);
+    setError('');
+
+    try {
+      await resetPassword(email.trim());
       setIsSubmitted(true);
-    }, 1500);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error
+        ? caughtError.message
+        : 'We could not send the reset email. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -52,14 +60,14 @@ export default function ForgotPasswordPage() {
                 </div>
                 <CardTitle className="text-2xl font-bold">Check your email</CardTitle>
                 <CardDescription className="text-muted-foreground">
-                  We've sent a password reset link to <strong className="text-foreground">{email}</strong>
+                  We&apos;ve sent a password reset link to <strong className="text-foreground">{email}</strong>
                 </CardDescription>
               </div>
             ) : (
               <div>
                 <CardTitle className="text-2xl font-bold">Forgot password?</CardTitle>
                 <CardDescription className="text-muted-foreground">
-                  No worries, we'll send you reset instructions
+                  No worries, we&apos;ll send you reset instructions
                 </CardDescription>
               </div>
             )}
@@ -69,9 +77,13 @@ export default function ForgotPasswordPage() {
             {isSubmitted ? (
               <div className="space-y-4">
                 <p className="text-sm text-center text-muted-foreground">
-                  Didn't receive the email? Check your spam folder or{' '}
+                  Didn&apos;t receive the email? Check your spam folder or{' '}
                   <button
-                    onClick={() => setIsSubmitted(false)}
+                    type="button"
+                    onClick={() => {
+                      setError('');
+                      setIsSubmitted(false);
+                    }}
                     className="text-indigo-400 hover:underline"
                   >
                     try again
@@ -86,6 +98,16 @@ export default function ForgotPasswordPage() {
               </div>
             ) : (
               <form onSubmit={handleSubmit} className="space-y-4">
+                {error && (
+                  <div
+                    role="alert"
+                    aria-live="assertive"
+                    className="flex items-start gap-2 rounded-lg border border-red-500/25 bg-red-500/10 p-3 text-sm text-red-300"
+                  >
+                    <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                    <span>{error}</span>
+                  </div>
+                )}
                 <div className="space-y-2">
                   <Label htmlFor="email">Email</Label>
                   <div className="relative">
@@ -95,7 +117,10 @@ export default function ForgotPasswordPage() {
                       type="email"
                       placeholder="you@example.com"
                       value={email}
-                      onChange={(e) => setEmail(e.target.value)}
+                      onChange={(e) => {
+                        setEmail(e.target.value);
+                        if (error) setError('');
+                      }}
                       className="pl-10"
                       required
                     />

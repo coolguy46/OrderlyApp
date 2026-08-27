@@ -98,6 +98,21 @@ WHERE exam.id = safe_match.exam_id
   AND exam.source = 'manual'
   AND exam.external_id IS NULL;
 
+DO $preflight$
+BEGIN
+  IF EXISTS (
+    SELECT user_id, source, external_id
+    FROM public.exams
+    WHERE external_id IS NOT NULL
+    GROUP BY user_id, source, external_id
+    HAVING COUNT(*) > 1
+  ) THEN
+    RAISE EXCEPTION
+      'Canvas reliability preflight failed: duplicate exam external identities require backed-up manual review';
+  END IF;
+END;
+$preflight$;
+
 ALTER TABLE public.exams
 ADD CONSTRAINT exams_user_id_source_external_id_key
 UNIQUE (user_id, source, external_id);

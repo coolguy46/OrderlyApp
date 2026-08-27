@@ -14,9 +14,12 @@ export function Calendar() {
 
   useEffect(() => {
     const requestedView = new URLSearchParams(window.location.search).get('view');
-    if (requestedView === 'schedule' || requestedView === 'tasks') {
-      setSection(requestedView);
-    }
+    if (requestedView !== 'schedule' && requestedView !== 'tasks') return;
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (!cancelled) setSection(requestedView);
+    });
+    return () => { cancelled = true; };
   }, []);
 
   return (

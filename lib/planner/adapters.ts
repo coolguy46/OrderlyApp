@@ -11,6 +11,11 @@ import type {
 } from './types';
 import { PLANNER_PROMPT_TASK_SOURCE } from './types';
 import { zonedDateTimeToTimestamp } from './engine';
+import { isMonthlyRecurrenceDate } from '@/lib/schedule/selectors';
+import {
+  discardUnownedLegacyStorageValue,
+  userScopedStorageKey,
+} from '@/lib/user-scoped-storage';
 
 export interface StoredCalendarEvent {
   id: string;
@@ -87,10 +92,6 @@ function addLocalDays(localDate: string, days: number): string {
 function localDayOfWeek(localDate: string): number {
   const [year, month, day] = localDate.split('-').map(Number);
   return new Date(Date.UTC(year, month - 1, day)).getUTCDay();
-}
-
-function localDayOfMonth(localDate: string): number {
-  return Number(localDate.slice(8, 10));
 }
 
 function normalizedRecurrenceDays(days: number[] | null | undefined): number[] {
@@ -196,7 +197,6 @@ export function tasksToPlannerInputs(
     const weeklyDays = configuredDays.length > 0
       ? configuredDays
       : [localDayOfWeek(anchorDate)];
-    const anchorDayOfMonth = localDayOfMonth(anchorDate);
 
     for (let offset = 0; offset < horizonDays; offset += 1) {
       const occurrenceDate = addLocalDays(firstLocalDate, offset);
@@ -206,7 +206,7 @@ export function tasksToPlannerInputs(
       const occurs = isAnchor
         || recurrence === 'daily'
         || (recurrence === 'weekly' && weeklyDays.includes(localDayOfWeek(occurrenceDate)))
-        || (recurrence === 'monthly' && localDayOfMonth(occurrenceDate) === anchorDayOfMonth);
+        || (recurrence === 'monthly' && isMonthlyRecurrenceDate(occurrenceDate, anchorDate));
       if (!occurs) continue;
 
       const occurrenceId = `${task.id}@${occurrenceDate}`;
@@ -392,18 +392,45 @@ export function storedEventsToCommitments(
   });
 }
 
-export function readStoredCalendarEvents(): StoredCalendarEvent[] {
+const CALENDAR_EVENTS_STORAGE_NAMESPACE = 'orderly-calendar-events';
+const LEGACY_CALENDAR_EVENTS_STORAGE_KEY = 'calendarEvents';
+
+export function readStoredCalendarEvents(
+  userId: string | null | undefined,
+): StoredCalendarEvent[] {
   if (typeof window === 'undefined') return [];
+  const storageKey = userScopedStorageKey(CALENDAR_EVENTS_STORAGE_NAMESPACE, userId);
+  if (!storageKey) return [];
+
+  // The legacy value has no owner metadata. Never guess that it belongs to the
+  // account that happens to be active now.
+  discardUnownedLegacyStorageValue(localStorage, LEGACY_CALENDAR_EVENTS_STORAGE_KEY);
   try {
-    const raw = JSON.parse(localStorage.getItem('calendarEvents') || '[]');
+    const raw = JSON.parse(localStorage.getItem(storageKey) || '[]');
     return Array.isArray(raw) ? raw : [];
   } catch {
+    try {
+      localStorage.removeItem(storageKey);
+    } catch {}
     return [];
   }
 }
 
-export function writeStoredCalendarEvents(events: readonly StoredCalendarEvent[]): void {
+export function writeStoredCalendarEvents(
+  userId: string | null | undefined,
+  events: readonly StoredCalendarEvent[],
+): void {
   if (typeof window === 'undefined') return;
-  localStorage.setItem('calendarEvents', JSON.stringify(events));
-  window.dispatchEvent(new CustomEvent('orderly-calendar-events-changed'));
+  const storageKey = userScopedStorageKey(CALENDAR_EVENTS_STORAGE_NAMESPACE, userId);
+  if (!storageKey) return;
+
+  discardUnownedLegacyStorageValue(localStorage, LEGACY_CALENDAR_EVENTS_STORAGE_KEY);
+  try {
+    localStorage.setItem(storageKey, JSON.stringify(events));
+    window.dispatchEvent(new CustomEvent('orderly-calendar-events-changed', {
+      detail: { userId },
+    }));
+  } catch {
+    // Keep the in-memory calendar usable when browser storage is unavailable.
+  }
 }

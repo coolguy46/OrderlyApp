@@ -30,18 +30,25 @@ export function PlannerStalenessMonitor() {
   const setActiveUser = usePlannerStore(state => state.setActiveUser);
   const refreshPlanStaleness = usePlannerStore(state => state.refreshPlanStaleness);
   const plan = plannerRecord?.currentPlan || null;
-  const [storedEvents, setStoredEvents] = useState<StoredCalendarEvent[]>([]);
-  const [storedEventsReady, setStoredEventsReady] = useState(false);
+  const [storedEventSnapshot, setStoredEventSnapshot] = useState<{
+    userId: string | null;
+    events: StoredCalendarEvent[];
+  }>({ userId: null, events: [] });
+  const storedEvents = storedEventSnapshot.events;
+  const storedEventsReady = Boolean(user && storedEventSnapshot.userId === user.id);
 
   useEffect(() => {
     if (!user) return;
     setActiveUser(user.id, Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
-  }, [setActiveUser, user?.id]);
+  }, [setActiveUser, user]);
 
   useEffect(() => {
+    const userId = user?.id || null;
     const refresh = () => {
-      setStoredEvents(readStoredCalendarEvents());
-      setStoredEventsReady(true);
+      setStoredEventSnapshot({
+        userId,
+        events: readStoredCalendarEvents(userId),
+      });
     };
     refresh();
     window.addEventListener('storage', refresh);
@@ -50,7 +57,7 @@ export function PlannerStalenessMonitor() {
       window.removeEventListener('storage', refresh);
       window.removeEventListener('orderly-calendar-events-changed', refresh);
     };
-  }, []);
+  }, [user?.id]);
 
   const taskInputs = useMemo(() => {
     if (!plan) return [];

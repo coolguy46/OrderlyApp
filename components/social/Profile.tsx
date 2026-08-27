@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState, useEffect } from 'react';
+import { useMemo, useState } from 'react';
 import { useAppStore } from '@/lib/store';
 import {
   Card,
@@ -19,9 +19,12 @@ import {
 import { ProgressBar, CircularProgress } from '@/components/ui/custom-progress';
 import { motion } from 'framer-motion';
 import { formatDuration } from '@/lib/utils';
+import { examTemporalStatus } from '@/lib/exam-status';
+import { isGoalComplete } from '@/lib/goal-status';
+import { useCurrentTime } from '@/lib/use-current-time';
+import { usePlannerStore } from '@/lib/planner/store';
+import { useHydrated } from '@/lib/use-hydrated';
 import {
-  User,
-  Flame,
   Clock,
   Target,
   Calendar,
@@ -30,11 +33,10 @@ import {
 } from 'lucide-react';
 
 // XP calculation from real stats
-function calculateXP(profile: { tasks_completed: number; total_study_time: number; current_streak: number }): number {
+function calculateXP(profile: { tasks_completed: number; total_study_time: number }): number {
   return (
     profile.tasks_completed * 10 +
-    Math.floor(profile.total_study_time / 10) * 5 +
-    profile.current_streak * 15
+    Math.floor(profile.total_study_time / 10) * 5
   );
 }
 
@@ -66,39 +68,38 @@ const itemVariants = {
 
 export function Profile() {
   const { user, tasks, studySessions, goals, exams, updateUserProfile } = useAppStore();
-  const [mounted, setMounted] = useState(false);
+  const plannerUsers = usePlannerStore(state => state.users);
+  const now = useCurrentTime();
+  const timeZone = (user?.id ? plannerUsers[user.id]?.settings.timeZone : null)
+    || Intl.DateTimeFormat().resolvedOptions().timeZone
+    || 'UTC';
+  const mounted = useHydrated();
   const [editOpen, setEditOpen] = useState(false);
   const [editName, setEditName] = useState('');
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
-  useEffect(() => {
-    if (user) setEditName(user.full_name || '');
-  }, [user]);
 
   const stats = useMemo(() => {
     if (!mounted) return { totalStudyMinutes: 0, completedTasks: 0, activeGoals: 0, upcomingExams: 0, totalSessions: 0, avgDailyMinutes: 0, weeklyMinutes: 0 };
 
     const totalStudyMinutes = studySessions.reduce((acc, s) => acc + s.duration_minutes, 0);
     const completedTasks = tasks.filter((t) => t.status === 'completed').length;
-    const activeGoals = goals.filter((g) => g.status === 'active').length;
-    const upcomingExams = exams.filter((e) => new Date(e.exam_date) > new Date()).length;
+    const activeGoals = goals.filter((g) => g.status === 'active' && !isGoalComplete(g)).length;
+    const upcomingExams = exams.filter(
+      (exam) => examTemporalStatus(exam, now, timeZone) === 'upcoming'
+    ).length;
     const totalSessions = studySessions.length;
 
-    const thirtyDaysAgo = new Date();
+    const thirtyDaysAgo = new Date(now);
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
     const recentSessions = studySessions.filter((s) => new Date(s.started_at) >= thirtyDaysAgo);
     const avgDailyMinutes = recentSessions.length > 0 ? Math.round(recentSessions.reduce((acc, s) => acc + s.duration_minutes, 0) / 30) : 0;
 
-    const sevenDaysAgo = new Date();
+    const sevenDaysAgo = new Date(now);
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
     const weekSessions = studySessions.filter((s) => new Date(s.started_at) >= sevenDaysAgo);
     const weeklyMinutes = weekSessions.reduce((acc, s) => acc + s.duration_minutes, 0);
 
     return { totalStudyMinutes, completedTasks, activeGoals, upcomingExams, totalSessions, avgDailyMinutes, weeklyMinutes };
-  }, [tasks, studySessions, goals, exams, mounted]);
+  }, [tasks, studySessions, goals, exams, mounted, now, timeZone]);
 
   // Real XP & level
   const xp = useMemo(() => {
@@ -153,16 +154,23 @@ export function Profile() {
             <div className="flex-1 text-center sm:text-left">
               <div className="flex items-center gap-2 justify-center sm:justify-start">
                 <h2 className="text-xl font-bold text-foreground">{user?.full_name || 'Student'}</h2>
-                <Button variant="ghost" size="icon-sm" onClick={() => setEditOpen(true)}>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={() => {
+                    setEditName(user?.full_name || '');
+                    setEditOpen(true);
+                  }}
+                >
                   <Edit3 className="w-3.5 h-3.5" />
                 </Button>
               </div>
               <p className="text-muted-foreground text-sm">{user?.email}</p>
               <div className="flex items-center gap-4 mt-2 justify-center sm:justify-start">
                 <div className="flex items-center gap-1.5 text-sm">
-                  <Flame className="w-4 h-4 text-orange-500" />
-                  <span className="text-foreground font-medium">{user?.current_streak || 0}</span>
-                  <span className="text-muted-foreground">day streak</span>
+                  <Target className="w-4 h-4 text-green-500" />
+                  <span className="text-foreground font-medium">{stats.completedTasks}</span>
+                  <span className="text-muted-foreground">tasks completed</span>
                 </div>
               </div>
             </div>
@@ -245,8 +253,8 @@ export function Profile() {
             <CardContent>
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground text-sm">Longest Streak</span>
-                  <span className="text-foreground font-medium">{user?.longest_streak || 0} days</span>
+                  <span className="text-muted-foreground text-sm">Study This Week</span>
+                  <span className="text-foreground font-medium">{formatDuration(stats.weeklyMinutes)}</span>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-muted-foreground text-sm">Avg. Daily Study</span>

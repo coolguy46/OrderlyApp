@@ -9,7 +9,6 @@ import {
   endOfWeek,
   format,
   isSameMonth,
-  isToday,
   startOfDay,
   startOfMonth,
   startOfWeek,
@@ -32,12 +31,15 @@ import { Card, CardContent } from '@/components/ui/Card';
 import { useAppStore } from '@/lib/store';
 import type { Exam, Subject, Task } from '@/lib/supabase/types';
 import {
+  isMonthlyRecurrenceDate,
+  localDateFromIso,
   localTimeFromIso,
   selectScheduleEntriesForUser,
   taskDeadlineDate,
   taskUntimedDisplayDate,
   type TaskUntimedDisplayDateOptions,
 } from '@/lib/schedule/selectors';
+import { civilDateFromStored } from '@/lib/civil-date';
 import { useScheduleStore } from '@/lib/schedule/store';
 import type { ScheduleEntry } from '@/lib/schedule/types';
 import { getDefaultPlannerSettings } from '@/lib/planner/types';
@@ -45,6 +47,7 @@ import { usePlannerStore } from '@/lib/planner/store';
 import { cn, isExamType } from '@/lib/utils';
 import { isTaskMissing } from '@/lib/task-status';
 import { useCurrentTime } from '@/lib/use-current-time';
+import { useHydrated } from '@/lib/use-hydrated';
 
 type TaskCalendarMode = 'week' | 'month';
 
@@ -55,12 +58,10 @@ interface TaskCalendarDay {
 
 const WEEK_STARTS_ON = 1 as const;
 
-function localDateKey(value: string | Date): string | null {
-  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}(?:$|T00:00:00(?:\.000)?Z?$)/.test(value)) {
-    return value.slice(0, 10);
-  }
-  const parsed = value instanceof Date ? value : new Date(value);
-  return Number.isNaN(parsed.getTime()) ? null : format(parsed, 'yyyy-MM-dd');
+function localDateKey(value: string | Date, timeZone: string): string | null {
+  return value instanceof Date
+    ? localDateFromIso(value.toISOString(), timeZone)
+    : civilDateFromStored(value, timeZone);
 }
 
 function localDateFromKey(value: string): Date {
@@ -81,7 +82,9 @@ function taskOccursOn(
   if (recurrence === 'none' || task.status === 'completed') return false;
   if (scheduleEntry?.recurrenceEndDate && dateKey > scheduleEntry.recurrenceEndDate) return false;
 
-  const anchorKey = dueDateKey || scheduleEntry?.scheduledDate || localDateKey(task.created_at);
+  const anchorKey = dueDateKey
+    || scheduleEntry?.scheduledDate
+    || localDateKey(task.created_at, displayOptions.timeZone || 'UTC');
   if (!anchorKey || startOfDay(date) < startOfDay(localDateFromKey(anchorKey))) return false;
   if (recurrence === 'daily') return true;
   if (recurrence === 'weekly') {
@@ -90,8 +93,7 @@ function taskOccursOn(
       ? configuredDays.includes(date.getDay())
       : date.getDay() === localDateFromKey(anchorKey).getDay();
   }
-  return recurrence === 'monthly'
-    && date.getDate() === localDateFromKey(anchorKey).getDate();
+  return recurrence === 'monthly' && isMonthlyRecurrenceDate(dateKey, anchorKey);
 }
 
 function taskTimeLabel(task: Task, timeZone?: string): string | null {
@@ -218,17 +220,13 @@ export function TaskCalendar() {
   const entriesByUser = useScheduleStore(state => state.entriesByUser);
   const plannerUsers = usePlannerStore(state => state.users);
   const setActiveUser = usePlannerStore(state => state.setActiveUser);
-  const [mounted, setMounted] = useState(false);
+  const mounted = useHydrated();
   const [currentDate, setCurrentDate] = useState<Date | null>(null);
+  const [currentDateTimeZone, setCurrentDateTimeZone] = useState<string | null>(null);
   const [mode, setMode] = useState<TaskCalendarMode>('month');
   const [taskFormOpen, setTaskFormOpen] = useState(false);
   const [detailTaskId, setDetailTaskId] = useState<string | null>(null);
   const now = useCurrentTime();
-
-  useEffect(() => {
-    setCurrentDate(new Date());
-    setMounted(true);
-  }, []);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -239,6 +237,13 @@ export function TaskCalendar() {
   const fallbackTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
   const plannerSettings = plannerRecord?.settings || getDefaultPlannerSettings(fallbackTimeZone);
   const timeZone = plannerSettings.timeZone;
+  const todayKey = localDateFromIso(now.toISOString(), timeZone);
+
+  if (mounted && todayKey && currentDateTimeZone !== timeZone) {
+    setCurrentDate(localDateFromKey(todayKey));
+    setCurrentDateTimeZone(timeZone);
+  }
+
   const displayOptions = useMemo<TaskUntimedDisplayDateOptions>(() => ({
     timeZone,
     schoolDays: plannerSettings.schoolDays,
@@ -283,7 +288,7 @@ export function TaskCalendar() {
         .filter(task => taskOccursOn(task, day, scheduleByTaskId.get(task.id), displayOptions))
         .sort((left, right) => taskTimeSortValue(left, timeZone) - taskTimeSortValue(right, timeZone) || left.title.localeCompare(right.title));
       const dayExams = exams
-        .filter(exam => localDateKey(exam.exam_date) === key)
+        .filter(exam => civilDateFromStored(exam.exam_date, timeZone) === key)
         .sort((left, right) => left.exam_date.localeCompare(right.exam_date));
       result.set(key, { tasks: dayTasks, exams: dayExams });
     }
@@ -312,7 +317,13 @@ export function TaskCalendar() {
           <Button type="button" variant="ghost" size="icon-sm" onClick={() => navigate(-1)} aria-label={`Previous ${mode}`}>
             <ChevronLeft className="h-4 w-4" />
           </Button>
-          <Button type="button" variant="ghost" size="sm" onClick={() => setCurrentDate(new Date())} className="h-8 px-2.5 text-xs">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => todayKey && setCurrentDate(localDateFromKey(todayKey))}
+            className="h-8 px-2.5 text-xs"
+          >
             Today
           </Button>
           <Button type="button" variant="ghost" size="icon-sm" onClick={() => navigate(1)} aria-label={`Next ${mode}`}>
@@ -366,20 +377,21 @@ export function TaskCalendar() {
                     const visibleExams = items.exams.slice(0, Math.max(0, 4 - visibleTasks.length));
                     const shown = visibleTasks.length + visibleExams.length;
                     const hasMissingTasks = items.tasks.some(task => isTaskMissing(task, now, timeZone));
+                    const isPlannerToday = key === todayKey;
                     return (
                       <div
                         key={key}
                         className={cn(
                           'min-h-[128px] border-b border-r border-border/40 p-1.5 last:border-r-0',
                           !isSameMonth(day, currentDate) && 'bg-muted/[0.08] text-muted-foreground opacity-55',
-                          isToday(day) && 'bg-primary/[0.035]',
+                          isPlannerToday && 'bg-primary/[0.035]',
                           hasMissingTasks && 'bg-red-500/[0.07] ring-1 ring-inset ring-red-500/35',
                         )}
                       >
                         <div className="mb-1 flex items-center justify-between">
                           <span className={cn(
                             'flex h-6 min-w-6 items-center justify-center rounded-full px-1.5 text-xs font-semibold',
-                            isToday(day) && 'bg-primary text-primary-foreground shadow-sm',
+                            isPlannerToday && 'bg-primary text-primary-foreground shadow-sm',
                           )}>
                             {format(day, 'd')}
                           </span>
@@ -415,14 +427,15 @@ export function TaskCalendar() {
                     const key = format(day, 'yyyy-MM-dd');
                     const items = itemsByDate.get(key) || { tasks: [], exams: [] };
                     const hasMissingTasks = items.tasks.some(task => isTaskMissing(task, now, timeZone));
+                    const isPlannerToday = key === todayKey;
                     return (
                       <div key={key} className={cn(
                         'min-h-[calc(100dvh-15.5rem)] border-r border-border/45 p-2 last:border-r-0',
-                        isToday(day) && 'bg-primary/[0.035]',
+                        isPlannerToday && 'bg-primary/[0.035]',
                         hasMissingTasks && 'bg-red-500/[0.07] ring-1 ring-inset ring-red-500/35',
                       )}>
                         <div className="mb-2 flex items-center justify-center">
-                          <span className={cn('flex h-7 min-w-7 items-center justify-center rounded-full px-2 text-sm font-semibold', isToday(day) && 'bg-primary text-primary-foreground shadow-sm')}>
+                          <span className={cn('flex h-7 min-w-7 items-center justify-center rounded-full px-2 text-sm font-semibold', isPlannerToday && 'bg-primary text-primary-foreground shadow-sm')}>
                             {format(day, 'd')}
                           </span>
                         </div>

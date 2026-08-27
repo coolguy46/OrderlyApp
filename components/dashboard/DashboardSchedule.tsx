@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { addDays, differenceInMinutes, format, startOfDay } from 'date-fns';
+import { differenceInMinutes, format } from 'date-fns';
 import Link from 'next/link';
 import { CalendarClock, ChevronLeft, ChevronRight, Clock3, ListTodo, LockKeyhole } from 'lucide-react';
 import { TaskDetailViewer } from '@/components/tasks/TaskDetailViewer';
@@ -10,11 +10,15 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import {
   addLocalDays,
   buildScheduleOccurrences,
+  formatIsoTime,
+  localDateFromIso,
+  localDateToDateCarrier,
   localDateTimeToIso,
+  localMinuteOfDayFromIso,
   selectScheduleEntriesForUser,
 } from '@/lib/schedule/selectors';
 import { useScheduleStore } from '@/lib/schedule/store';
-import type { ScheduleOccurrence } from '@/lib/schedule/types';
+import type { LocalDate, ScheduleOccurrence } from '@/lib/schedule/types';
 import { useAppStore } from '@/lib/store';
 import { cn } from '@/lib/utils';
 import {
@@ -42,11 +46,11 @@ function taskColor(item: ScheduleOccurrence): string {
   return item.color || (item.task.priority === 'high' ? '#ef4444' : item.task.priority === 'low' ? '#22c55e' : '#6366f1');
 }
 
-function timeLabel(item: ScheduleOccurrence): string {
+function timeLabel(item: ScheduleOccurrence, timeZone: string): string {
   if (!item.startAt) return '';
-  const start = new Date(item.startAt);
-  const end = item.endAt ? new Date(item.endAt) : null;
-  return `${format(start, 'h:mm a')}${end ? `–${format(end, 'h:mm a')}` : ''}`;
+  const start = formatIsoTime(item.startAt, timeZone);
+  const end = item.endAt ? formatIsoTime(item.endAt, timeZone) : null;
+  return `${start || ''}${end ? `–${end}` : ''}`;
 }
 
 interface DashboardFixedBlock {
@@ -90,16 +94,19 @@ export function DashboardSchedule() {
   const entriesByUser = useScheduleStore(state => state.entriesByUser);
   const plannerUsers = usePlannerStore(state => state.users);
   const setActiveUser = usePlannerStore(state => state.setActiveUser);
-  const [selectedDate, setSelectedDate] = useState(() => startOfDay(new Date()));
-  const [detailOccurrenceId, setDetailOccurrenceId] = useState<string | null>(null);
-  const [storedEvents, setStoredEvents] = useState<StoredCalendarEvent[]>([]);
-  const scrollerRef = useRef<HTMLDivElement>(null);
   const userId = user?.id || null;
   const plannerRecord = userId ? plannerUsers[userId] : null;
   const timeZone = plannerRecord?.settings.timeZone
     || Intl.DateTimeFormat().resolvedOptions().timeZone
     || 'UTC';
-  const dateKey = format(selectedDate, 'yyyy-MM-dd');
+  const [selectedDateKey, setSelectedDateKey] = useState<LocalDate>(() => (
+    localDateFromIso(new Date().toISOString(), timeZone) || '1970-01-01'
+  ));
+  const [detailOccurrenceId, setDetailOccurrenceId] = useState<string | null>(null);
+  const [storedEvents, setStoredEvents] = useState<StoredCalendarEvent[]>([]);
+  const scrollerRef = useRef<HTMLDivElement>(null);
+  const selectedDate = localDateToDateCarrier(selectedDateKey) || new Date(1970, 0, 1, 12);
+  const dateKey = selectedDateKey;
 
   useEffect(() => {
     if (!userId) return;
@@ -107,7 +114,17 @@ export function DashboardSchedule() {
   }, [setActiveUser, userId]);
 
   useEffect(() => {
-    const refresh = () => setStoredEvents(readStoredCalendarEvents());
+    const today = localDateFromIso(new Date().toISOString(), timeZone);
+    if (!today) return;
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (!cancelled) setSelectedDateKey(today);
+    });
+    return () => { cancelled = true; };
+  }, [timeZone, userId]);
+
+  useEffect(() => {
+    const refresh = () => setStoredEvents(readStoredCalendarEvents(userId));
     refresh();
     window.addEventListener('storage', refresh);
     window.addEventListener('orderly-calendar-events-changed', refresh);
@@ -115,7 +132,7 @@ export function DashboardSchedule() {
       window.removeEventListener('storage', refresh);
       window.removeEventListener('orderly-calendar-events-changed', refresh);
     };
-  }, []);
+  }, [userId]);
 
   const entries = useMemo(
     () => selectScheduleEntriesForUser(entriesByUser, user?.id),
@@ -192,11 +209,22 @@ export function DashboardSchedule() {
               </p>
             </div>
             <div className="ml-1 flex items-center gap-0.5">
-              <Button type="button" variant="ghost" size="icon-sm" className="h-7 w-7" onClick={() => setSelectedDate(current => addDays(current, -1))} aria-label="Previous day">
+              <Button type="button" variant="ghost" size="icon-sm" className="h-7 w-7" onClick={() => setSelectedDateKey(current => addLocalDays(current, -1))} aria-label="Previous day">
                 <ChevronLeft className="h-3.5 w-3.5" />
               </Button>
-              <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-[11px]" onClick={() => setSelectedDate(startOfDay(new Date()))}>Today</Button>
-              <Button type="button" variant="ghost" size="icon-sm" className="h-7 w-7" onClick={() => setSelectedDate(current => addDays(current, 1))} aria-label="Next day">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2 text-[11px]"
+                onClick={() => {
+                  const today = localDateFromIso(new Date().toISOString(), timeZone);
+                  if (today) setSelectedDateKey(today);
+                }}
+              >
+                Today
+              </Button>
+              <Button type="button" variant="ghost" size="icon-sm" className="h-7 w-7" onClick={() => setSelectedDateKey(current => addLocalDays(current, 1))} aria-label="Next day">
                 <ChevronRight className="h-3.5 w-3.5" />
               </Button>
             </div>
@@ -248,7 +276,8 @@ export function DashboardSchedule() {
                 if (!item.startAt) return null;
                 const start = new Date(item.startAt);
                 const end = item.endAt ? new Date(item.endAt) : new Date(start.getTime() + 30 * 60_000);
-                const startMinute = start.getHours() * 60 + start.getMinutes();
+                const startMinute = localMinuteOfDayFromIso(item.startAt, timeZone);
+                if (startMinute === null) return null;
                 const duration = Math.max(15, differenceInMinutes(end, start));
                 const color = taskColor(item);
                 return (
@@ -270,7 +299,7 @@ export function DashboardSchedule() {
                     }}
                   >
                     <p className="truncate text-[11px] font-semibold">{item.title}</p>
-                    <p className="truncate text-[9px] text-muted-foreground">{timeLabel(item)}</p>
+                    <p className="truncate text-[9px] text-muted-foreground">{timeLabel(item, timeZone)}</p>
                   </button>
                 );
               })}
@@ -278,8 +307,11 @@ export function DashboardSchedule() {
               {fixedBlocks.map(item => {
                 const start = new Date(item.startAt);
                 const end = new Date(item.endAt);
-                const startMinute = start.getHours() * 60 + start.getMinutes();
+                const startMinute = localMinuteOfDayFromIso(item.startAt, timeZone);
+                if (startMinute === null) return null;
                 const duration = Math.max(15, differenceInMinutes(end, start));
+                const startLabel = formatIsoTime(item.startAt, timeZone) || '';
+                const endLabel = formatIsoTime(item.endAt, timeZone) || '';
                 return (
                   <div
                     key={item.id}
@@ -295,14 +327,14 @@ export function DashboardSchedule() {
                       backgroundColor: `${item.color}18`,
                       zIndex: 5,
                     }}
-                    aria-label={`${item.title}, ${format(start, 'h:mm a')}–${format(end, 'h:mm a')}, busy`}
+                    aria-label={`${item.title}, ${startLabel}–${endLabel}, busy`}
                   >
                     <p className="flex min-w-0 items-center gap-1 truncate text-[11px] font-semibold">
                       {item.locked && <LockKeyhole className="h-3 w-3 shrink-0 text-muted-foreground" />}
                       <span className="truncate">{item.title}</span>
                     </p>
                     <p className="truncate text-[9px] text-muted-foreground">
-                      {format(start, 'h:mm a')}–{format(end, 'h:mm a')}
+                      {startLabel}–{endLabel}
                     </p>
                   </div>
                 );

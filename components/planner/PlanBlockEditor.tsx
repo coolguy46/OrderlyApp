@@ -98,10 +98,15 @@ export function PlanBlockEditor({
     if (!block || !open) return;
     const start = asDate(block.startAt);
     const end = asDate(block.endAt);
-    setDate(format(start, 'yyyy-MM-dd'));
-    setStartTime(format(start, 'HH:mm'));
-    setEndTime(format(end, 'HH:mm'));
-    setError(null);
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      setDate(format(start, 'yyyy-MM-dd'));
+      setStartTime(format(start, 'HH:mm'));
+      setEndTime(format(end, 'HH:mm'));
+      setError(null);
+    });
+    return () => { cancelled = true; };
   }, [block, open]);
 
   const draftTimes = useMemo(() => {

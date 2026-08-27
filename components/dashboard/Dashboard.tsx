@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState, useEffect, useCallback } from 'react';
+import { useMemo, useState, useCallback } from 'react';
 import { useAppStore } from '@/lib/store';
 import { 
   Card, 
@@ -17,11 +17,15 @@ import { TaskCard, TaskForm } from '@/components/tasks';
 import { DashboardSchedule } from './DashboardSchedule';
 import { usePlannerStore } from '@/lib/planner/store';
 import { getDefaultPlannerSettings } from '@/lib/planner/types';
-import { localDateFromIso, taskUntimedDisplayDate } from '@/lib/schedule/selectors';
-import { getDaysUntil, cn, isExamType } from '@/lib/utils';
+import { isMonthlyRecurrenceDate, localDateFromIso, taskUntimedDisplayDate } from '@/lib/schedule/selectors';
+import { cn, isExamType } from '@/lib/utils';
+import { civilDateFromStored, formatCivilDate } from '@/lib/civil-date';
+import { examDateInputValue, examDayDistance, examTemporalStatus } from '@/lib/exam-status';
+import { isGoalComplete } from '@/lib/goal-status';
 import { isTaskMissing, taskDueAt } from '@/lib/task-status';
 import { useCurrentTime } from '@/lib/use-current-time';
-import { format, isToday, startOfMonth, endOfMonth, startOfWeek, endOfWeek, addDays } from 'date-fns';
+import { useHydrated } from '@/lib/use-hydrated';
+import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, addDays } from 'date-fns';
 import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -60,28 +64,30 @@ const itemVariants = {
 
 // Normalize any date value to a 'yyyy-MM-dd' string in local time.
 // Handles ISO strings, date-only strings, and Date objects consistently.
-function toLocalDateStr(d: string | Date, timeZone: string): string {
+function toLocalDateStr(d: string | Date, timeZone: string): string | null {
   if (typeof d === 'string') {
-    // For date-only strings like '2026-03-16', return as-is
-    if (!d.includes('T')) return d.slice(0, 10);
-    return localDateFromIso(d, timeZone) || d.slice(0, 10);
+    return civilDateFromStored(d, timeZone);
   }
-  return localDateFromIso(d.toISOString(), timeZone) || format(d, 'yyyy-MM-dd');
+  return localDateFromIso(d.toISOString(), timeZone);
+}
+
+function localDateFromKey(value: string): Date {
+  const [year, month, day] = value.split('-').map(Number);
+  return new Date(year, month - 1, day, 12);
 }
 
 export function Dashboard() {
   const { tasks, goals, exams, subjects, user } = useAppStore();
   const plannerUsers = usePlannerStore(state => state.users);
   const now = useCurrentTime();
-  const [mounted, setMounted] = useState(false);
+  const mounted = useHydrated();
   const [currentDate, setCurrentDate] = useState(new Date());
+  const [currentDateTimeZone, setCurrentDateTimeZone] = useState<string | null>(null);
   const [showTaskForm, setShowTaskForm] = useState(false);
   const [mainView, setMainView] = useState<'tasks' | 'schedule'>('tasks');
   // Store selected date as a stable string to avoid Date reference / timezone issues
   const [selectedDateStr, setSelectedDateStr] = useState<string | null>(null);
 
-  // Derive a Date from the selected string for display/comparison in the calendar UI
-  const selectedDate = selectedDateStr ? new Date(selectedDateStr + 'T00:00:00') : null;
   const fallbackTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
   const plannerSettings = (user?.id ? plannerUsers[user.id]?.settings : null)
     || getDefaultPlannerSettings(fallbackTimeZone);
@@ -91,10 +97,15 @@ export function Dashboard() {
     schoolStartTime: plannerSettings.schoolStartTime,
     schoolHomeTime: plannerSettings.schoolHomeTime,
   }), [plannerSettings.schoolDays, plannerSettings.schoolHomeTime, plannerSettings.schoolStartTime, plannerSettings.timeZone]);
+  const todayKey = localDateFromIso(now.toISOString(), taskDisplayOptions.timeZone);
+  const selectedDateLabel = selectedDateStr
+    ? formatCivilDate(selectedDateStr, taskDisplayOptions.timeZone, { month: 'short', day: 'numeric' })
+    : null;
 
-  useEffect(() => {
-    setMounted(true);
-  }, []);
+  if (mounted && todayKey && currentDateTimeZone !== taskDisplayOptions.timeZone) {
+    setCurrentDate(localDateFromKey(todayKey));
+    setCurrentDateTimeZone(taskDisplayOptions.timeZone);
+  }
 
   // Today's stats
   const todayStats = useMemo(() => {
@@ -108,6 +119,7 @@ export function Dashboard() {
       if (t.due_date && taskUntimedDisplayDate(t, taskDisplayOptions) === today) return true;
       if (t.recurrence && t.recurrence !== 'none' && t.status !== 'completed') {
         const taskStartKey = toLocalDateStr(t.due_date || t.created_at, taskDisplayOptions.timeZone);
+        if (!taskStartKey) return false;
         if (today < taskStartKey) return false;
         if (t.due_date && toLocalDateStr(t.due_date, taskDisplayOptions.timeZone) === today) return false;
         if (t.recurrence === 'daily') return true;
@@ -116,8 +128,7 @@ export function Dashboard() {
           const taskStart = new Date(`${taskStartKey}T12:00:00`);
           return todayDate.getDay() === taskStart.getDay();
         }
-        const taskStart = new Date(`${taskStartKey}T12:00:00`);
-        if (t.recurrence === 'monthly') return todayDate.getDate() === taskStart.getDate();
+        if (t.recurrence === 'monthly') return isMonthlyRecurrenceDate(today, taskStartKey);
       }
       return false;
     });
@@ -145,8 +156,11 @@ export function Dashboard() {
       return tasks
         .filter((t) => {
           if (t.due_date && taskUntimedDisplayDate(t, taskDisplayOptions) === selectedDateStr) return true;
-          if (t.recurrence && t.recurrence !== 'none') {
+          // A completed materialized occurrence must not be expanded into
+          // future selected dates; its successor is represented by a new row.
+          if (t.recurrence && t.recurrence !== 'none' && t.status !== 'completed') {
             const taskStartKey = toLocalDateStr(t.due_date || t.created_at, taskDisplayOptions.timeZone);
+            if (!taskStartKey) return false;
             if (selectedDateStr < taskStartKey) return false;
             if (t.due_date && toLocalDateStr(t.due_date, taskDisplayOptions.timeZone) === selectedDateStr) return false;
             if (t.recurrence === 'daily') return true;
@@ -155,8 +169,7 @@ export function Dashboard() {
               const taskStart = new Date(`${taskStartKey}T12:00:00`);
               return selDate.getDay() === taskStart.getDay();
             }
-            const taskStart = new Date(`${taskStartKey}T12:00:00`);
-            if (t.recurrence === 'monthly') return selDate.getDate() === taskStart.getDate();
+            if (t.recurrence === 'monthly') return isMonthlyRecurrenceDate(selectedDateStr, taskStartKey);
           }
           return false;
         })
@@ -183,17 +196,18 @@ export function Dashboard() {
 
   // Active goals
   const activeGoals = useMemo(() => {
-    return goals.filter((g) => g.status === 'active').slice(0, 3);
+    return goals.filter((g) => g.status === 'active' && !isGoalComplete(g)).slice(0, 3);
   }, [goals]);
 
   // Upcoming exams
   const upcomingExams = useMemo(() => {
     if (!mounted) return [];
-    const today = localDateFromIso(now.toISOString(), taskDisplayOptions.timeZone);
-    if (!today) return [];
     return exams
-      .filter((e) => toLocalDateStr(e.exam_date, taskDisplayOptions.timeZone) >= today)
-      .sort((a, b) => new Date(a.exam_date).getTime() - new Date(b.exam_date).getTime())
+      .filter((exam) => examTemporalStatus(exam, now, taskDisplayOptions.timeZone) === 'upcoming')
+      .sort((a, b) =>
+        examDateInputValue(a, taskDisplayOptions.timeZone)
+          .localeCompare(examDateInputValue(b, taskDisplayOptions.timeZone))
+      )
       .slice(0, 3);
   }, [exams, mounted, now, taskDisplayOptions.timeZone]);
 
@@ -223,6 +237,7 @@ export function Dashboard() {
       // Recurring task expansion
       if (task.recurrence && task.recurrence !== 'none' && task.status !== 'completed') {
         const taskStartKey = toLocalDateStr(task.due_date || task.created_at, taskDisplayOptions.timeZone);
+        if (!taskStartKey) return false;
         if (dateStr < taskStartKey) return false;
         if (task.due_date && toLocalDateStr(task.due_date, taskDisplayOptions.timeZone) === dateStr) return false;
 
@@ -235,15 +250,14 @@ export function Dashboard() {
           return date.getDay() === taskStart.getDay();
         }
         if (task.recurrence === 'monthly') {
-          const taskStart = new Date(`${taskStartKey}T12:00:00`);
-          return date.getDate() === taskStart.getDate();
+          return isMonthlyRecurrenceDate(dateStr, taskStartKey);
         }
       }
 
       return false;
     });
     const dayExams = exams.filter((exam) => {
-      return toLocalDateStr(exam.exam_date, taskDisplayOptions.timeZone) === dateStr;
+      return civilDateFromStored(exam.exam_date, taskDisplayOptions.timeZone) === dateStr;
     });
     return { tasks: dayTasks, exams: dayExams };
   }, [tasks, exams, taskDisplayOptions]);
@@ -269,7 +283,14 @@ export function Dashboard() {
             </motion.span>
           </h1>
           <p className="text-xs sm:text-sm text-muted-foreground">
-            {mounted ? format(new Date(), "EEEE, MMMM d, yyyy") : '\u00A0'}
+            {mounted && todayKey
+              ? formatCivilDate(todayKey, taskDisplayOptions.timeZone, {
+                  weekday: 'long',
+                  month: 'long',
+                  day: 'numeric',
+                  year: 'numeric',
+                })
+              : '\u00A0'}
           </p>
         </div>
         <Link href="/study" className="self-start sm:self-auto">
@@ -284,9 +305,9 @@ export function Dashboard() {
       <motion.div variants={containerVariants} className="grid grid-cols-1 gap-2.5 sm:grid-cols-3 sm:gap-3">
         {[
           { label: 'Completed', value: String(todayStats.tasksCompleted), sub: `${todayStats.tasksDue} due today`, icon: CheckCircle2, color: 'green', gradient: 'from-green-500/10 to-emerald-500/10', borderColor: 'border-green-500/20' },
-          { label: 'Goals', value: String(activeGoals.length), sub: `${goals.filter((g) => g.status === 'completed').length} done`, icon: Target, color: 'purple', gradient: 'from-purple-500/10 to-pink-500/10', borderColor: 'border-purple-500/20' },
+          { label: 'Goals', value: String(activeGoals.length), sub: `${goals.filter(isGoalComplete).length} done`, icon: Target, color: 'purple', gradient: 'from-purple-500/10 to-pink-500/10', borderColor: 'border-purple-500/20' },
           { label: 'Missing', value: String(missingTasks.length), sub: missingTasks.length === 1 ? '1 overdue task' : `${missingTasks.length} overdue tasks`, icon: AlertTriangle, color: 'red', gradient: 'from-red-500/10 to-rose-500/10', borderColor: 'border-red-500/20' },
-        ].map((stat, i) => (
+        ].map((stat) => (
           <motion.div key={stat.label} variants={itemVariants}>
             <Card className={cn(
               'overflow-hidden border bg-gradient-to-br backdrop-blur-sm transition-shadow active:scale-[0.98]',
@@ -361,15 +382,15 @@ export function Dashboard() {
                   </div>
                   <div>
                     <CardTitle className="text-base font-display">
-                      {selectedDate ? `Tasks for ${format(selectedDate, 'MMM d')}` : 'Upcoming Tasks'}
+                      {selectedDateLabel ? `Tasks for ${selectedDateLabel}` : 'Upcoming Tasks'}
                     </CardTitle>
                     <CardDescription className="text-xs">
-                      {upcomingTasks.length} tasks {selectedDate ? 'on this date' : 'pending'}
+                      {upcomingTasks.length} tasks {selectedDateLabel ? 'on this date' : 'pending'}
                     </CardDescription>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  {selectedDate && (
+                  {selectedDateLabel && (
                     <Button 
                       variant="ghost" 
                       size="sm" 
@@ -434,7 +455,7 @@ export function Dashboard() {
                     variants={{ hidden: {}, show: { transition: { staggerChildren: 0.05 } } }}
                     className="space-y-2"
                   >
-                    {upcomingTasks.map((task, i) => (
+                    {upcomingTasks.map((task) => (
                       <motion.div
                         key={task.id}
                         variants={{
@@ -495,6 +516,7 @@ export function Dashboard() {
               {/* Calendar grid */}
               <div className="grid grid-cols-7 gap-1">
                 {calendarDays.map((day, index) => {
+                  const dayKey = format(day, 'yyyy-MM-dd');
                   const dayEvents = getEventsForDate(day);
                   const hasEvents = dayEvents.tasks.length > 0 || dayEvents.exams.length > 0;
                   const hasMissingTasks = dayEvents.tasks.some(task =>
@@ -504,15 +526,15 @@ export function Dashboard() {
                   return (
                     <button
                       key={index}
-                      onClick={() => setSelectedDateStr(format(day, 'yyyy-MM-dd'))}
+                      onClick={() => setSelectedDateStr(dayKey)}
                       className={cn(
                         'aspect-square text-xs rounded-lg flex flex-col items-center justify-center transition-all relative group/day min-h-[36px] sm:min-h-0',
                         !isCurrentMonth && 'opacity-30',
-                        isToday(day) && 'bg-primary/20 border border-primary font-bold dot-pulse',
-                        selectedDateStr === format(day, 'yyyy-MM-dd') && 'bg-primary/10 ring-1 ring-primary/50',
+                        dayKey === todayKey && 'bg-primary/20 border border-primary font-bold dot-pulse',
+                        selectedDateStr === dayKey && 'bg-primary/10 ring-1 ring-primary/50',
                         hasMissingTasks && 'border border-red-500/70 bg-red-500/15 text-red-300',
-                        hasMissingTasks && selectedDateStr === format(day, 'yyyy-MM-dd') && 'ring-1 ring-red-500/70',
-                        !isToday(day) && 'hover:bg-muted hover:scale-110'
+                        hasMissingTasks && selectedDateStr === dayKey && 'ring-1 ring-red-500/70',
+                        dayKey !== todayKey && 'hover:bg-muted hover:scale-110'
                       )}
                     >
                       {format(day, 'd')}
@@ -650,9 +672,9 @@ export function Dashboard() {
               </div>
             ) : (
               upcomingExams.map((exam, i) => {
-                const daysUntil = getDaysUntil(exam.exam_date);
+                const daysUntil = examDayDistance(exam, now, taskDisplayOptions.timeZone);
                 const subject = subjects.find((s) => s.id === exam.subject_id);
-                const isUrgent = daysUntil <= 7;
+                const isUrgent = daysUntil !== null && daysUntil <= 7;
 
                 return (
                   <motion.div
@@ -673,7 +695,7 @@ export function Dashboard() {
                         )}
                       </div>
                       <Badge variant={isUrgent ? "destructive" : "secondary"} className={cn("shrink-0 text-xs", isUrgent && "animate-breathe")}>
-                        {daysUntil === 0 ? 'Today' : daysUntil === 1 ? 'Tomorrow' : `${daysUntil}d`}
+                        {daysUntil === null ? 'Date unavailable' : daysUntil === 0 ? 'Today' : daysUntil === 1 ? 'Tomorrow' : `${daysUntil}d`}
                       </Badge>
                     </div>
                     <div className="mt-2 relative">

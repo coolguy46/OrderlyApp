@@ -14,6 +14,12 @@ import { motion } from 'framer-motion';
 import { formatDuration } from '@/lib/utils';
 import { useCurrentTime } from '@/lib/use-current-time';
 import { usePlannerStore } from '@/lib/planner/store';
+import { localDateFromIso } from '@/lib/schedule/selectors';
+import {
+  discardUnownedLegacyStorageValue,
+  userScopedStorageKey,
+} from '@/lib/user-scoped-storage';
+import { useHydrated } from '@/lib/use-hydrated';
 import {
   Egg,
   Snowflake,
@@ -43,13 +49,9 @@ export function StudySession() {
   const timeZone = (user?.id ? plannerUsers[user.id]?.settings.timeZone : null)
     || Intl.DateTimeFormat().resolvedOptions().timeZone
     || 'UTC';
-  const [visualType, setVisualType] = useState<VisualizationType>(() => {
-    if (typeof window !== 'undefined') {
-      return (localStorage.getItem('studyVisualType') as VisualizationType) || 'egg';
-    }
-    return 'egg';
-  });
-  const [mounted, setMounted] = useState(false);
+  const [visualType, setVisualType] = useState<VisualizationType>('egg');
+  const [preferencesLoadedForUserId, setPreferencesLoadedForUserId] = useState('');
+  const mounted = useHydrated();
   
   // Editable goal duration (in hours, min 1, max 24)
   const [goalHours, setGoalHours] = useState(2);
@@ -57,40 +59,47 @@ export function StudySession() {
   const [tempGoalHours, setTempGoalHours] = useState('2');
   const [tempGoalMinutes, setTempGoalMinutes] = useState('0');
 
-  useEffect(() => {
-    setMounted(true);
-    // Load goal from localStorage
-    const savedGoal = localStorage.getItem('studyGoalHours');
-    if (savedGoal) {
-      setGoalHours(parseFloat(savedGoal));
-    }
-  }, []);
+  const preferenceOwner = mounted ? user?.id || '' : '';
+  if (preferencesLoadedForUserId !== preferenceOwner) {
+    discardUnownedLegacyStorageValue(localStorage, 'studyVisualType');
+    discardUnownedLegacyStorageValue(localStorage, 'studyGoalHours');
+    const visualKey = userScopedStorageKey('studyVisualType', preferenceOwner);
+    const goalKey = userScopedStorageKey('studyGoalHours', preferenceOwner);
+    const savedVisual = visualKey ? localStorage.getItem(visualKey) : null;
+    const savedGoal = goalKey ? localStorage.getItem(goalKey) : null;
+    const parsedGoal = savedGoal ? Number.parseFloat(savedGoal) : Number.NaN;
+    setVisualType(savedVisual === 'ice' ? 'ice' : 'egg');
+    setGoalHours(Number.isFinite(parsedGoal) && parsedGoal >= 1 && parsedGoal <= 24 ? parsedGoal : 2);
+    setPreferencesLoadedForUserId(preferenceOwner);
+  }
 
   // Persist visualization type
   useEffect(() => {
-    if (mounted) {
-      localStorage.setItem('studyVisualType', visualType);
+    const storageKey = userScopedStorageKey('studyVisualType', user?.id);
+    if (mounted && storageKey && preferencesLoadedForUserId === user?.id) {
+      localStorage.setItem(storageKey, visualType);
     }
-  }, [visualType, mounted]);
+  }, [visualType, mounted, preferencesLoadedForUserId, user?.id]);
 
   // Save goal to localStorage
   useEffect(() => {
-    if (mounted) {
-      localStorage.setItem('studyGoalHours', goalHours.toString());
+    const storageKey = userScopedStorageKey('studyGoalHours', user?.id);
+    if (mounted && storageKey && preferencesLoadedForUserId === user?.id) {
+      localStorage.setItem(storageKey, goalHours.toString());
     }
-  }, [goalHours, mounted]);
+  }, [goalHours, mounted, preferencesLoadedForUserId, user?.id]);
 
   // Calculate today's study time
   const todayStats = useMemo(() => {
     if (!mounted) return { totalMinutes: 0 };
-    const today = new Date().toDateString();
+    const today = localDateFromIso(currentTime.toISOString(), timeZone);
     const todaySessions = studySessions.filter(
-      (s) => new Date(s.started_at).toDateString() === today
+      (s) => localDateFromIso(s.started_at, timeZone) === today
     );
     const savedMinutes = todaySessions.reduce((acc, s) => acc + s.duration_minutes, 0);
     const totalMinutes = savedMinutes + Math.floor(activeStudySeconds / 60);
     return { totalMinutes };
-  }, [studySessions, mounted, activeStudySeconds]);
+  }, [studySessions, mounted, activeStudySeconds, currentTime, timeZone]);
 
   // Daily goal progress
   const dailyGoal = goalHours * 60; // Convert hours to minutes

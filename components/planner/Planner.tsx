@@ -51,6 +51,7 @@ import {
 } from '@/lib/schedule/selectors';
 import { useScheduleStore } from '@/lib/schedule/store';
 import type { LocalDate, ScheduleEntry, ScheduleOccurrence } from '@/lib/schedule/types';
+import { selectUnscheduledTasks } from '@/lib/schedule/unscheduled';
 import type { Task } from '@/lib/supabase/types';
 import { Button } from '@/components/ui/Button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
@@ -322,7 +323,7 @@ export function Planner() {
   const commandInputRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
-    const refresh = () => setStoredEvents(readStoredCalendarEvents());
+    const refresh = () => setStoredEvents(readStoredCalendarEvents(userId));
     refresh();
     window.addEventListener('storage', refresh);
     window.addEventListener('orderly-calendar-events-changed', refresh);
@@ -330,12 +331,17 @@ export function Planner() {
       window.removeEventListener('storage', refresh);
       window.removeEventListener('orderly-calendar-events-changed', refresh);
     };
-  }, []);
+  }, [userId]);
 
   useEffect(() => {
     const today = dateCarrierInTimeZone(timeZone);
-    setWeekStart(startOfWeek(today, { weekStartsOn: 1 }));
-    setSelectedDate(today);
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      setWeekStart(startOfWeek(today, { weekStartsOn: 1 }));
+      setSelectedDate(today);
+    });
+    return () => { cancelled = true; };
   }, [timeZone]);
 
   const entries = useMemo(
@@ -431,10 +437,10 @@ export function Planner() {
       .sort((left, right) => (left.startAt || '').localeCompare(right.startAt || '') || left.title.localeCompare(right.title)),
     [occurrences.timed, occurrences.untimed, selectedDate],
   );
-  const unscheduledTasks = useMemo(() => {
-    const scheduled = new Set(entries.map(entry => entry.taskId));
-    return pendingTasks.filter(task => !scheduled.has(task.id)).slice(0, 10);
-  }, [entries, pendingTasks]);
+  const unscheduledTasks = useMemo(
+    () => selectUnscheduledTasks(pendingTasks, entries),
+    [entries, pendingTasks],
+  );
 
   const selectDay = useCallback((next: Date) => {
     const normalized = startOfDay(next);
@@ -456,7 +462,11 @@ export function Planner() {
   const submitCommand = useCallback((value = command, taskId = selectedTaskId) => {
     const normalized = value.trim();
     if (!normalized) return;
-    const nextPreview = interpretScheduleCommand(normalized, { ...context, selectedTaskId: taskId });
+    const nextPreview = interpretScheduleCommand(normalized, {
+      ...context,
+      now: new Date().toISOString(),
+      selectedTaskId: taskId,
+    });
     setPreview(nextPreview);
     setCommand(normalized);
     setMessages(previous => [
@@ -556,7 +566,7 @@ export function Planner() {
         ? { ...event, occurrenceOverrides: updated.occurrenceOverrides }
         : event);
       setStoredEvents(nextEvents);
-      writeStoredCalendarEvents(nextEvents);
+      writeStoredCalendarEvents(userId, nextEvents);
     } else {
       upsertCommitment(userId, updated);
     }

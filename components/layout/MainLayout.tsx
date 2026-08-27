@@ -1,18 +1,18 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useAppStore } from '@/lib/store';
 import { Sidebar } from './Sidebar';
 import { Header } from './Header';
 import { BottomNav } from './BottomNav';
 import { motion, AnimatePresence } from 'framer-motion';
-import { cn } from '@/lib/utils';
 import { ErrorBoundary } from '@/components/ui/error-boundary';
 import { usePathname } from 'next/navigation';
 import {
   Sheet,
   SheetContent,
 } from '@/components/ui/sheet';
+import { useMediaQuery } from '@/lib/use-hydrated';
 
 interface MainLayoutProps {
   children: React.ReactNode;
@@ -21,20 +21,14 @@ interface MainLayoutProps {
 export function MainLayout({ children }: MainLayoutProps) {
   const { sidebarOpen } = useAppStore();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [isDesktop, setIsDesktop] = useState(false);
+  const isDesktop = useMediaQuery('(min-width: 1024px)');
   const pathname = usePathname();
 
-  useEffect(() => {
-    const check = () => setIsDesktop(window.innerWidth >= 1024);
-    check();
-    window.addEventListener('resize', check);
-    return () => window.removeEventListener('resize', check);
-  }, []);
-
-  // Close mobile menu on route change
-  useEffect(() => {
+  const [mobileMenuPathname, setMobileMenuPathname] = useState(pathname);
+  if (mobileMenuPathname !== pathname) {
+    setMobileMenuPathname(pathname);
     setMobileMenuOpen(false);
-  }, [pathname]);
+  }
 
   return (
     <div className="min-h-dvh bg-background bg-grain mesh-gradient">
@@ -56,7 +50,7 @@ export function MainLayout({ children }: MainLayoutProps) {
         transition={{ duration: 0.2, ease: 'easeInOut' }}
         className="flex flex-col min-h-dvh"
       >
-        <Header onMobileMenuToggle={() => setMobileMenuOpen(!mobileMenuOpen)} />
+        <Header />
         <main className="flex-1 px-4 pt-4 pb-20 sm:px-6 sm:pb-6 lg:px-10 lg:pb-10 lg:pt-6 relative">
           <ErrorBoundary>
             <AnimatePresence mode="wait">

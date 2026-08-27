@@ -1,7 +1,13 @@
 -- Fan out Canvas background syncs into one serverless invocation per due user.
 -- This prevents a slow or broken Canvas feed from consuming another user's
--- function budget. Safe to run more than once in the production Supabase SQL
--- editor after the `canvas_sync_cron_secret` Vault secret has been created.
+-- function budget. This claims dispatch delivery only; the application-wide
+-- manual/background mutation lease must already be installed by
+-- canvas-sync-concurrency-migration.sql. Apply this migration last because it
+-- immediately activates the five-minute cron. Safe to run more than once in the
+-- production Supabase SQL editor after both the `canvas_sync_cron_secret` and
+-- `canvas_sync_endpoint_url` Vault secrets have been created. The endpoint
+-- secret must be the complete, redirect-free HTTPS URL ending exactly in
+-- `/api/canvas/background-sync` for the environment being deployed.
 
 BEGIN;
 
@@ -26,6 +32,7 @@ SET search_path = pg_catalog, public, vault, net
 AS $function$
 DECLARE
   cron_secret TEXT;
+  endpoint_url TEXT;
 BEGIN
   SELECT decrypted_secret
   INTO cron_secret
@@ -36,6 +43,25 @@ BEGIN
 
   IF cron_secret IS NULL OR length(cron_secret) = 0 THEN
     RAISE EXCEPTION 'Vault secret canvas_sync_cron_secret is missing';
+  END IF;
+
+  SELECT BTRIM(decrypted_secret)
+  INTO endpoint_url
+  FROM vault.decrypted_secrets
+  WHERE name = 'canvas_sync_endpoint_url'
+  ORDER BY created_at DESC
+  LIMIT 1;
+
+  -- Do not silently dispatch a staging database to production (or leak the
+  -- bearer secret through an HTTP redirect). Configuration is deliberately
+  -- fail-closed and accepts only a complete HTTPS origin plus the exact route.
+  IF endpoint_url IS NULL OR endpoint_url = '' THEN
+    RAISE EXCEPTION 'Vault secret canvas_sync_endpoint_url is missing';
+  END IF;
+
+  IF endpoint_url !~ '^https://[^/?#]+/api/canvas/background-sync$' THEN
+    RAISE EXCEPTION
+      'Vault secret canvas_sync_endpoint_url must be an exact HTTPS /api/canvas/background-sync URL';
   END IF;
 
   RETURN QUERY
@@ -78,7 +104,7 @@ BEGIN
   )
   SELECT claimed.user_id,
          net.http_post(
-           url := 'https://orderlyappp.vercel.app/api/canvas/background-sync',
+           url := endpoint_url,
            headers := jsonb_build_object(
              'Authorization', 'Bearer ' || cron_secret,
              'Content-Type', 'application/json'

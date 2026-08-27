@@ -2,17 +2,18 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/Card';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Separator } from '@/components/ui/separator';
-import { Sparkles, Mail, Lock, ArrowRight, Github, Chrome } from 'lucide-react';
+import { Mail, Lock, ArrowRight, Chrome, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { useAppStore } from '@/lib/store';
 import { signInWithGoogle } from '@/lib/supabase/services';
+import { useHydrated } from '@/lib/use-hydrated';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -21,6 +22,15 @@ export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const hydrated = useHydrated();
+  const authResult = hydrated ? new URLSearchParams(window.location.search) : null;
+  const queryError = authResult?.get('error') === 'auth_callback_error'
+    ? 'Google sign-in could not be completed. Please try again.'
+    : '';
+  const notice = authResult?.get('accountDeleted') === '1'
+    ? 'Your Orderly account and stored data were deleted.'
+    : '';
+  const displayedError = error || queryError;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -34,8 +44,10 @@ export default function LoginPage() {
       } else {
         setError('Invalid email or password');
       }
-    } catch (err: any) {
-      setError(err?.message || 'An error occurred. Please try again.');
+    } catch (caughtError) {
+      setError(caughtError instanceof Error
+        ? caughtError.message
+        : 'An error occurred. Please try again.');
     } finally {
       setIsLoading(false);
     }
@@ -46,7 +58,7 @@ export default function LoginPage() {
     setError('');
     try {
       await signInWithGoogle();
-    } catch (err) {
+    } catch {
       setError('Google sign-in failed. Please try again.');
       setIsLoading(false);
     }
@@ -70,7 +82,7 @@ export default function LoginPage() {
           <CardHeader className="text-center space-y-4">
             {/* Logo */}
             <div className="mx-auto w-12 h-12 rounded-xl flex items-center justify-center">
-              <img src="/logo.svg" alt="Orderly Logo" className="w-12 h-12" />
+              <Image src="/logo.svg" alt="Orderly Logo" width={48} height={48} className="w-12 h-12" priority />
             </div>
             <div>
               <CardTitle className="text-2xl font-bold">Welcome back</CardTitle>
@@ -101,6 +113,28 @@ export default function LoginPage() {
               </span>
             </div>
 
+            {displayedError && (
+              <div
+                role="alert"
+                aria-live="assertive"
+                className="flex items-start gap-2 rounded-lg border border-red-500/25 bg-red-500/10 p-3 text-sm text-red-300"
+              >
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>{displayedError}</span>
+              </div>
+            )}
+
+            {notice && (
+              <div
+                role="status"
+                aria-live="polite"
+                className="flex items-start gap-2 rounded-lg border border-emerald-500/25 bg-emerald-500/10 p-3 text-sm text-emerald-300"
+              >
+                <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>{notice}</span>
+              </div>
+            )}
+
             {/* Email/Password Form */}
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-2">
@@ -112,7 +146,10 @@ export default function LoginPage() {
                     type="email"
                     placeholder="you@example.com"
                     value={email}
-                    onChange={(e) => setEmail(e.target.value)}
+                    onChange={(e) => {
+                      setEmail(e.target.value);
+                      if (error) setError('');
+                    }}
                     className="!pl-12"
                     required
                   />
@@ -136,18 +173,14 @@ export default function LoginPage() {
                     type="password"
                     placeholder="••••••••"
                     value={password}
-                    onChange={(e) => setPassword(e.target.value)}
+                    onChange={(e) => {
+                      setPassword(e.target.value);
+                      if (error) setError('');
+                    }}
                     className="!pl-12"
                     required
                   />
                 </div>
-              </div>
-
-              <div className="flex items-center space-x-2">
-                <Checkbox id="remember" />
-                <Label htmlFor="remember" className="text-sm font-normal text-muted-foreground cursor-pointer">
-                  Remember me for 30 days
-                </Label>
               </div>
 
               <Button
@@ -169,7 +202,7 @@ export default function LoginPage() {
 
           <CardFooter className="justify-center">
             <p className="text-sm text-muted-foreground">
-              Don't have an account?{' '}
+              Don&apos;t have an account?{' '}
               <Link
                 href="/auth/register"
                 className="text-indigo-400 hover:text-indigo-300 font-medium transition-colors"

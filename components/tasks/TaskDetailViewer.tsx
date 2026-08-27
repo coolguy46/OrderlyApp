@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { Task } from '@/lib/supabase/types';
 import { useAppStore } from '@/lib/store';
 import {
@@ -13,20 +14,19 @@ import {
 } from '@/components/ui';
 import { SubjectBadge } from '@/components/ui';
 import { formatDate, cn, isExamType } from '@/lib/utils';
+import { externalHtmlToPlainText, safeExternalUrl } from '@/lib/safe-content';
 import { isTaskMissing, taskDueDayDistance } from '@/lib/task-status';
 import { useCurrentTime } from '@/lib/use-current-time';
 import { useScheduleStore } from '@/lib/schedule/store';
 import { usePlannerStore } from '@/lib/planner/store';
-import { formatDurationInput, scheduledEndAt, selectScheduleEntry } from '@/lib/schedule/selectors';
+import { formatDurationInput, formatIsoTime, scheduledEndAt, selectScheduleEntry } from '@/lib/schedule/selectors';
 import type { ScheduleOccurrence } from '@/lib/schedule/types';
 import { format } from 'date-fns';
-import { motion, AnimatePresence } from 'framer-motion';
 import Link from 'next/link';
 import {
   Calendar,
   Clock,
   ExternalLink,
-  BookOpen,
   Tag,
   CheckCircle2,
   Play,
@@ -48,6 +48,7 @@ interface TaskDetailViewerProps {
 
 export function TaskDetailViewer({ task, open, onOpenChange, onEdit, scheduleOccurrence }: TaskDetailViewerProps) {
   const { subjects, completeTask, updateTask } = useAppStore();
+  const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
   const scheduleEntry = useScheduleStore((state) =>
     selectScheduleEntry(state.entriesByUser, task?.user_id, task?.id)
   );
@@ -88,12 +89,16 @@ export function TaskDetailViewer({ task, open, onOpenChange, onEdit, scheduleOcc
   };
 
   const handleComplete = async () => {
-    if (isCompleted) {
-      await updateTask(task.id, { status: 'pending', completed_at: null });
-    } else {
-      await completeTask(task.id);
+    if (isUpdatingStatus) return;
+    setIsUpdatingStatus(true);
+    try {
+      const success = isCompleted
+        ? await updateTask(task.id, { status: 'pending', completed_at: null })
+        : await completeTask(task.id);
+      if (success) onOpenChange(false);
+    } finally {
+      setIsUpdatingStatus(false);
     }
-    onOpenChange(false);
   };
 
   const handleStartProgress = async () => {
@@ -113,11 +118,12 @@ export function TaskDetailViewer({ task, open, onOpenChange, onEdit, scheduleOcc
   const getSourceInfo = () => {
     switch (task.source) {
       case 'canvas': return { label: 'Canvas', className: 'bg-orange-500/15 text-orange-400 border-orange-500/20' };
-      case 'google_classroom': return { label: 'Google Classroom', className: 'bg-blue-500/15 text-blue-400 border-blue-500/20' };
+      case 'google_classroom': return { label: 'Imported LMS', className: 'bg-blue-500/15 text-blue-400 border-blue-500/20' };
       default: return null;
     }
   };
   const sourceInfo = getSourceInfo();
+  const externalUrl = safeExternalUrl(task.external_url);
 
   // Due date display
   const getDueDisplay = () => {
@@ -146,6 +152,12 @@ export function TaskDetailViewer({ task, open, onOpenChange, onEdit, scheduleOcc
   const scheduledEnd = scheduledStartAt
     ? scheduledEndAt(scheduledStartAt, scheduledDuration)
     : null;
+  const scheduledStartLabel = scheduledStartAt
+    ? formatIsoTime(scheduledStartAt, timeZone)
+    : null;
+  const scheduledEndLabel = scheduledEnd
+    ? formatIsoTime(scheduledEnd, timeZone)
+    : null;
   const scheduledDate = scheduleOccurrence?.date || scheduleEntry?.scheduledDate || null;
   const scheduledDateLabel = scheduledDate
     ? format(new Date(`${scheduledDate}T12:00:00`), 'EEEE, MMM d')
@@ -153,42 +165,9 @@ export function TaskDetailViewer({ task, open, onOpenChange, onEdit, scheduleOcc
 
   // Format description
   const formatDescription = (description: string) => {
-    if (!description) return null;
-    
-    const decodeHTMLEntities = (text: string) => {
-      const textarea = document.createElement('textarea');
-      textarea.innerHTML = text;
-      return textarea.value;
-    };
-    
-    const hasHTMLTags = /<[a-z][\s\S]*>/i.test(description);
-    
-    if (hasHTMLTags) {
-      let cleanedHtml = description
-        .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-        .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '')
-        .replace(/<!--[\s\S]*?-->/g, '')
-        .replace(/&nbsp;/g, ' ')
-        .replace(/<br\s*\/?>/gi, '\n')
-        .replace(/<\/p>\s*<p>/gi, '\n\n')
-        .replace(/<\/div>\s*<div>/gi, '\n')
-        .trim();
-      
-      const textContent = cleanedHtml.replace(/<[^>]*>/g, '').trim();
-      if (!textContent) return null;
-      
-      return (
-        <div 
-          className="prose prose-sm dark:prose-invert max-w-none 
-            prose-p:my-1 prose-ul:my-1 prose-ol:my-1 prose-li:my-0.5
-            prose-headings:my-2 prose-a:text-primary prose-a:no-underline hover:prose-a:underline
-            [&_*]:text-foreground [&_a]:text-primary"
-          dangerouslySetInnerHTML={{ __html: cleanedHtml }}
-        />
-      );
-    }
-    
-    const decodedText = decodeHTMLEntities(description);
+    const decodedText = externalHtmlToPlainText(description);
+    if (!decodedText) return null;
+
     return (
       <div className="whitespace-pre-wrap text-sm text-muted-foreground leading-relaxed">
         {decodedText}
@@ -337,8 +316,8 @@ export function TaskDetailViewer({ task, open, onOpenChange, onEdit, scheduleOcc
                   </div>
                   <div className="min-w-0">
                     <p className="text-sm font-semibold">
-                      {scheduledStartAt
-                        ? `${format(new Date(scheduledStartAt), 'h:mm a')}${scheduledEnd ? `–${format(new Date(scheduledEnd), 'h:mm a')}` : ''}`
+                      {scheduledStartLabel
+                        ? `${scheduledStartLabel}${scheduledEndLabel ? `–${scheduledEndLabel}` : ''}`
                         : 'Untimed'}
                     </p>
                     <p className="text-[11px] text-muted-foreground">
@@ -388,9 +367,9 @@ export function TaskDetailViewer({ task, open, onOpenChange, onEdit, scheduleOcc
             )}
 
             {/* External Link */}
-            {task.external_url && (
+            {externalUrl && (
               <a
-                href={task.external_url}
+                href={externalUrl}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center justify-between gap-2 p-3 rounded-xl bg-primary/5 hover:bg-primary/10 border border-primary/10 text-primary transition-all group"
@@ -398,7 +377,7 @@ export function TaskDetailViewer({ task, open, onOpenChange, onEdit, scheduleOcc
                 <div className="flex items-center gap-2.5">
                   <ExternalLink className="w-4 h-4" />
                   <span className="text-sm font-medium">
-                    Open in {task.source === 'canvas' ? 'Canvas' : task.source === 'google_classroom' ? 'Google Classroom' : 'Browser'}
+                    Open in {task.source === 'canvas' ? 'Canvas' : task.source === 'google_classroom' ? 'source LMS' : 'Browser'}
                   </span>
                 </div>
                 <ArrowUpRight className="w-4 h-4 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
@@ -431,7 +410,7 @@ export function TaskDetailViewer({ task, open, onOpenChange, onEdit, scheduleOcc
               </Button>
             )}
             <div className="flex-1" />
-            <Button size="sm" onClick={handleComplete} className={cn(
+            <Button size="sm" onClick={handleComplete} disabled={isUpdatingStatus} className={cn(
               'gap-1.5',
               isCompleted
                 ? 'bg-amber-600 hover:bg-amber-700 text-white'

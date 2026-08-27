@@ -3,6 +3,12 @@
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import { DEFAULT_SCHEDULE_DURATION_SECONDS, isLocalDate } from './selectors';
+import { persistTaskSchedule } from './persistence-client';
+import {
+  mergeScheduleHydration,
+  persistedTaskScheduleUpdate,
+  type PendingScheduleMutation,
+} from './persistence';
 import type {
   LocalDate,
   ScheduleBatchOperation,
@@ -11,10 +17,15 @@ import type {
   ScheduleOccurrenceOverride,
 } from './types';
 
-const SCHEDULE_STORE_VERSION = 1;
+const SCHEDULE_STORE_VERSION = 2;
 
 export interface ScheduleState {
+  activeUserId: string | null;
+  sessionGeneration: number;
   entriesByUser: Record<string, Record<string, ScheduleEntry>>;
+  pendingByUser: Record<string, Record<string, PendingScheduleMutation>>;
+  nextRevisionByUser: Record<string, number>;
+  setActiveUser: (userId: string | null) => void;
   upsertTaskSchedule: (userId: string, taskId: string, input: ScheduleEntryInput) => ScheduleEntry | null;
   removeTaskSchedule: (userId: string, taskId: string) => void;
   setOccurrenceOverride: (
@@ -39,6 +50,8 @@ export interface ScheduleState {
   ) => void;
   applyScheduleBatch: (userId: string, operations: ScheduleBatchOperation[]) => void;
   replaceUserSchedules: (userId: string, entries: ScheduleEntry[]) => void;
+  hydrateUserSchedules: (userId: string, entries: ScheduleEntry[]) => void;
+  retryPendingSchedules: (userId: string) => void;
   clearTaskSchedules: (userId: string, taskIds?: string[]) => void;
 }
 
@@ -146,10 +159,109 @@ function applyOperation(
   return next;
 }
 
+const persistenceQueues = new Map<string, Promise<void>>();
+let onlineRetryInstalled = false;
+
+function samePersistedSchedule(left: ScheduleEntry | undefined, right: ScheduleEntry | undefined): boolean {
+  return JSON.stringify(persistedTaskScheduleUpdate(left || null))
+    === JSON.stringify(persistedTaskScheduleUpdate(right || null));
+}
+
+function schedulePersistenceKey(userId: string, taskId: string): string {
+  return `${userId}:${taskId}`;
+}
+
+function queueSchedulePersistence(
+  userId: string,
+  taskId: string,
+  expectedGeneration: number,
+): void {
+  const key = schedulePersistenceKey(userId, taskId);
+  const previous = persistenceQueues.get(key) || Promise.resolve();
+  const queued = previous.catch(() => undefined).then(async () => {
+    const before = useScheduleStore.getState();
+    const pending = before.pendingByUser[userId]?.[taskId];
+    if (!pending || before.activeUserId !== userId || before.sessionGeneration !== expectedGeneration) return;
+    try {
+      await persistTaskSchedule(userId, taskId, pending.entry);
+    } catch (error) {
+      // The local cache remains fully usable offline. A later online event,
+      // hydration, or explicit account activation retries this exact revision.
+      console.warn('Could not persist task schedule; keeping it queued locally.', error);
+      return;
+    }
+
+    const after = useScheduleStore.getState();
+    const latest = after.pendingByUser[userId]?.[taskId];
+    if (
+      after.activeUserId !== userId
+      || after.sessionGeneration !== expectedGeneration
+      || latest?.revision !== pending.revision
+    ) return;
+    useScheduleStore.setState(state => {
+      const userPending = { ...(state.pendingByUser[userId] || {}) };
+      delete userPending[taskId];
+      return { pendingByUser: { ...state.pendingByUser, [userId]: userPending } };
+    });
+  }).finally(() => {
+    if (persistenceQueues.get(key) === queued) persistenceQueues.delete(key);
+  });
+  persistenceQueues.set(key, queued);
+}
+
+function retryPendingSchedules(userId: string): void {
+  const state = useScheduleStore.getState();
+  if (state.activeUserId !== userId) return;
+  for (const taskId of Object.keys(state.pendingByUser[userId] || {})) {
+    queueSchedulePersistence(userId, taskId, state.sessionGeneration);
+  }
+}
+
+function installOnlineRetry(): void {
+  if (onlineRetryInstalled || typeof window === 'undefined') return;
+  onlineRetryInstalled = true;
+  window.addEventListener('online', () => {
+    const userId = useScheduleStore.getState().activeUserId;
+    if (userId) retryPendingSchedules(userId);
+  });
+}
+
+function markScheduleMutation(userId: string, taskId: string, entry: ScheduleEntry | null): void {
+  const state = useScheduleStore.getState();
+  const revision = (state.nextRevisionByUser[userId] || 0) + 1;
+  useScheduleStore.setState(current => ({
+    nextRevisionByUser: { ...current.nextRevisionByUser, [userId]: revision },
+    pendingByUser: {
+      ...current.pendingByUser,
+      [userId]: {
+        ...(current.pendingByUser[userId] || {}),
+        [taskId]: { revision, entry },
+      },
+    },
+  }));
+  const active = useScheduleStore.getState();
+  if (active.activeUserId === userId) {
+    queueSchedulePersistence(userId, taskId, active.sessionGeneration);
+  }
+}
+
 export const useScheduleStore = create<ScheduleState>()(
   persist(
     (set, get) => ({
+      activeUserId: null,
+      sessionGeneration: 0,
       entriesByUser: {},
+      pendingByUser: {},
+      nextRevisionByUser: {},
+      setActiveUser: (userId) => {
+        const previous = get().activeUserId;
+        if (previous !== userId) {
+          set(state => ({ activeUserId: userId, sessionGeneration: state.sessionGeneration + 1 }));
+        } else {
+          set({ activeUserId: userId });
+        }
+        installOnlineRetry();
+      },
       upsertTaskSchedule: (userId, taskId, input) => {
         if (!userId || !taskId) return null;
         const previous = get().entriesByUser[userId]?.[taskId];
@@ -160,6 +272,7 @@ export const useScheduleStore = create<ScheduleState>()(
           else delete userEntries[taskId];
           return { entriesByUser: { ...state.entriesByUser, [userId]: userEntries } };
         });
+        markScheduleMutation(userId, taskId, entry);
         return entry;
       },
       removeTaskSchedule: (userId, taskId) => {
@@ -168,6 +281,7 @@ export const useScheduleStore = create<ScheduleState>()(
           delete userEntries[taskId];
           return { entriesByUser: { ...state.entriesByUser, [userId]: userEntries } };
         });
+        markScheduleMutation(userId, taskId, null);
       },
       setOccurrenceOverride: (userId, taskId, occurrenceDate, override) => {
         if (!get().entriesByUser[userId]?.[taskId]) {
@@ -187,6 +301,7 @@ export const useScheduleStore = create<ScheduleState>()(
             }),
           },
         }));
+        markScheduleMutation(userId, taskId, get().entriesByUser[userId]?.[taskId] || null);
       },
       clearOccurrenceOverride: (userId, taskId, occurrenceDate) => {
         set(state => ({
@@ -197,6 +312,7 @@ export const useScheduleStore = create<ScheduleState>()(
             }),
           },
         }));
+        markScheduleMutation(userId, taskId, get().entriesByUser[userId]?.[taskId] || null);
       },
       moveOccurrence: (userId, taskId, occurrenceDate, scheduledDate, startAt) => {
         const existing = get().entriesByUser[userId]?.[taskId];
@@ -224,26 +340,71 @@ export const useScheduleStore = create<ScheduleState>()(
         get().setOccurrenceOverride(userId, taskId, occurrenceDate, { durationSeconds });
       },
       applyScheduleBatch: (userId, operations) => {
+        const before = get().entriesByUser[userId] || {};
         set(state => {
           let userEntries = state.entriesByUser[userId] || {};
           for (const operation of operations) userEntries = applyOperation(userEntries, userId, operation);
           return { entriesByUser: { ...state.entriesByUser, [userId]: userEntries } };
         });
+        const after = get().entriesByUser[userId] || {};
+        const affectedTaskIds = [...new Set(operations.map(operation => operation.taskId))];
+        for (const taskId of affectedTaskIds) {
+          if (!samePersistedSchedule(before[taskId], after[taskId])) {
+            markScheduleMutation(userId, taskId, after[taskId] || null);
+          }
+        }
       },
       replaceUserSchedules: (userId, entries) => {
+        const before = get().entriesByUser[userId] || {};
         const userEntries = Object.fromEntries(entries
           .filter(entry => entry.userId === userId && entry.taskId)
           .map(entry => [entry.taskId, entry]));
         set(state => ({ entriesByUser: { ...state.entriesByUser, [userId]: userEntries } }));
+        for (const taskId of new Set([...Object.keys(before), ...Object.keys(userEntries)])) {
+          if (!samePersistedSchedule(before[taskId], userEntries[taskId])) {
+            markScheduleMutation(userId, taskId, userEntries[taskId] || null);
+          }
+        }
       },
+      hydrateUserSchedules: (userId, entries) => {
+        set(state => ({
+          entriesByUser: {
+            ...state.entriesByUser,
+            [userId]: mergeScheduleHydration(
+              userId,
+              entries,
+              state.entriesByUser[userId] || {},
+              state.pendingByUser[userId] || {},
+            ),
+          },
+        }));
+        retryPendingSchedules(userId);
+      },
+      retryPendingSchedules,
       clearTaskSchedules: (userId, taskIds) => {
         set(state => {
+          const pendingByUser = { ...state.pendingByUser };
+          const nextRevisionByUser = { ...state.nextRevisionByUser };
           if (!taskIds) {
-            return { entriesByUser: { ...state.entriesByUser, [userId]: {} } };
+            pendingByUser[userId] = {};
+            delete nextRevisionByUser[userId];
+            return {
+              entriesByUser: { ...state.entriesByUser, [userId]: {} },
+              pendingByUser,
+              nextRevisionByUser,
+            };
           }
           const userEntries = { ...(state.entriesByUser[userId] || {}) };
-          for (const taskId of taskIds) delete userEntries[taskId];
-          return { entriesByUser: { ...state.entriesByUser, [userId]: userEntries } };
+          const userPending = { ...(pendingByUser[userId] || {}) };
+          for (const taskId of taskIds) {
+            delete userEntries[taskId];
+            delete userPending[taskId];
+          }
+          pendingByUser[userId] = userPending;
+          return {
+            entriesByUser: { ...state.entriesByUser, [userId]: userEntries },
+            pendingByUser,
+          };
         });
       },
     }),
@@ -251,7 +412,45 @@ export const useScheduleStore = create<ScheduleState>()(
       name: 'orderly-schedule-storage',
       version: SCHEDULE_STORE_VERSION,
       storage: createJSONStorage(() => localStorage),
-      partialize: state => ({ entriesByUser: state.entriesByUser }),
+      partialize: state => ({
+        entriesByUser: state.entriesByUser,
+        pendingByUser: state.pendingByUser,
+        nextRevisionByUser: state.nextRevisionByUser,
+      }),
+      migrate: (persisted, persistedVersion) => {
+        const saved = persisted as Partial<ScheduleState> | undefined;
+        const entriesByUser = saved?.entriesByUser || {};
+        const pendingByUser = Object.fromEntries(
+          Object.entries(saved?.pendingByUser || {}).map(([userId, pending]) => [userId, { ...pending }]),
+        );
+        const nextRevisionByUser = { ...(saved?.nextRevisionByUser || {}) };
+
+        // Version one stored complete per-account schedules locally but had no
+        // server outbox. Seed an outbox exactly once so an upgrade does not
+        // erase existing calendar work when the initially-empty task columns
+        // hydrate from Supabase.
+        if (persistedVersion < SCHEDULE_STORE_VERSION) {
+          for (const [userId, entries] of Object.entries(entriesByUser)) {
+            const pending = { ...(pendingByUser[userId] || {}) };
+            let revision = nextRevisionByUser[userId] || 0;
+            for (const [taskId, entry] of Object.entries(entries || {})) {
+              if (pending[taskId]) continue;
+              revision += 1;
+              pending[taskId] = { revision, entry };
+            }
+            pendingByUser[userId] = pending;
+            nextRevisionByUser[userId] = revision;
+          }
+        }
+        return {
+          ...saved,
+          activeUserId: null,
+          sessionGeneration: 0,
+          entriesByUser,
+          pendingByUser,
+          nextRevisionByUser,
+        } as ScheduleState;
+      },
     },
   ),
 );

@@ -2,12 +2,31 @@ import 'server-only';
 
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import {
   hydrateCanvasDueDate,
   parseICalFile,
   type CanvasAssignment,
 } from '@/lib/integrations/canvas';
+import { normalizeCanvasFeedUrl } from '@/lib/integrations/canvas-feed-url';
+import {
+  countCanvasCourses,
+  countCanvasCoursesForCompleteSnapshot,
+} from '@/lib/integrations/canvas-course-count';
+import {
+  countCanvasEventBoundaries,
+  isConfirmedCanvasCleanupSnapshot,
+} from '@/lib/integrations/canvas-sync-safety';
+import {
+  isCanvasSyncLeaseMigrationError,
+  parseCanvasSyncLease,
+  type CanvasSyncLease,
+} from '@/lib/integrations/canvas-sync-lease';
 import { isExamType } from '@/lib/utils';
+import type { Database } from '@/lib/supabase/types';
+
+type CanvasTaskRow = Database['public']['Tables']['tasks']['Row'];
+type CanvasExamRow = Database['public']['Tables']['exams']['Row'];
 
 const SUBJECT_COLORS = [
   '#6366f1', '#ec4899', '#f59e0b', '#10b981', '#3b82f6',
@@ -31,6 +50,7 @@ export interface CanvasSyncSetting {
   last_background_attempt_at?: string | null;
   auto_sync_interval: number | null;
   time_zone: string | null;
+  course_count?: number;
 }
 
 export interface CanvasUserSyncResult {
@@ -41,6 +61,7 @@ export interface CanvasUserSyncResult {
   examsImported: number;
   examsUpdated: number;
   orphanCleanupSkipped: boolean;
+  courseCount: number;
   lastSyncAt: string;
   lastBackgroundSyncAt: string | null;
 }
@@ -59,6 +80,128 @@ interface AssignmentSyncCounts {
   updated: number;
   examsImported: number;
   examsUpdated: number;
+}
+
+type CanvasAdminClient = SupabaseClient<Database>;
+
+export class CanvasSyncInProgressError extends Error {
+  constructor() {
+    super('A Canvas sync is already in progress');
+    this.name = 'CanvasSyncInProgressError';
+  }
+}
+
+export class CanvasSyncMigrationRequiredError extends Error {
+  constructor() {
+    super('Canvas sync concurrency migration is required');
+    this.name = 'CanvasSyncMigrationRequiredError';
+  }
+}
+
+export class CanvasSyncNotEnabledError extends Error {
+  constructor() {
+    super('Canvas background sync is disabled');
+    this.name = 'CanvasSyncNotEnabledError';
+  }
+}
+
+class CanvasSyncLeaseLostError extends Error {
+  constructor() {
+    super('Canvas sync lease was lost');
+    this.name = 'CanvasSyncLeaseLostError';
+  }
+}
+
+function throwLeaseRpcError(error: unknown): never {
+  if (isCanvasSyncLeaseMigrationError(error)) {
+    throw new CanvasSyncMigrationRequiredError();
+  }
+  throw new Error('Canvas sync coordination failed');
+}
+
+async function claimCanvasSyncLease(
+  admin: CanvasAdminClient,
+  userId: string
+): Promise<CanvasSyncLease | null> {
+  const { data, error } = await admin
+    .rpc('claim_canvas_sync', { target_user_id: userId })
+    .maybeSingle();
+  if (error) throwLeaseRpcError(error);
+  return parseCanvasSyncLease(data);
+}
+
+async function renewCanvasSyncLease(
+  admin: CanvasAdminClient,
+  userId: string,
+  lease: CanvasSyncLease
+): Promise<void> {
+  const { data, error } = await admin.rpc('renew_canvas_sync_lease', {
+    target_user_id: userId,
+    expected_lease_token: lease.token,
+    expected_revision: lease.revision,
+  });
+  if (error) throwLeaseRpcError(error);
+  if (data !== true) throw new CanvasSyncLeaseLostError();
+}
+
+async function completeCanvasSyncLease(
+  admin: CanvasAdminClient,
+  userId: string,
+  lease: CanvasSyncLease,
+  mode: CanvasSyncMode,
+  completedAt: string,
+  courseCount: number | null,
+): Promise<void> {
+  const { data, error } = await admin.rpc('complete_canvas_sync', {
+    target_user_id: userId,
+    expected_lease_token: lease.token,
+    expected_revision: lease.revision,
+    requested_mode: mode,
+    completed_sync_at: completedAt,
+    completed_course_count: courseCount,
+  });
+  if (error) throwLeaseRpcError(error);
+  if (data !== true) throw new CanvasSyncLeaseLostError();
+}
+
+async function releaseCanvasSyncLease(
+  admin: CanvasAdminClient,
+  userId: string,
+  lease: CanvasSyncLease
+): Promise<void> {
+  // Best effort only: the lease expires automatically after a terminated
+  // function, and the token/revision predicate cannot release a newer owner.
+  try {
+    await admin.rpc('release_canvas_sync_lease', {
+      target_user_id: userId,
+      expected_lease_token: lease.token,
+      expected_revision: lease.revision,
+    });
+  } catch {
+    // Never replace the original sync failure with cleanup diagnostics.
+  }
+}
+
+async function readClaimedCanvasSyncSetting(
+  admin: CanvasAdminClient,
+  userId: string,
+  lease: CanvasSyncLease,
+  mode: CanvasSyncMode
+): Promise<CanvasSyncSetting> {
+  const { data, error } = await admin
+    .from('canvas_settings')
+    .select('user_id, ical_url, last_sync_at, last_background_sync_at, last_background_attempt_at, auto_sync_interval, time_zone, sync_enabled, course_count')
+    .eq('user_id', userId)
+    .eq('sync_lease_token', lease.token)
+    .eq('sync_revision', lease.revision)
+    .maybeSingle();
+  if (error) throw new Error('Could not load claimed Canvas settings');
+  if (!data?.ical_url) throw new CanvasSyncLeaseLostError();
+  if (mode === 'background' && data.sync_enabled !== true) {
+    throw new CanvasSyncNotEnabledError();
+  }
+
+  return data as CanvasSyncSetting;
 }
 
 async function mapWithConcurrency<T, R>(
@@ -144,24 +287,9 @@ async function assertSafeFeedUrl(
   rawUrl: string,
   signal: AbortSignal
 ): Promise<URL> {
-  let url: URL;
-  try {
-    url = new URL(rawUrl);
-  } catch {
-    throw new Error('Canvas feed URL is invalid');
-  }
-
-  if (url.protocol !== 'https:' || url.username || url.password || url.port) {
-    throw new Error('Canvas feed URL must be a standard HTTPS URL');
-  }
-  if (!/^\/feeds\/calendars\/[^/]+\/?$/i.test(url.pathname)) {
-    throw new Error('Use the Calendar Feed URL provided by Canvas');
-  }
+  const url = new URL(normalizeCanvasFeedUrl(rawUrl));
 
   const hostname = url.hostname.toLowerCase().replace(/\.$/, '').replace(/^\[|\]$/g, '');
-  if (hostname !== 'instructure.com' && !hostname.endsWith('.instructure.com')) {
-    throw new Error('Canvas feed URL must use an instructure.com host');
-  }
   if (
     hostname === 'localhost'
     || hostname.endsWith('.localhost')
@@ -275,7 +403,10 @@ async function fetchCanvasFeed(rawUrl: string): Promise<string> {
 
 async function loadCanvasAssignments(icalUrl: string): Promise<LoadedCanvasAssignments> {
   const content = await fetchCanvasFeed(icalUrl);
-  const eventCount = content.match(/^BEGIN:VEVENT\s*$/gmi)?.length || 0;
+  const { beginCount: eventCount, endCount: eventEndCount } = countCanvasEventBoundaries(content);
+  if (eventCount !== eventEndCount) {
+    throw new Error('Canvas feed contained an incomplete calendar event');
+  }
   const assignments = parseICalFile(content);
 
   if (eventCount > 0 && assignments.length === 0) {
@@ -287,20 +418,7 @@ async function loadCanvasAssignments(icalUrl: string): Promise<LoadedCanvasAssig
 
 export async function getCanvasFeedSummary(icalUrl: string): Promise<CanvasFeedSummary> {
   const { assignments } = await loadCanvasAssignments(icalUrl);
-  const courses = new Set(
-    assignments
-      .map(assignment => {
-        if (assignment.courseId) return `id:${assignment.courseId}`;
-        const courseName = assignment.courseName.trim().toLowerCase();
-        // Canvas can omit the readable course label while still providing a
-        // real course through the event URL. Keep one unknown identity as the
-        // final fallback instead of silently dropping that course.
-        return courseName ? `name:${courseName}` : null;
-      })
-      .filter((courseIdentity): courseIdentity is string => Boolean(courseIdentity))
-  ).size;
-
-  return { courses };
+  return { courses: countCanvasCourses(assignments) };
 }
 
 function canvasTaskChanged(
@@ -332,14 +450,24 @@ function dueTimeFor(assignment: CanvasAssignment, dueDate: Date, timeZone: strin
   }
 }
 
-export async function syncCanvasUser(
-  // The service-role client intentionally operates across user RLS boundaries.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  admin: any,
+async function syncCanvasUserWithLease(
+  admin: CanvasAdminClient,
   setting: CanvasSyncSetting,
-  mode: CanvasSyncMode
+  mode: CanvasSyncMode,
+  lease: CanvasSyncLease
 ): Promise<CanvasUserSyncResult> {
   const { assignments, eventCount } = await loadCanvasAssignments(setting.ical_url);
+  const completedCourseCount = countCanvasCoursesForCompleteSnapshot(
+    assignments,
+    eventCount,
+  );
+  const previousCourseCount = Number(setting.course_count);
+  const safePreviousCourseCount = (
+    Number.isInteger(previousCourseCount) && previousCourseCount >= 0
+      ? previousCourseCount
+      : 0
+  );
+  await renewCanvasSyncLease(admin, setting.user_id, lease);
   const currentIds = new Set(assignments.map(assignment => assignment.id));
   const currentExamIds = new Set(
     assignments
@@ -364,6 +492,7 @@ export async function syncCanvasUser(
   if (subjectError) throw new Error(`Could not load subjects: ${subjectError.message}`);
   if (taskError) throw new Error(`Could not load Canvas tasks: ${taskError.message}`);
   if (examError) throw new Error(`Could not load exams: ${examError.message}`);
+  await renewCanvasSyncLease(admin, setting.user_id, lease);
 
   const subjectIds = new Map<string, string>(
     (existingSubjects || []).map((subject: { id: string; name: string }) => [subject.name.toLowerCase(), subject.id])
@@ -389,15 +518,15 @@ export async function syncCanvasUser(
     subjectIds.set(courseName.toLowerCase(), created.id);
   }
 
-  const tasksByExternalId = new Map<string, Record<string, unknown>>(
+  const tasksByExternalId = new Map<string, CanvasTaskRow>(
     (existingTasks || [])
-      .filter((task: Record<string, unknown>) => typeof task.external_id === 'string')
-      .map((task: Record<string, unknown>) => [task.external_id as string, task])
+      .filter((task): task is CanvasTaskRow & { external_id: string } => typeof task.external_id === 'string')
+      .map((task) => [task.external_id, task])
   );
-  const examsByExternalId = new Map<string, Record<string, unknown>>(
+  const examsByExternalId = new Map<string, Pick<CanvasExamRow, 'id' | 'title' | 'description' | 'exam_date' | 'subject_id' | 'external_id'>>(
     (existingExams || [])
-      .filter((exam: Record<string, unknown>) => typeof exam.external_id === 'string')
-      .map((exam: Record<string, unknown>) => [exam.external_id as string, exam])
+      .filter((exam): exam is typeof exam & { external_id: string } => typeof exam.external_id === 'string')
+      .map((exam) => [exam.external_id, exam])
   );
   const now = new Date();
 
@@ -522,6 +651,7 @@ export async function syncCanvasUser(
       return counts;
     }
   );
+  await renewCanvasSyncLease(admin, setting.user_id, lease);
   const {
     imported,
     updated,
@@ -539,25 +669,66 @@ export async function syncCanvasUser(
     examsUpdated: 0,
   });
 
-  // An empty, but syntactically valid, response can be caused by a transient
-  // Canvas outage or permissions issue. A parser mismatch is equally unsafe:
-  // never delete orphans unless every VEVENT became an assignment.
-  const orphanCleanupSkipped = assignments.length === 0 || assignments.length !== eventCount;
-  const orphanIds = orphanCleanupSkipped ? [] : (existingTasks || [])
+  // An empty, syntactically valid response can be caused by a transient Canvas
+  // outage. A parser mismatch is equally unsafe. When deletion candidates do
+  // exist, fetch one independent snapshot and require identical task and exam
+  // UID sets before applying any destructive cleanup. This catches a validly
+  // closed response that contains only a truncated prefix, without permanently
+  // preventing a stable legitimate removal.
+  const candidateOrphanIds = (existingTasks || [])
     .filter((task: Record<string, unknown>) =>
       typeof task.external_id === 'string' && !currentIds.has(task.external_id)
     )
     .map((task: Record<string, unknown>) => task.id as string);
+  const candidateOrphanExamIds = (existingExams || [])
+    .filter((exam: Record<string, unknown>) =>
+      typeof exam.external_id === 'string' && !currentExamIds.has(exam.external_id)
+    )
+    .map((exam: Record<string, unknown>) => exam.id as string);
+
+  let orphanCleanupSkipped = completedCourseCount === null;
+  if (
+    !orphanCleanupSkipped
+    && (candidateOrphanIds.length > 0 || candidateOrphanExamIds.length > 0)
+  ) {
+    let confirmation: LoadedCanvasAssignments | null = null;
+    try {
+      confirmation = await loadCanvasAssignments(setting.ical_url);
+    } catch {
+      orphanCleanupSkipped = true;
+    }
+
+    if (confirmation) {
+      // Coordination failures must never be treated as an ordinary unsafe-feed
+      // skip: once ownership is lost, this invocation must stop all writes.
+      await renewCanvasSyncLease(admin, setting.user_id, lease);
+      const confirmationIds = new Set(confirmation.assignments.map(assignment => assignment.id));
+      const confirmationExamIds = new Set(
+        confirmation.assignments
+          .filter(assignment => isExamType(assignment.title, assignment.type))
+          .map(assignment => assignment.id)
+      );
+      orphanCleanupSkipped = !isConfirmedCanvasCleanupSnapshot({
+        parsedAssignmentCount: assignments.length,
+        eventCount,
+        taskIds: currentIds,
+        examIds: currentExamIds,
+      }, {
+        parsedAssignmentCount: confirmation.assignments.length,
+        eventCount: confirmation.eventCount,
+        taskIds: confirmationIds,
+        examIds: confirmationExamIds,
+      });
+    }
+  }
+
+  const orphanIds = orphanCleanupSkipped ? [] : candidateOrphanIds;
   if (orphanIds.length > 0) {
     const { error } = await admin.from('tasks').delete().in('id', orphanIds);
     if (error) throw new Error(`Could not remove old Canvas tasks: ${error.message}`);
   }
 
-  const orphanExamIds = orphanCleanupSkipped ? [] : (existingExams || [])
-    .filter((exam: Record<string, unknown>) =>
-      typeof exam.external_id === 'string' && !currentExamIds.has(exam.external_id)
-    )
-    .map((exam: Record<string, unknown>) => exam.id as string);
+  const orphanExamIds = orphanCleanupSkipped ? [] : candidateOrphanExamIds;
   if (orphanExamIds.length > 0) {
     const { error } = await admin.from('exams').delete().in('id', orphanExamIds);
     if (error) throw new Error(`Could not remove old Canvas exams: ${error.message}`);
@@ -567,14 +738,21 @@ export async function syncCanvasUser(
   const lastBackgroundSyncAt = mode === 'background'
     ? lastSyncAt
     : setting.last_background_sync_at ?? null;
-  const syncMarkers = mode === 'background'
-    ? { last_sync_at: lastSyncAt, last_background_sync_at: lastBackgroundSyncAt }
-    : { last_sync_at: lastSyncAt };
-  const { error: settingsError } = await admin
-    .from('canvas_settings')
-    .update(syncMarkers)
-    .eq('user_id', setting.user_id);
-  if (settingsError) throw new Error(`Could not save sync time: ${settingsError.message}`);
+  // A fully parsed snapshot can still be a validly closed truncated prefix.
+  // If the independent cleanup confirmation rejects it, retain both the old
+  // rows and their last authoritative course count.
+  const courseCountToPersist = orphanCleanupSkipped
+    ? null
+    : completedCourseCount;
+  const courseCount = courseCountToPersist ?? safePreviousCourseCount;
+  await completeCanvasSyncLease(
+    admin,
+    setting.user_id,
+    lease,
+    mode,
+    lastSyncAt,
+    courseCountToPersist,
+  );
 
   return {
     assignments,
@@ -584,7 +762,41 @@ export async function syncCanvasUser(
     examsImported,
     examsUpdated,
     orphanCleanupSkipped,
+    courseCount,
     lastSyncAt,
     lastBackgroundSyncAt,
   };
+}
+
+/**
+ * Runs one account's Canvas import under a durable database lease.
+ *
+ * Every caller—manual, scheduled, or a future server worker—must use this
+ * entry point. The account-scoped lease serializes subject/task/exam writes,
+ * while its monotonic revision fences a stale owner from committing sync
+ * markers or releasing a successor's lease.
+ */
+export async function syncCanvasUser(
+  admin: CanvasAdminClient,
+  setting: CanvasSyncSetting,
+  mode: CanvasSyncMode
+): Promise<CanvasUserSyncResult> {
+  const lease = await claimCanvasSyncLease(admin, setting.user_id);
+  if (!lease) throw new CanvasSyncInProgressError();
+
+  try {
+    // The caller's row was read before acquisition. Re-read it through the
+    // acquired token so a URL/timezone change in that window cannot make this
+    // invocation import an obsolete feed snapshot.
+    const claimedSetting = await readClaimedCanvasSyncSetting(
+      admin,
+      setting.user_id,
+      lease,
+      mode
+    );
+    return await syncCanvasUserWithLease(admin, claimedSetting, mode, lease);
+  } catch (error) {
+    await releaseCanvasSyncLease(admin, setting.user_id, lease);
+    throw error;
+  }
 }

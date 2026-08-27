@@ -186,7 +186,33 @@ function zonedDateTimeToUtc(
   let result = utcGuess - getOffset(utcGuess);
   // Recalculate once to handle a DST boundary between the guess and result.
   result = utcGuess - getOffset(result);
+  const resolved = Object.fromEntries(
+    formatter.formatToParts(new Date(result)).map(({ type, value }) => [type, value])
+  );
+  if (
+    Number(resolved.year) !== year
+    || Number(resolved.month) !== month + 1
+    || Number(resolved.day) !== day
+    || Number(resolved.hour) !== hour
+    || Number(resolved.minute) !== minute
+    || Number(resolved.second) !== second
+  ) {
+    // A spring-forward gap (for example 02:30 on a day that jumps from
+    // 01:59 to 03:00) has no corresponding instant. Silently shifting it by an
+    // hour changes the assignment deadline, so reject it instead.
+    throw new RangeError('The local calendar time does not exist in this timezone');
+  }
   return new Date(result);
+}
+
+function isValidCalendarDate(year: number, month: number, day: number): boolean {
+  if (!Number.isInteger(year) || year < 1 || year > 9999) return false;
+  if (!Number.isInteger(month) || month < 1 || month > 12) return false;
+  if (!Number.isInteger(day) || day < 1) return false;
+
+  const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const daysInMonth = [31, leapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  return day <= daysInMonth[month - 1];
 }
 
 /**
@@ -199,17 +225,22 @@ export function hydrateCanvasDueDate(
   timeZone?: string
 ): Date | undefined {
   if (!assignment.dueDateOnly) {
-    return assignment.dueDate ? new Date(assignment.dueDate) : undefined;
+    if (!assignment.dueDate) return undefined;
+    const dueDate = new Date(assignment.dueDate);
+    return Number.isNaN(dueDate.getTime()) ? undefined : dueDate;
   }
 
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(assignment.dueDateOnly)) return undefined;
   const [year, month, day] = assignment.dueDateOnly.split('-').map(Number);
-  if (![year, month, day].every(Number.isFinite)) return undefined;
+  if (!isValidCalendarDate(year, month, day)) return undefined;
 
   if (timeZone) {
     try {
       return zonedDateTimeToUtc(year, month - 1, day, 23, 59, 0, timeZone);
     } catch {
-      // Fall through to the runtime's local timezone for unsupported TZIDs.
+      // A supplied but invalid timezone must not silently become the server's
+      // timezone, because that can move an all-day assignment by many hours.
+      return undefined;
     }
   }
 
@@ -225,12 +256,15 @@ function parseICalDate(
   if (!dateString) return undefined;
 
   const cleanDate = dateString.trim();
-  const isDateOnly = property?.toUpperCase().includes('VALUE=DATE') || /^\d{8}$/.test(cleanDate);
+  const declaredValue = property?.match(/(?:^|;)VALUE=([^;:]+)/i)?.[1].toUpperCase();
+  const isDateOnly = declaredValue === 'DATE' || (!declaredValue && /^\d{8}$/.test(cleanDate));
+  if (isDateOnly && !/^\d{8}$/.test(cleanDate)) return undefined;
   const year = Number(cleanDate.substring(0, 4));
-  const month = Number(cleanDate.substring(4, 6)) - 1;
+  const calendarMonth = Number(cleanDate.substring(4, 6));
+  const month = calendarMonth - 1;
   const day = Number(cleanDate.substring(6, 8));
 
-  if (![year, month, day].every(Number.isFinite)) return undefined;
+  if (!isValidCalendarDate(year, calendarMonth, day)) return undefined;
 
   if (isDateOnly) {
     const dateOnly = `${String(year).padStart(4, '0')}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
@@ -244,6 +278,11 @@ function parseICalDate(
   const hour = Number(cleanDate.substring(9, 11));
   const minute = Number(cleanDate.substring(11, 13));
   const second = cleanDate.length >= 15 ? Number(cleanDate.substring(13, 15)) : 0;
+  if (
+    !Number.isInteger(hour) || hour < 0 || hour > 23
+    || !Number.isInteger(minute) || minute < 0 || minute > 59
+    || !Number.isInteger(second) || second < 0 || second > 59
+  ) return undefined;
 
   if (cleanDate.endsWith('Z')) {
     return { date: new Date(Date.UTC(year, month, day, hour, minute, second)), hasTime: true };
@@ -256,7 +295,8 @@ function parseICalDate(
     try {
       return { date: zonedDateTimeToUtc(year, month, day, hour, minute, second, timeZone), hasTime: true };
     } catch {
-      // Invalid or unsupported TZID: fall through to deterministic UTC parsing.
+      // An invalid TZID or nonexistent DST wall time is not safely convertible.
+      return undefined;
     }
   }
 

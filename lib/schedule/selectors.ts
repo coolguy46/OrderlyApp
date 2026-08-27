@@ -41,18 +41,94 @@ function dateFromLocalDate(value: LocalDate): Date {
   return new Date(Date.UTC(year, month - 1, day));
 }
 
+/**
+ * Convert a civil-date key into a browser-local Date used only as a UI carrier.
+ * Noon keeps the carrier away from daylight-saving transitions at midnight.
+ */
+export function localDateToDateCarrier(value: string): Date | null {
+  if (!isLocalDate(value)) return null;
+  const [year, month, day] = value.split('-').map(Number);
+  return new Date(year, month - 1, day, 12);
+}
+
+/** Read a civil-date key back from a browser-local UI carrier. */
+export function localDateFromDateCarrier(value: Date): LocalDate | null {
+  if (Number.isNaN(value.getTime())) return null;
+  const year = value.getFullYear().toString().padStart(4, '0');
+  const month = (value.getMonth() + 1).toString().padStart(2, '0');
+  const day = value.getDate().toString().padStart(2, '0');
+  const result = `${year}-${month}-${day}`;
+  return isLocalDate(result) ? result : null;
+}
+
 export function addLocalDays(value: LocalDate, amount: number): LocalDate {
   const result = dateFromLocalDate(value);
   result.setUTCDate(result.getUTCDate() + amount);
   return result.toISOString().slice(0, 10);
 }
 
-function localDayOfWeek(value: LocalDate): number {
-  return dateFromLocalDate(value).getUTCDay();
+/** Find the next civil date in a recurrence without JS month overflow. */
+export function nextLocalRecurrenceDate(
+  currentDate: LocalDate,
+  recurrence: ScheduleRecurrence,
+  recurrenceDays?: number[] | null,
+): LocalDate {
+  if (recurrence === 'daily') return addLocalDays(currentDate, 1);
+  if (recurrence === 'weekly') {
+    const days = [...new Set(recurrenceDays || [])]
+      .filter(day => Number.isInteger(day) && day >= 0 && day <= 6);
+    if (days.length === 0) return addLocalDays(currentDate, 7);
+    for (let offset = 1; offset <= 7; offset += 1) {
+      const candidate = addLocalDays(currentDate, offset);
+      if (days.includes(dateFromLocalDate(candidate).getUTCDay())) return candidate;
+    }
+  }
+  if (recurrence === 'monthly') {
+    const [year, month, day] = currentDate.split('-').map(Number);
+    const currentMonthLastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    const targetMonthStart = new Date(Date.UTC(year, month, 1));
+    const targetYear = targetMonthStart.getUTCFullYear();
+    const targetMonth = targetMonthStart.getUTCMonth();
+    const targetMonthLastDay = new Date(Date.UTC(targetYear, targetMonth + 1, 0)).getUTCDate();
+    const targetDay = day === currentMonthLastDay
+      ? targetMonthLastDay
+      : Math.min(day, targetMonthLastDay);
+    return new Date(Date.UTC(targetYear, targetMonth, targetDay)).toISOString().slice(0, 10);
+  }
+  return currentDate;
 }
 
-function localDayOfMonth(value: LocalDate): number {
-  return dateFromLocalDate(value).getUTCDate();
+/**
+ * Test whether a civil date belongs to the monthly sequence produced by
+ * `nextLocalRecurrenceDate`. This deliberately walks the sequence instead of
+ * comparing day-of-month values: once a recurrence is clamped into the last
+ * day of a short month, subsequent occurrences retain that end-of-month
+ * intent. Keeping this rule here gives the task shelf, planner, previews, and
+ * dashboard one canonical monthly-recurrence definition.
+ */
+export function isMonthlyRecurrenceDate(
+  candidateDate: LocalDate,
+  anchorDate: LocalDate,
+): boolean {
+  if (!isLocalDate(candidateDate) || !isLocalDate(anchorDate) || candidateDate < anchorDate) {
+    return false;
+  }
+  if (candidateDate === anchorDate) return true;
+
+  const [candidateYear, candidateMonth] = candidateDate.split('-').map(Number);
+  const [anchorYear, anchorMonth] = anchorDate.split('-').map(Number);
+  const monthDistance = (candidateYear - anchorYear) * 12 + candidateMonth - anchorMonth;
+  if (monthDistance <= 0) return false;
+
+  let occurrenceDate = anchorDate;
+  for (let index = 0; index < monthDistance; index += 1) {
+    occurrenceDate = nextLocalRecurrenceDate(occurrenceDate, 'monthly');
+  }
+  return occurrenceDate === candidateDate;
+}
+
+function localDayOfWeek(value: LocalDate): number {
+  return dateFromLocalDate(value).getUTCDay();
 }
 
 function localDateParts(value: Date, requestedTimeZone?: string): { date: LocalDate; time: string } {
@@ -83,6 +159,25 @@ export function localTimeFromIso(value: string, timeZone?: string): string | nul
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return null;
   return localDateParts(parsed, timeZone).time.slice(0, 5);
+}
+
+/** Format an ISO instant in the schedule's timezone, never the browser's. */
+export function formatIsoTime(value: string, requestedTimeZone?: string): string | null {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: safeTimeZone(requestedTimeZone),
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(parsed);
+}
+
+/** Return the wall-clock minute used to position an instant on a day grid. */
+export function localMinuteOfDayFromIso(value: string, requestedTimeZone?: string): number | null {
+  const localTime = localTimeFromIso(value, requestedTimeZone);
+  if (!localTime) return null;
+  const [hour, minute] = localTime.split(':').map(Number);
+  return hour * 60 + minute;
 }
 
 /** Convert a wall-clock date/time in an IANA timezone into a stable ISO instant. */
@@ -242,7 +337,7 @@ function occursOnDate(
     const days = recurrenceDays.length > 0 ? recurrenceDays : [localDayOfWeek(anchorDate)];
     return days.includes(localDayOfWeek(date));
   }
-  return localDayOfMonth(date) === localDayOfMonth(anchorDate);
+  return isMonthlyRecurrenceDate(date, anchorDate);
 }
 
 function hasOwn<T extends object>(value: T, key: PropertyKey): boolean {

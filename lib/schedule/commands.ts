@@ -3,6 +3,7 @@ import { plannerTaskDeadline } from '@/lib/planner/adapters';
 import {
   addLocalDays,
   isLocalDate,
+  isMonthlyRecurrenceDate,
   localDateFromIso,
   localDateTimeToIso,
 } from './selectors';
@@ -14,6 +15,11 @@ import type {
   ScheduleOccurrence,
   ScheduleRecurrence,
 } from './types';
+import {
+  findAmbiguousBareTime,
+  findScheduleClockRange,
+  normalizeScheduleCommandWords,
+} from './command-text';
 
 export type ScheduleCommandKind =
   | 'add'
@@ -302,30 +308,30 @@ function normalizedDuration(duration: ParsedDuration | null, assumptions: string
 function clockValue(hourValue: string, minuteValue: string | undefined, periodValue: string | undefined): { time: string; assumption?: string } | null {
   let hour = Number(hourValue);
   const minute = Number(minuteValue || 0);
-  if (!Number.isInteger(hour) || !Number.isInteger(minute) || minute > 59 || hour > 23) return null;
+  if (!Number.isInteger(hour) || !Number.isInteger(minute) || minute < 0 || minute > 59 || hour < 0 || hour > 23) return null;
   const period = periodValue?.toLowerCase();
-  let assumption: string | undefined;
   if (period) {
     if (hour < 1 || hour > 12) return null;
     if (period === 'pm' && hour !== 12) hour += 12;
     if (period === 'am' && hour === 12) hour = 0;
-  } else if (hour >= 1 && hour <= 7) {
-    assumption = `Interpreted ${hourValue}${minuteValue ? `:${minuteValue}` : ''} as PM.`;
-    hour += 12;
+  } else if (hour >= 1 && hour <= 12 && !hourValue.startsWith('0')) {
+    // Bare 1–12 values have two equally valid meanings. The public command
+    // interpreter returns a clarification before reaching this fallback.
+    return null;
   }
-  return { time: `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`, assumption };
+  return { time: `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}` };
 }
 
 function parseTimeRange(text: string): ParsedTimeRange {
-  const range = /\b(?:from\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*(?:-|–|—|to|until)\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/i.exec(text);
-  if (range?.index !== undefined) {
-    const inheritedStartPeriod = range[3] || range[6];
-    const inheritedEndPeriod = range[6] || range[3];
-    const startValue = clockValue(range[1], range[2], inheritedStartPeriod);
-    const endValue = clockValue(range[4], range[5], inheritedEndPeriod);
+  const range = findScheduleClockRange(text);
+  if (range) {
+    const inheritedStartPeriod = range.startPeriod || range.endPeriod;
+    const inheritedEndPeriod = range.endPeriod || range.startPeriod;
+    const startValue = clockValue(range.startHour, range.startMinute, inheritedStartPeriod);
+    const endValue = clockValue(range.endHour, range.endMinute, inheritedEndPeriod);
     return {
       start: startValue ? { ...startValue, index: range.index } : null,
-      end: endValue ? { ...endValue, index: range.index + range[0].length } : null,
+      end: endValue ? { ...endValue, index: range.index + range.raw.length } : null,
     };
   }
 
@@ -378,15 +384,6 @@ function recurrenceFromText(text: string, startDate: LocalDate): ParsedRecurrenc
   return { recurrence, recurrenceDays, recurrenceEndDate, explicit };
 }
 
-function normalizeWords(value: string): string {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, ' ')
-    .replace(/\b(?:the|a|an|my|task|assignment|event)\b/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
 function titleCase(value: string): string {
   return value.split(/\s+/).filter(Boolean).map(word => {
     if (/^(?:sat|act|psat|ap|ib|lsat|mcat)$/i.test(word)) return word.toUpperCase();
@@ -426,14 +423,14 @@ function resolveTask(
     const selected = context.tasks.find(task => task.id === context.selectedTaskId) || null;
     if (selected) return { task: selected, candidates: [selected] };
   }
-  const normalizedText = normalizeWords(text);
+  const normalizedText = normalizeScheduleCommandWords(text);
   const included = context.tasks.filter(task => {
-    const title = normalizeWords(task.title);
+    const title = normalizeScheduleCommandWords(task.title);
     return title.length >= 2 && normalizedText.includes(title);
-  }).sort((left, right) => normalizeWords(right.title).length - normalizeWords(left.title).length);
+  }).sort((left, right) => normalizeScheduleCommandWords(right.title).length - normalizeScheduleCommandWords(left.title).length);
   if (included.length > 0) {
-    const bestLength = normalizeWords(included[0].title).length;
-    const best = included.filter(task => normalizeWords(task.title).length === bestLength);
+    const bestLength = normalizeScheduleCommandWords(included[0].title).length;
+    const best = included.filter(task => normalizeScheduleCommandWords(task.title).length === bestLength);
     const selected = context.selectedTaskId
       ? best.find(task => task.id === context.selectedTaskId)
       : null;
@@ -443,7 +440,7 @@ function resolveTask(
 
   const commandTokens = new Set(normalizedText.split(' ').filter(token => token.length > 1));
   const scored = context.tasks.map(task => {
-    const tokens = normalizeWords(task.title).split(' ').filter(Boolean);
+    const tokens = normalizeScheduleCommandWords(task.title).split(' ').filter(Boolean);
     const matches = tokens.filter(token => commandTokens.has(token)).length;
     return { task, score: tokens.length ? matches / tokens.length : 0 };
   }).filter(item => item.score >= 0.6).sort((left, right) => right.score - left.score || left.task.title.localeCompare(right.task.title));
@@ -485,7 +482,7 @@ function occurrencePreviews(
     const occurs = recurrence === 'daily'
       || recurrence === 'none' && date === startDate
       || recurrence === 'weekly' && (recurrenceDays.length ? recurrenceDays.includes(localDayOfWeek(date)) : localDayOfWeek(date) === localDayOfWeek(startDate))
-      || recurrence === 'monthly' && date.slice(8) === startDate.slice(8);
+      || recurrence === 'monthly' && isMonthlyRecurrenceDate(date, startDate);
     if (!occurs) continue;
     const baseTime = localTimeFromIso(schedule.startAt, context);
     const startAt = baseTime
@@ -935,6 +932,14 @@ export function interpretScheduleCommand(
 ): ScheduleCommandPreview {
   const normalized = command.trim().replace(/\s+/g, ' ');
   if (!normalized) return { ...emptyPreview(command), status: 'clarification', summary: 'Type a schedule command first.' };
+  const ambiguousTime = findAmbiguousBareTime(normalized);
+  if (ambiguousTime) {
+    return {
+      ...emptyPreview(normalized),
+      status: 'clarification',
+      summary: `Is ${ambiguousTime} AM or PM? Add AM/PM, or use an explicit 24-hour time such as 08:00 or 20:00.`,
+    };
+  }
   if (/\b(?:best\s+time|find\s+(?:me\s+)?(?:a\s+)?(?:gap|opening)|free\s+(?:time|slot)|when\s+(?:can|should)\s+i)\b/i.test(normalized)) {
     return previewForGap(normalized, context);
   }
@@ -950,6 +955,6 @@ export function interpretScheduleCommand(
   return {
     ...emptyPreview(normalized),
     status: 'clarification',
-    summary: 'Try “schedule chemistry tomorrow at 4 pm for 45 minutes”, “move chemistry to Friday at 5”, “repeat chemistry every weekday”, “unschedule chemistry”, or “find a 30 minute gap tomorrow”.',
+    summary: 'Try “schedule chemistry tomorrow at 4 pm for 45 minutes”, “move chemistry to Friday at 5 pm”, “repeat chemistry every weekday”, “unschedule chemistry”, or “find a 30 minute gap tomorrow”.',
   };
 }
