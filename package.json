@@ -12,6 +12,7 @@
     "test:canvas-sync-lease": "node --test --experimental-strip-types tests/canvas-sync-lease.test.mjs",
     "test:canvas-provider-throttle": "node --test --experimental-strip-types tests/canvas-provider-throttle.test.mjs",
     "test:task-status": "node --test --experimental-strip-types tests/task-status.test.mjs",
+    "test:dashboard-tasks": "node --test --experimental-strip-types tests/dashboard-tasks.test.mjs",
     "test:safe-content": "node --test --experimental-strip-types tests/safe-content.test.mjs",
     "test:navigation": "node --test --experimental-strip-types tests/navigation.test.mjs",
     "test:password-reset": "node --test --experimental-strip-types tests/password-reset.test.mjs",
@@ -37,7 +38,7 @@
     "test:planner-persistence": "node --test --experimental-strip-types tests/planner-persistence.test.mjs",
     "test:setup-safety": "node --test --experimental-strip-types tests/setup-safety.test.mjs",
     "test:account-deletion": "node --test --experimental-strip-types tests/account-deletion.test.mjs",
-    "test": "npm run test:canvas-sync && npm run test:canvas-sync-lease && npm run test:canvas-provider-throttle && npm run test:task-status && npm run test:safe-content && npm run test:navigation && npm run test:password-reset && npm run test:canvas-parser-safety && npm run test:schedule-timezone && npm run test:date-semantics && npm run test:schedule-command-text && npm run test:unscheduled-tasks && npm run test:goal-status && npm run test:calendar-segments && npm run test:user-scoped-storage && npm run test:user-data-load && npm run test:store-account-safety && npm run test:timer-clock && npm run test:timer-recovery && npm run test:timer-settings && npm run test:recent-auth && npm run test:task-form-save-sequence && npm run test:interaction-safety && npm run test:csp && npm run test:migration-contracts && npm run test:schedule-persistence && npm run test:planner-persistence && npm run test:setup-safety && npm run test:account-deletion"
+    "test": "npm run test:canvas-sync && npm run test:canvas-sync-lease && npm run test:canvas-provider-throttle && npm run test:task-status && npm run test:dashboard-tasks && npm run test:safe-content && npm run test:navigation && npm run test:password-reset && npm run test:canvas-parser-safety && npm run test:schedule-timezone && npm run test:date-semantics && npm run test:schedule-command-text && npm run test:unscheduled-tasks && npm run test:goal-status && npm run test:calendar-segments && npm run test:user-scoped-storage && npm run test:user-data-load && npm run test:store-account-safety && npm run test:timer-clock && npm run test:timer-recovery && npm run test:timer-settings && npm run test:recent-auth && npm run test:task-form-save-sequence && npm run test:interaction-safety && npm run test:csp && npm run test:migration-contracts && npm run test:schedule-persistence && npm run test:planner-persistence && npm run test:setup-safety && npm run test:account-deletion"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

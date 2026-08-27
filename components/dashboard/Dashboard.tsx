@@ -18,11 +18,12 @@ import { DashboardSchedule } from './DashboardSchedule';
 import { usePlannerStore } from '@/lib/planner/store';
 import { getDefaultPlannerSettings } from '@/lib/planner/types';
 import { isMonthlyRecurrenceDate, localDateFromIso, taskUntimedDisplayDate } from '@/lib/schedule/selectors';
+import { selectDashboardTasksForDate } from '@/lib/dashboard-tasks';
 import { cn, isExamType } from '@/lib/utils';
 import { civilDateFromStored, formatCivilDate } from '@/lib/civil-date';
 import { examDateInputValue, examDayDistance, examTemporalStatus } from '@/lib/exam-status';
 import { isGoalComplete } from '@/lib/goal-status';
-import { isTaskMissing, taskDueAt } from '@/lib/task-status';
+import { isTaskMissing, isTaskMissingFromPriorDay } from '@/lib/task-status';
 import { useCurrentTime } from '@/lib/use-current-time';
 import { useHydrated } from '@/lib/use-hydrated';
 import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, addDays } from 'date-fns';
@@ -98,8 +99,10 @@ export function Dashboard() {
     schoolHomeTime: plannerSettings.schoolHomeTime,
   }), [plannerSettings.schoolDays, plannerSettings.schoolHomeTime, plannerSettings.schoolStartTime, plannerSettings.timeZone]);
   const todayKey = localDateFromIso(now.toISOString(), taskDisplayOptions.timeZone);
-  const selectedDateLabel = selectedDateStr
-    ? formatCivilDate(selectedDateStr, taskDisplayOptions.timeZone, { month: 'short', day: 'numeric' })
+  const viewingDateKey = selectedDateStr || todayKey;
+  const isViewingToday = Boolean(viewingDateKey && viewingDateKey === todayKey);
+  const selectedDateLabel = viewingDateKey
+    ? formatCivilDate(viewingDateKey, taskDisplayOptions.timeZone, { month: 'short', day: 'numeric' })
     : null;
 
   if (mounted && todayKey && currentDateTimeZone !== taskDisplayOptions.timeZone) {
@@ -113,25 +116,7 @@ export function Dashboard() {
     
     const today = localDateFromIso(now.toISOString(), taskDisplayOptions.timeZone);
     if (!today) return { tasksCompleted: 0, tasksDue: 0 };
-    const todayDate = new Date(`${today}T12:00:00`);
-    const todayDayOfWeek = todayDate.getDay();
-    const todayTasks = tasks.filter((t) => {
-      if (t.due_date && taskUntimedDisplayDate(t, taskDisplayOptions) === today) return true;
-      if (t.recurrence && t.recurrence !== 'none' && t.status !== 'completed') {
-        const taskStartKey = toLocalDateStr(t.due_date || t.created_at, taskDisplayOptions.timeZone);
-        if (!taskStartKey) return false;
-        if (today < taskStartKey) return false;
-        if (t.due_date && toLocalDateStr(t.due_date, taskDisplayOptions.timeZone) === today) return false;
-        if (t.recurrence === 'daily') return true;
-        if (t.recurrence === 'weekly') {
-          if (t.recurrence_days && t.recurrence_days.length > 0) return t.recurrence_days.includes(todayDayOfWeek);
-          const taskStart = new Date(`${taskStartKey}T12:00:00`);
-          return todayDate.getDay() === taskStart.getDay();
-        }
-        if (t.recurrence === 'monthly') return isMonthlyRecurrenceDate(today, taskStartKey);
-      }
-      return false;
-    });
+    const todayTasks = selectDashboardTasksForDate(tasks, today, now, taskDisplayOptions);
     const completedToday = tasks.filter(
       (t) => t.completed_at && localDateFromIso(t.completed_at, taskDisplayOptions.timeZone) === today
     ).length;
@@ -143,56 +128,16 @@ export function Dashboard() {
   }, [tasks, mounted, now, taskDisplayOptions]);
 
   const missingTasks = useMemo(
-    () => tasks.filter(task => isTaskMissing(task, now, plannerSettings.timeZone)),
-    [now, plannerSettings.timeZone, tasks],
+    () => tasks.filter(task => isTaskMissingFromPriorDay(task, now, taskDisplayOptions.timeZone)),
+    [now, taskDisplayOptions.timeZone, tasks],
   );
 
-  // Upcoming tasks - filter by selected date if any
+  // The dashboard is a single-day view. It defaults to today and only changes
+  // when the user explicitly chooses another day in the mini calendar.
   const upcomingTasks = useMemo(() => {
-    if (selectedDateStr) {
-      const selDate = new Date(selectedDateStr + 'T00:00:00');
-      const selDayOfWeek = selDate.getDay();
-      // When a date is selected, show ALL tasks for that date (including completed and recurring)
-      return tasks
-        .filter((t) => {
-          if (t.due_date && taskUntimedDisplayDate(t, taskDisplayOptions) === selectedDateStr) return true;
-          // A completed materialized occurrence must not be expanded into
-          // future selected dates; its successor is represented by a new row.
-          if (t.recurrence && t.recurrence !== 'none' && t.status !== 'completed') {
-            const taskStartKey = toLocalDateStr(t.due_date || t.created_at, taskDisplayOptions.timeZone);
-            if (!taskStartKey) return false;
-            if (selectedDateStr < taskStartKey) return false;
-            if (t.due_date && toLocalDateStr(t.due_date, taskDisplayOptions.timeZone) === selectedDateStr) return false;
-            if (t.recurrence === 'daily') return true;
-            if (t.recurrence === 'weekly') {
-              if (t.recurrence_days && t.recurrence_days.length > 0) return t.recurrence_days.includes(selDayOfWeek);
-              const taskStart = new Date(`${taskStartKey}T12:00:00`);
-              return selDate.getDay() === taskStart.getDay();
-            }
-            if (t.recurrence === 'monthly') return isMonthlyRecurrenceDate(selectedDateStr, taskStartKey);
-          }
-          return false;
-        })
-        .sort((a, b) => new Date(a.due_date || a.created_at).getTime() - new Date(b.due_date || b.created_at).getTime());
-    }
-    // Keep tasks completed today in place until the day ends. They are never
-    // considered missing, but this avoids a row vanishing the instant it is checked.
-    const todayKey = localDateFromIso(now.toISOString(), taskDisplayOptions.timeZone);
-    return tasks
-      .filter((t) => t.due_date && (
-        t.status !== 'completed'
-        || Boolean(
-          t.completed_at
-          && todayKey
-          && localDateFromIso(t.completed_at, taskDisplayOptions.timeZone) === todayKey
-        )
-      ))
-      .sort((a, b) =>
-        (taskDueAt(a, taskDisplayOptions.timeZone)?.getTime() || 0)
-        - (taskDueAt(b, taskDisplayOptions.timeZone)?.getTime() || 0)
-      )
-      .slice(0, 6);
-  }, [now, selectedDateStr, taskDisplayOptions, tasks]);
+    if (!viewingDateKey) return [];
+    return selectDashboardTasksForDate(tasks, viewingDateKey, now, taskDisplayOptions);
+  }, [now, taskDisplayOptions, tasks, viewingDateKey]);
 
   // Active goals
   const activeGoals = useMemo(() => {
@@ -304,28 +249,38 @@ export function Dashboard() {
       {/* Stats Grid - Animated */}
       <motion.div variants={containerVariants} className="grid grid-cols-1 gap-2.5 sm:grid-cols-3 sm:gap-3">
         {[
-          { label: 'Completed', value: String(todayStats.tasksCompleted), sub: `${todayStats.tasksDue} due today`, icon: CheckCircle2, color: 'green', gradient: 'from-green-500/10 to-emerald-500/10', borderColor: 'border-green-500/20' },
-          { label: 'Goals', value: String(activeGoals.length), sub: `${goals.filter(isGoalComplete).length} done`, icon: Target, color: 'purple', gradient: 'from-purple-500/10 to-pink-500/10', borderColor: 'border-purple-500/20' },
-          { label: 'Missing', value: String(missingTasks.length), sub: missingTasks.length === 1 ? '1 overdue task' : `${missingTasks.length} overdue tasks`, icon: AlertTriangle, color: 'red', gradient: 'from-red-500/10 to-rose-500/10', borderColor: 'border-red-500/20' },
+          { label: 'Completed', value: String(todayStats.tasksCompleted), sub: `${todayStats.tasksDue} due today`, icon: CheckCircle2, color: 'green', gradient: 'from-green-500/10 to-emerald-500/10', borderColor: 'border-green-500/20', href: null },
+          { label: 'Goals', value: String(activeGoals.length), sub: `${goals.filter(isGoalComplete).length} done`, icon: Target, color: 'purple', gradient: 'from-purple-500/10 to-pink-500/10', borderColor: 'border-purple-500/20', href: null },
+          { label: 'Missing', value: String(missingTasks.length), sub: missingTasks.length === 1 ? '1 overdue task' : `${missingTasks.length} overdue tasks`, icon: AlertTriangle, color: 'red', gradient: 'from-red-500/10 to-rose-500/10', borderColor: 'border-red-500/20', href: '/tasks?view=missing' },
         ].map((stat) => (
           <motion.div key={stat.label} variants={itemVariants}>
-            <Card className={cn(
-              'overflow-hidden border bg-gradient-to-br backdrop-blur-sm transition-shadow active:scale-[0.98]',
-              stat.gradient, stat.borderColor
-            )}>
-              <CardContent className="p-3 sm:p-4">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="space-y-0.5 sm:space-y-1 min-w-0">
-                    <p className="text-[10px] sm:text-xs font-medium text-muted-foreground truncate">{stat.label}</p>
-                    <p className="text-lg sm:text-xl font-bold tracking-tight">{stat.value}</p>
-                    <p className="text-[10px] sm:text-xs text-muted-foreground truncate">{stat.sub}</p>
-                  </div>
-                  <div className={`p-2 sm:p-2.5 rounded-xl bg-${stat.color}-500/10 shrink-0`}>
-                    <stat.icon className={`w-4 h-4 sm:w-5 sm:h-5 text-${stat.color}-500`} />
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+            {(() => {
+              const card = (
+                <Card className={cn(
+                  'overflow-hidden border bg-gradient-to-br backdrop-blur-sm transition-all active:scale-[0.98]',
+                  stat.href && 'hover:-translate-y-0.5 hover:shadow-md',
+                  stat.gradient, stat.borderColor
+                )}>
+                  <CardContent className="p-3 sm:p-4">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="space-y-0.5 sm:space-y-1 min-w-0">
+                        <p className="text-[10px] sm:text-xs font-medium text-muted-foreground truncate">{stat.label}</p>
+                        <p className="text-lg sm:text-xl font-bold tracking-tight">{stat.value}</p>
+                        <p className="text-[10px] sm:text-xs text-muted-foreground truncate">{stat.sub}</p>
+                      </div>
+                      <div className={`p-2 sm:p-2.5 rounded-xl bg-${stat.color}-500/10 shrink-0`}>
+                        <stat.icon className={`w-4 h-4 sm:w-5 sm:h-5 text-${stat.color}-500`} />
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+              return stat.href ? (
+                <Link href={stat.href} className="block rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label={`View ${stat.sub}`}>
+                  {card}
+                </Link>
+              ) : card;
+            })()}
           </motion.div>
         ))}
       </motion.div>
@@ -382,15 +337,15 @@ export function Dashboard() {
                   </div>
                   <div>
                     <CardTitle className="text-base font-display">
-                      {selectedDateLabel ? `Tasks for ${selectedDateLabel}` : 'Upcoming Tasks'}
+                      {isViewingToday ? "Today's Tasks" : `Tasks for ${selectedDateLabel || 'selected date'}`}
                     </CardTitle>
                     <CardDescription className="text-xs">
-                      {upcomingTasks.length} tasks {selectedDateLabel ? 'on this date' : 'pending'}
+                      {upcomingTasks.length} {upcomingTasks.length === 1 ? 'task' : 'tasks'} {isViewingToday ? 'for today' : 'on this date'}
                     </CardDescription>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  {selectedDateLabel && (
+                  {!isViewingToday && (
                     <Button 
                       variant="ghost" 
                       size="sm" 
@@ -398,7 +353,7 @@ export function Dashboard() {
                       onClick={() => setSelectedDateStr(null)}
                     >
                       <X className="w-3 h-3" />
-                      Clear Filter
+                      Back to Today
                     </Button>
                   )}
                   <Button
@@ -435,8 +390,8 @@ export function Dashboard() {
                     >
                       <CheckCircle2 className="w-10 h-10 mx-auto mb-2 opacity-50" />
                     </motion.div>
-                    <p className="font-medium text-sm">All caught up!</p>
-                    <p className="text-xs mb-3">No upcoming tasks. Great job! 🎉</p>
+                    <p className="font-medium text-sm">Nothing due here</p>
+                    <p className="text-xs mb-3">No tasks belong to this day.</p>
                     <Button
                       size="sm"
                       variant="outline"
@@ -449,11 +404,11 @@ export function Dashboard() {
                   </motion.div>
                 ) : (
                   <motion.div
-                    key={`tasks-${selectedDateStr || 'upcoming'}`}
+                    key={`tasks-${viewingDateKey || 'today'}`}
                     initial="hidden"
                     animate="show"
                     variants={{ hidden: {}, show: { transition: { staggerChildren: 0.05 } } }}
-                    className="space-y-2"
+                    className="max-h-[26rem] space-y-2 overflow-y-auto overscroll-contain pr-1 sm:max-h-[30rem]"
                   >
                     {upcomingTasks.map((task) => (
                       <motion.div
@@ -526,14 +481,14 @@ export function Dashboard() {
                   return (
                     <button
                       key={index}
-                      onClick={() => setSelectedDateStr(dayKey)}
+                      onClick={() => setSelectedDateStr(dayKey === todayKey ? null : dayKey)}
                       className={cn(
                         'aspect-square text-xs rounded-lg flex flex-col items-center justify-center transition-all relative group/day min-h-[36px] sm:min-h-0',
                         !isCurrentMonth && 'opacity-30',
                         dayKey === todayKey && 'bg-primary/20 border border-primary font-bold dot-pulse',
-                        selectedDateStr === dayKey && 'bg-primary/10 ring-1 ring-primary/50',
+                        viewingDateKey === dayKey && 'bg-primary/10 ring-1 ring-primary/50',
                         hasMissingTasks && 'border border-red-500/70 bg-red-500/15 text-red-300',
-                        hasMissingTasks && selectedDateStr === dayKey && 'ring-1 ring-red-500/70',
+                        hasMissingTasks && viewingDateKey === dayKey && 'ring-1 ring-red-500/70',
                         dayKey !== todayKey && 'hover:bg-muted hover:scale-110'
                       )}
                     >

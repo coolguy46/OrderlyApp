@@ -86,3 +86,20 @@ export function taskDueDayDistance(
       / 86_400_000,
   );
 }
+
+/**
+ * Whether an unfinished task belongs in the Missing view.
+ *
+ * A task that passed its deadline earlier today is overdue, but it remains in
+ * today's workload until the user's local day ends. It becomes "missing" only
+ * after its deadline date is before the current local date.
+ */
+export function isTaskMissingFromPriorDay(
+  task: Task,
+  now: Date | number = Date.now(),
+  timeZone?: string,
+): boolean {
+  if (task.status === 'completed') return false;
+  const dayDistance = taskDueDayDistance(task, now, timeZone);
+  return dayDistance !== null && dayDistance < 0;
+}
