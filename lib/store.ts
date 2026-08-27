@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
+import type { User } from '@supabase/supabase-js';
 import type { Task, Goal, StudySession, Exam, Subject, Profile } from '@/lib/supabase/types';
 import { supabase } from '@/lib/supabase/client';
 import * as db from '@/lib/supabase/services';
@@ -14,6 +15,17 @@ import {
   localTimeFromIso,
 } from '@/lib/schedule/selectors';
 import type { LocalDate, ScheduleRecurrence } from '@/lib/schedule/types';
+import {
+  AUTH_ACTION_TIMEOUT_MS,
+  AUTH_PROFILE_TIMEOUT_MS,
+  AUTH_SESSION_TIMEOUT_MS,
+  USER_DATA_TIMEOUT_MS,
+  errorMessage,
+  isAbortLikeError,
+  profileFromAuthUser,
+  withTimeout,
+} from '@/lib/auth/lifecycle';
+import type { RegistrationResult } from '@/lib/auth/lifecycle';
 
 // Module-level subscription ref to prevent duplicate listeners
 let authSubscription: { unsubscribe: () => void } | null = null;
@@ -45,12 +57,21 @@ function nextScheduleDate(
   }
   return currentDate;
 }
-// Serialize data loads instead of dropping refreshes that arrive while another
-// load is running. Each caller awaits its own queued refresh, so a Canvas sync
-// marker is never accepted before the corresponding database read completes.
-let dataLoadQueue: Promise<void> = Promise.resolve();
-// Guard against re-initializing in React Strict Mode
+// Auth initialization is shared across Strict Mode mounts. A boolean alone is
+// not enough: a second caller must await the first caller's in-flight work.
+let initializationPromise: Promise<void> | null = null;
 let initializationDone = false;
+let authEventGeneration = 0;
+
+// User hydration runs outside Supabase auth callbacks and is coalesced per
+// account. Auth callbacks are awaited by Supabase, so they must stay quick.
+const userHydrationPromises = new Map<string, Promise<void>>();
+
+// Full data refreshes may overlap, but an older response must never replace a
+// newer one. This avoids the old global queue where one stuck request blocked
+// every later refresh (including a different account).
+let dataLoadSequence = 0;
+const latestDataLoadByUser = new Map<string, number>();
 
 export type Theme = 'light' | 'dark' | 'system';
 
@@ -58,6 +79,7 @@ interface AppState {
   // Auth
   isAuthenticated: boolean;
   isLoading: boolean;
+  authError: string | null;
   
   // Theme
   theme: Theme;
@@ -91,10 +113,11 @@ interface AppState {
   
   // Data loading state
   dataLoaded: boolean;
+  dataLoadError: string | null;
   
   // Auth actions
   login: (email: string, password: string) => Promise<boolean>;
-  register: (email: string, password: string, fullName?: string) => Promise<boolean>;
+  register: (email: string, password: string, fullName?: string) => Promise<RegistrationResult>;
   logout: () => Promise<void>;
   initializeAuth: () => Promise<void>;
   
@@ -152,12 +175,97 @@ interface AppState {
   updateUserProfile: (updates: Partial<Profile>) => Promise<void>;
 }
 
+function clearAuthenticatedState() {
+  useAppStore.setState({
+    isAuthenticated: false,
+    user: null,
+    tasks: [],
+    goals: [],
+    studySessions: [],
+    exams: [],
+    subjects: [],
+    friends: [],
+    dataLoaded: false,
+    dataLoadError: null,
+    authError: null,
+    isLoading: false,
+  });
+}
+
+function establishAuthenticatedState(authUser: User) {
+  useAppStore.setState((state) => {
+    const isSameUser = state.user?.id === authUser.id;
+    return {
+      isAuthenticated: true,
+      user: isSameUser && state.user ? state.user : profileFromAuthUser(authUser),
+      isLoading: false,
+      authError: null,
+      ...(isSameUser
+        ? {}
+        : {
+            tasks: [],
+            goals: [],
+            studySessions: [],
+            exams: [],
+            subjects: [],
+            friends: [],
+            dataLoaded: false,
+            dataLoadError: null,
+          }),
+    };
+  });
+}
+
+async function hydrateAuthenticatedUser(authUser: User): Promise<void> {
+  const existing = userHydrationPromises.get(authUser.id);
+  if (existing) return existing;
+
+  const hydration = (async () => {
+    const profilePromise = withTimeout(
+      db.getProfile(authUser.id),
+      AUTH_PROFILE_TIMEOUT_MS,
+      'Profile load',
+    );
+    const dataPromise = useAppStore.getState().loadUserData(authUser.id);
+    const [profileResult, dataResult] = await Promise.allSettled([profilePromise, dataPromise]);
+
+    if (profileResult.status === 'fulfilled' && profileResult.value) {
+      if (useAppStore.getState().user?.id === authUser.id) {
+        useAppStore.setState({ user: profileResult.value });
+      }
+    } else if (profileResult.status === 'rejected') {
+      console.error('Authenticated profile hydration failed:', profileResult.reason);
+    }
+
+    // loadUserData publishes a visible error state before rejecting. Logging
+    // here preserves the background failure without producing an unhandled
+    // promise rejection.
+    if (dataResult.status === 'rejected') {
+      console.error('Authenticated data hydration failed:', dataResult.reason);
+    }
+  })().finally(() => {
+    if (userHydrationPromises.get(authUser.id) === hydration) {
+      userHydrationPromises.delete(authUser.id);
+    }
+  });
+
+  userHydrationPromises.set(authUser.id, hydration);
+  return hydration;
+}
+
+function deferAuthenticatedUserHydration(authUser: User) {
+  setTimeout(() => {
+    void hydrateAuthenticatedUser(authUser);
+  }, 0);
+}
+
 export const useAppStore = create<AppState>()(
   persist(
     (set, get) => ({
       // Initial state
       isAuthenticated: false,
       isLoading: true,
+      authError: null,
       theme: 'light',
       user: null,
       subjects: [],
@@ -167,6 +275,7 @@ export const useAppStore = create<AppState>()(
       exams: [],
       friends: [],
       dataLoaded: false,
+      dataLoadError: null,
       
       pomodoroSettings: {
         focusDuration: 25,
@@ -183,116 +292,126 @@ export const useAppStore = create<AppState>()(
       
       // Initialize auth state
       initializeAuth: async () => {
-        // Prevent double-init from React Strict Mode
         if (initializationDone) return;
-        initializationDone = true;
+        if (initializationPromise) return initializationPromise;
 
-        // Clean up any existing subscription to prevent duplicate listeners
-        if (authSubscription) {
-          authSubscription.unsubscribe();
-          authSubscription = null;
-        }
+        set({ isLoading: true, authError: null });
 
-        try {
-          const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-
-          if (sessionError) {
-            // Don't treat a session fetch error as a logout
-            console.warn('Session fetch error (non-fatal):', sessionError.message);
-            set({ isLoading: false });
-          } else if (session?.user) {
-            const profile = await db.getProfile(session.user.id);
-            set({
-              isAuthenticated: true,
-              user: profile,
-              isLoading: false,
-            });
-            await get().loadUserData(session.user.id);
-          } else {
-            set({ isAuthenticated: false, user: null, isLoading: false });
-          }
-        } catch (error: any) {
-          // Ignore aborted-signal errors (React Strict Mode artefact)
-          if (error?.name === 'AbortError' || error?.message?.includes('signal')) {
-            console.warn('Auth init aborted (harmless in dev):', error.message);
-            set({ isLoading: false });
-            initializationDone = false; // allow retry
-            return;
-          }
-          console.error('Error initializing auth:', error);
-          set({ isLoading: false });
-        }
-
-        // Listen for auth changes — register only once
-        const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-          const currentUser = get().user;
-
-          if (event === 'SIGNED_IN' && session?.user) {
-            // Skip redundant reload if it's the same user and data is already loaded
-            if (currentUser?.id === session.user.id && get().dataLoaded) return;
-
-            // Small delay to allow the profile trigger to create the profile (OAuth)
-            let profile = await db.getProfile(session.user.id);
-            if (!profile) {
-              await new Promise(resolve => setTimeout(resolve, 1500));
-              profile = await db.getProfile(session.user.id);
+        // Supabase awaits auth callbacks in registration order. Keep this
+        // listener synchronous and defer all network hydration so sign-in and
+        // sign-up buttons are never held behind unrelated database reads.
+        if (!authSubscription) {
+          const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+            if (
+              (event === 'SIGNED_IN' || event === 'INITIAL_SESSION' || event === 'USER_UPDATED')
+              && session?.user
+            ) {
+              authEventGeneration += 1;
+              const alreadyHydrated = get().user?.id === session.user.id && get().dataLoaded;
+              establishAuthenticatedState(session.user);
+              if (!alreadyHydrated) deferAuthenticatedUserHydration(session.user);
+            } else if (event === 'SIGNED_OUT' || (event === 'INITIAL_SESSION' && !session)) {
+              authEventGeneration += 1;
+              clearAuthenticatedState();
             }
-            set({ isAuthenticated: true, user: profile, isLoading: false });
-            await get().loadUserData(session.user.id);
+          });
+          authSubscription = subscription;
+        }
 
-          } else if (event === 'TOKEN_REFRESHED') {
-            // Token refreshed silently — no state change needed
-          } else if (event === 'INITIAL_SESSION') {
-            // Already handled above via getSession()
-          } else if (event === 'SIGNED_OUT') {
-            initializationDone = false; // allow re-init after next login
+        const generationAtStart = authEventGeneration;
+
+        initializationPromise = (async () => {
+          try {
+            const { data: { session }, error: sessionError } = await withTimeout(
+              supabase.auth.getSession(),
+              AUTH_SESSION_TIMEOUT_MS,
+              'Session check',
+            );
+            if (sessionError) throw sessionError;
+
+            // The listener may have received a newer sign-in/out event while
+            // getSession was in flight. Never overwrite that newer state.
+            if (generationAtStart === authEventGeneration) {
+              if (session?.user) {
+                establishAuthenticatedState(session.user);
+                deferAuthenticatedUserHydration(session.user);
+              } else {
+                clearAuthenticatedState();
+              }
+            }
+            initializationDone = true;
+          } catch (error) {
+            // If an auth event won the race, its state is authoritative and a
+            // stale session request failure should not flash an error.
+            if (generationAtStart !== authEventGeneration) {
+              initializationDone = true;
+              return;
+            }
+
+            if (isAbortLikeError(error)) {
+              console.warn('Auth initialization was interrupted:', errorMessage(error));
+            } else {
+              console.error('Error initializing auth:', error);
+            }
             set({
-              isAuthenticated: false,
-              user: null,
-              tasks: [],
-              goals: [],
-              studySessions: [],
-              exams: [],
-              subjects: [],
-              friends: [],
-              dataLoaded: false,
+              authError: errorMessage(error, 'Unable to check your session.'),
               isLoading: false,
             });
+            initializationDone = false;
+          } finally {
+            initializationPromise = null;
           }
-        });
-        authSubscription = subscription;
+        })();
+
+        return initializationPromise;
       },
       
       // Load all user data from Supabase
       loadUserData: async (userId: string) => {
-        const requestedUserId = userId;
-        const queuedLoad = dataLoadQueue.then(async () => {
-          try {
-            const [tasks, goals, studySessions, exams, subjects, friends] = await Promise.all([
-              db.getTasks(requestedUserId),
-              db.getGoals(requestedUserId),
-              db.getStudySessions(requestedUserId),
-              db.getExams(requestedUserId),
-              db.getSubjects(requestedUserId),
-              db.getFriends(requestedUserId),
-            ]);
+        const requestId = ++dataLoadSequence;
+        latestDataLoadByUser.set(userId, requestId);
+        if (get().user?.id === userId) set({ dataLoadError: null });
 
-            // A sign-out or account switch may finish while the queries are in
-            // flight. Never publish one user's data into another session.
-            if (get().user?.id === requestedUserId) {
-              set({ tasks, goals, studySessions, exams, subjects, friends, dataLoaded: true });
-            }
-          } catch (error: any) {
-            if (error?.name === 'AbortError' || error?.message?.includes('signal')) {
-              console.warn('Data load aborted (retrying next interaction):', error.message);
-            } else {
-              console.error('Error loading user data:', error);
-            }
+        const strictRead = { throwOnError: true } as const;
+        const [tasks, goals, studySessions, exams, subjects] = await Promise.allSettled([
+          withTimeout(db.getTasks(userId, strictRead), USER_DATA_TIMEOUT_MS, 'Task load'),
+          withTimeout(db.getGoals(userId, strictRead), USER_DATA_TIMEOUT_MS, 'Goal load'),
+          withTimeout(db.getStudySessions(userId, strictRead), USER_DATA_TIMEOUT_MS, 'Study session load'),
+          withTimeout(db.getExams(userId, strictRead), USER_DATA_TIMEOUT_MS, 'Exam load'),
+          withTimeout(db.getSubjects(userId, strictRead), USER_DATA_TIMEOUT_MS, 'Subject load'),
+        ]);
+
+        const results = [tasks, goals, studySessions, exams, subjects];
+        const failures = results
+          .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+          .map(result => errorMessage(result.reason));
+        const failureMessage = failures.length > 0
+          ? `Some account data could not be loaded: ${failures.join('; ')}`
+          : null;
+
+        const isLatestRequest = latestDataLoadByUser.get(userId) === requestId;
+        if (get().user?.id === userId && isLatestRequest) {
+          const updates: Partial<AppState> = {
+            dataLoaded: failures.length === 0,
+            dataLoadError: failureMessage,
+          };
+          if (tasks.status === 'fulfilled') updates.tasks = tasks.value;
+          if (goals.status === 'fulfilled') updates.goals = goals.value;
+          if (studySessions.status === 'fulfilled') updates.studySessions = studySessions.value;
+          if (exams.status === 'fulfilled') updates.exams = exams.value;
+          if (subjects.status === 'fulfilled') updates.subjects = subjects.value;
+          set(updates);
+        }
+
+        if (failureMessage) {
+          const error = new Error(failureMessage);
+          if (failures.some(message => message.toLowerCase().includes('abort'))) {
+            console.warn('Account data load was interrupted:', failureMessage);
+          } else {
+            console.error('Error loading account data:', error);
           }
-        });
-
-        dataLoadQueue = queuedLoad;
-        await queuedLoad;
+          throw error;
+        }
       },
       
       // Refresh data from database
@@ -306,11 +425,14 @@ export const useAppStore = create<AppState>()(
       // Auth actions
       login: async (email: string, password: string) => {
         try {
-          const { user } = await db.signIn(email, password);
+          const { user } = await withTimeout(
+            db.signIn(email, password),
+            AUTH_ACTION_TIMEOUT_MS,
+            'Sign in',
+          );
           if (user) {
-            const profile = await db.getProfile(user.id);
-            set({ isAuthenticated: true, user: profile });
-            await get().loadUserData(user.id);
+            establishAuthenticatedState(user);
+            deferAuthenticatedUserHydration(user);
             return true;
           }
           return false;
@@ -322,16 +444,24 @@ export const useAppStore = create<AppState>()(
       
       register: async (email: string, password: string, fullName?: string) => {
         try {
-          const { user } = await db.signUp(email, password, fullName);
-          if (user) {
-            // Wait a moment for the trigger to create the profile
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            const profile = await db.getProfile(user.id);
-            set({ isAuthenticated: true, user: profile });
-            await get().loadUserData(user.id);
-            return true;
+          const { user, session } = await withTimeout(
+            db.signUp(email, password, fullName),
+            AUTH_ACTION_TIMEOUT_MS,
+            'Account creation',
+          );
+          if (session?.user) {
+            establishAuthenticatedState(session.user);
+            deferAuthenticatedUserHydration(session.user);
+            return 'authenticated';
           }
-          return false;
+          if (user) {
+            // Email-confirmation projects return a user but no usable session.
+            // Do not pretend the account is signed in or send it into an auth
+            // redirect loop.
+            clearAuthenticatedState();
+            return 'confirmation-required';
+          }
+          return 'failed';
         } catch (error) {
           console.error('Registration error:', error);
           throw error;
@@ -340,21 +470,12 @@ export const useAppStore = create<AppState>()(
       
       logout: async () => {
         try {
-          await db.signOut();
-          initializationDone = false; // allow re-init after next login
-          set({ 
-            isAuthenticated: false, 
-            user: null,
-            tasks: [],
-            goals: [],
-            studySessions: [],
-            exams: [],
-            subjects: [],
-            friends: [],
-            dataLoaded: false,
-          });
+          await withTimeout(db.signOut(), AUTH_ACTION_TIMEOUT_MS, 'Sign out');
+          authEventGeneration += 1;
+          clearAuthenticatedState();
         } catch (error) {
           console.error('Logout error:', error);
+          toast.error(errorMessage(error, 'Could not sign out. Please try again.'));
         }
       },
       

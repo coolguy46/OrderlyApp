@@ -28,7 +28,7 @@ export default function TermsOfServicePage() {
       <main className="pt-28 pb-20 px-6">
         <div className="max-w-3xl mx-auto prose prose-invert">
           <h1 className="text-4xl font-bold mb-2">Terms of Service</h1>
-          <p className="text-muted-foreground text-lg mb-10">Last updated: January 2025</p>
+          <p className="text-muted-foreground text-lg mb-10">Last updated: August 27, 2026</p>
 
           <section className="space-y-6">
             <div>
@@ -43,9 +43,9 @@ export default function TermsOfServicePage() {
             <div>
               <h2 className="text-2xl font-semibold mb-3">2. Description of Service</h2>
               <p className="text-muted-foreground leading-relaxed">
-                Orderly is a web-based student productivity platform that provides task management, 
-                study timer, goal tracking, exam preparation tools, analytics, and social learning features. 
-                The Service also offers an integration with Canvas LMS to help students sync academic data.
+                Orderly is a web-based student planning and productivity platform with task management,
+                calendars and schedules, study sessions, goals, exam planning, and optional connections
+                to supported school services.
               </p>
             </div>
 
@@ -76,10 +76,11 @@ export default function TermsOfServicePage() {
             <div>
               <h2 className="text-2xl font-semibold mb-3">5. Third-Party Integrations</h2>
               <p className="text-muted-foreground leading-relaxed">
-                The Service integrates with Canvas LMS. By connecting this integration, you authorize
-                Orderly to access your data from Canvas as described in our Privacy Policy. You are also
-                subject to Canvas&apos;s terms of service. We are not responsible for any changes, outages,
-                or issues with third-party services that may affect the integration.
+                The Service can connect to supported third-party school services and calendar feeds. By
+                enabling a connection, you authorize Orderly to access and process the data needed to provide
+                it, as described in our Privacy Policy. Your use of a connected service remains subject to that
+                provider&apos;s terms. We are not responsible for changes, outages, or other issues with third-party
+                services that may affect a connection.
               </p>
             </div>
 

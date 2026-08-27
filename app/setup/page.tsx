@@ -8,13 +8,8 @@ import { Input } from '@/components/ui/Input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent } from '@/components/ui/Card';
 import {
-  Sparkles,
   ArrowRight,
   ArrowLeft,
-  CheckSquare,
-  Timer,
-  Users,
-  GraduationCap,
   User,
   BookOpen,
   Plus,
@@ -25,10 +20,10 @@ import {
   Check,
   Rocket,
   Link2,
-  ExternalLink,
 } from 'lucide-react';
 import { useAppStore } from '@/lib/store';
 import type { Theme } from '@/lib/store';
+import { setupCompletionKey } from '@/lib/auth/lifecycle';
 import * as db from '@/lib/supabase/services';
 
 const SUBJECT_COLORS = [
@@ -38,13 +33,13 @@ const SUBJECT_COLORS = [
   '#3b82f6', '#2563eb',
 ];
 
-const STEPS = ['welcome', 'profile', 'subjects', 'integrations', 'preferences', 'complete'] as const;
+const STEPS = ['profile', 'subjects', 'integrations', 'preferences', 'complete'] as const;
 type Step = typeof STEPS[number];
 
 export default function SetupPage() {
   const router = useRouter();
-  const { user, updateUserProfile, addSubject, setTheme, theme, subjects } = useAppStore();
-  const [currentStep, setCurrentStep] = useState<Step>('welcome');
+  const { user, updateUserProfile, addSubject, setTheme, theme } = useAppStore();
+  const [currentStep, setCurrentStep] = useState<Step>('profile');
   const [direction, setDirection] = useState(1);
 
   // Profile state
@@ -131,7 +126,7 @@ export default function SetupPage() {
       setTheme(selectedTheme);
 
       // Mark setup as complete
-      localStorage.setItem('orderly-setup-complete', 'true');
+      localStorage.setItem(setupCompletionKey(user.id), 'true');
 
       router.push('/');
     } catch (error) {
@@ -146,14 +141,6 @@ export default function SetupPage() {
     center: { x: 0, opacity: 1 },
     exit: (dir: number) => ({ x: dir > 0 ? -300 : 300, opacity: 0 }),
   };
-
-  const features = [
-    { icon: CheckSquare, label: 'Smart Tasks', desc: 'Manage assignments with priorities & due dates' },
-    { icon: Timer, label: 'Pomodoro Timer', desc: 'Focus sessions with gamified progress' },
-    { icon: Users, label: 'Social', desc: 'Study with friends & compete on leaderboards' },
-    { icon: GraduationCap, label: 'Exam Tracking', desc: 'Track preparation for upcoming exams' },
-    { icon: BookOpen, label: 'LMS Sync', desc: 'Import assignments from Canvas' },
-  ];
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-background via-background to-indigo-500/10">
@@ -195,37 +182,6 @@ export default function SetupPage() {
                 exit="exit"
                 transition={{ duration: 0.3, ease: 'easeInOut' }}
               >
-                {/* Step: Welcome */}
-                {currentStep === 'welcome' && (
-                  <div className="text-center space-y-8">
-                    <div className="mx-auto w-16 h-16 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center">
-                      <Sparkles className="w-8 h-8 text-white" />
-                    </div>
-                    <div>
-                      <h1 className="text-3xl font-bold mb-2">Welcome to Orderly!</h1>
-                      <p className="text-muted-foreground text-lg">
-                        Let&apos;s get you set up in just a few steps.
-                      </p>
-                    </div>
-
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 text-left">
-                      {features.map((feature, i) => (
-                        <motion.div
-                          key={feature.label}
-                          initial={{ opacity: 0, y: 20 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          transition={{ delay: 0.1 + i * 0.08 }}
-                          className="p-4 rounded-xl border border-border/50 bg-muted/30 space-y-2"
-                        >
-                          <feature.icon className="w-5 h-5 text-indigo-400" />
-                          <p className="font-medium text-sm">{feature.label}</p>
-                          <p className="text-xs text-muted-foreground">{feature.desc}</p>
-                        </motion.div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
                 {/* Step: Profile */}
                 {currentStep === 'profile' && (
                   <div className="space-y-6">
@@ -235,7 +191,7 @@ export default function SetupPage() {
                       </div>
                       <h2 className="text-2xl font-bold">What should we call you?</h2>
                       <p className="text-muted-foreground mt-1">
-                        This is how you&apos;ll appear to friends and on leaderboards.
+                        This name will appear across your Orderly workspace.
                       </p>
                     </div>
 
@@ -504,15 +460,6 @@ export default function SetupPage() {
                 )}
               </div>
               <div>
-                {currentStep === 'welcome' && (
-                  <Button
-                    onClick={goNext}
-                    className="bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700"
-                  >
-                    Get Started
-                    <ArrowRight className="w-4 h-4" />
-                  </Button>
-                )}
                 {currentStep === 'profile' && (
                   <Button
                     onClick={goNext}

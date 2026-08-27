@@ -6,6 +6,12 @@ import {
   syncCanvasUser,
   type CanvasSyncSetting,
 } from '@/lib/integrations/canvas-server-sync';
+import {
+  CANVAS_MANUAL_SYNC_SERVER_DEADLINE_MS,
+  CANVAS_SYNC_TIMEOUT_MESSAGE,
+  CanvasOperationTimeoutError,
+  withCanvasDeadline,
+} from '@/lib/integrations/canvas-sync-reliability';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -16,57 +22,71 @@ export const maxDuration = 60;
  */
 export async function POST() {
   try {
-    const sessionClient = await createSupabaseServerClient();
-    const { data: { user }, error: authError } = await sessionClient.auth.getUser();
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    return await withCanvasDeadline(async () => {
+      const sessionClient = await createSupabaseServerClient();
+      const { data: { user }, error: authError } = await sessionClient.auth.getUser();
+      if (authError || !user) {
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      }
 
-    // The generated database type predates canvas_settings, so keep this query
-    // localized behind a narrow runtime shape until those types are regenerated.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: setting, error: settingError } = await (sessionClient as any)
-      .from('canvas_settings')
-      .select('user_id, ical_url, last_sync_at, last_background_sync_at, auto_sync_interval, time_zone')
-      .eq('user_id', user.id)
-      .maybeSingle();
+      // The generated database type predates canvas_settings, so keep this query
+      // localized behind a narrow runtime shape until those types are regenerated.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: setting, error: settingError } = await (sessionClient as any)
+        .from('canvas_settings')
+        .select('user_id, ical_url, last_sync_at, last_background_sync_at, auto_sync_interval, time_zone')
+        .eq('user_id', user.id)
+        .maybeSingle();
 
-    if (settingError) {
-      return NextResponse.json({ error: settingError.message }, { status: 500 });
-    }
-    if (!setting?.ical_url) {
-      return NextResponse.json({ error: 'Connect a Canvas calendar before syncing' }, { status: 400 });
-    }
+      if (settingError) {
+        return NextResponse.json({ error: settingError.message }, { status: 500 });
+      }
+      if (!setting?.ical_url) {
+        return NextResponse.json({ error: 'Connect a Canvas calendar before syncing' }, { status: 400 });
+      }
 
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    if (!supabaseUrl || !serviceRoleKey) {
-      return NextResponse.json({ error: 'Canvas sync is not configured' }, { status: 503 });
-    }
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+      if (!supabaseUrl || !serviceRoleKey) {
+        return NextResponse.json({ error: 'Canvas sync is not configured' }, { status: 503 });
+      }
 
-    const admin = createClient(supabaseUrl, serviceRoleKey, {
-      auth: { persistSession: false, autoRefreshToken: false },
-    });
-    const result = await syncCanvasUser(admin, setting as CanvasSyncSetting, 'manual');
+      const admin = createClient(supabaseUrl, serviceRoleKey, {
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
+      const result = await syncCanvasUser(admin, setting as CanvasSyncSetting, 'manual');
 
-    return NextResponse.json({
-      success: true,
-      count: result.assignments.length,
-      assignments: result.assignments,
-      imported: result.imported,
-      updated: result.updated,
-      removed: result.removed,
-      examsImported: result.examsImported,
-      examsUpdated: result.examsUpdated,
-      orphanCleanupSkipped: result.orphanCleanupSkipped,
-      lastSyncAt: result.lastSyncAt,
-      lastBackgroundSyncAt: result.lastBackgroundSyncAt,
-    });
+      return NextResponse.json({
+        success: true,
+        count: result.assignments.length,
+        assignments: result.assignments,
+        imported: result.imported,
+        updated: result.updated,
+        removed: result.removed,
+        examsImported: result.examsImported,
+        examsUpdated: result.examsUpdated,
+        orphanCleanupSkipped: result.orphanCleanupSkipped,
+        lastSyncAt: result.lastSyncAt,
+        lastBackgroundSyncAt: result.lastBackgroundSyncAt,
+      });
+    }, CANVAS_MANUAL_SYNC_SERVER_DEADLINE_MS, CANVAS_SYNC_TIMEOUT_MESSAGE);
   } catch (error) {
     console.error('Canvas sync error:', error);
-    
+
+    if (
+      error instanceof CanvasOperationTimeoutError
+      || (error instanceof Error && error.message.toLowerCase().includes('timed out'))
+    ) {
+      return NextResponse.json(
+        { error: error instanceof CanvasOperationTimeoutError
+          ? error.message
+          : 'Canvas did not respond in time. Check the calendar feed and try again.' },
+        { status: 504, headers: { 'Retry-After': '60' } }
+      );
+    }
+
     return NextResponse.json(
-      { 
+      {
         error: 'Failed to sync Canvas calendar',
         details: error instanceof Error ? error.message : 'Unknown error'
       },

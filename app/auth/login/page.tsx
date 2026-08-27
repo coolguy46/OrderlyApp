@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
@@ -8,11 +8,11 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/Card';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Separator } from '@/components/ui/separator';
-import { Sparkles, Mail, Lock, ArrowRight, Github, Chrome } from 'lucide-react';
+import { Mail, Lock, ArrowRight, Chrome } from 'lucide-react';
 import { useAppStore } from '@/lib/store';
 import { signInWithGoogle } from '@/lib/supabase/services';
+import { errorMessage } from '@/lib/auth/lifecycle';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -22,6 +22,13 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
 
+  useEffect(() => {
+    const callbackError = new URLSearchParams(window.location.search).get('error');
+    if (callbackError === 'auth_callback_error') {
+      setError('Google sign-in could not be completed. Please try again.');
+    }
+  }, []);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
@@ -30,12 +37,12 @@ export default function LoginPage() {
     try {
       const success = await login(email, password);
       if (success) {
-        router.push('/');
+        router.replace('/');
       } else {
         setError('Invalid email or password');
       }
-    } catch (err: any) {
-      setError(err?.message || 'An error occurred. Please try again.');
+    } catch (err) {
+      setError(errorMessage(err, 'An error occurred. Please try again.'));
     } finally {
       setIsLoading(false);
     }
@@ -47,7 +54,7 @@ export default function LoginPage() {
     try {
       await signInWithGoogle();
     } catch (err) {
-      setError('Google sign-in failed. Please try again.');
+      setError(errorMessage(err, 'Google sign-in failed. Please try again.'));
       setIsLoading(false);
     }
   };
@@ -101,6 +108,12 @@ export default function LoginPage() {
               </span>
             </div>
 
+            {error && (
+              <div role="alert" className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+                {error}
+              </div>
+            )}
+
             {/* Email/Password Form */}
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-2">
@@ -141,13 +154,6 @@ export default function LoginPage() {
                     required
                   />
                 </div>
-              </div>
-
-              <div className="flex items-center space-x-2">
-                <Checkbox id="remember" />
-                <Label htmlFor="remember" className="text-sm font-normal text-muted-foreground cursor-pointer">
-                  Remember me for 30 days
-                </Label>
               </div>
 
               <Button

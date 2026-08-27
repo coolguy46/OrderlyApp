@@ -1,5 +1,14 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { CanvasAssignment, hydrateCanvasDueDate } from './canvas';
+import {
+  CANVAS_CONNECT_DEADLINE_MS,
+  CANVAS_CONNECT_TIMEOUT_MESSAGE,
+  CANVAS_MANUAL_SYNC_CLIENT_DEADLINE_MS,
+  CANVAS_SYNC_TIMEOUT_MESSAGE,
+  CanvasOperationTimeoutError,
+  readCanvasSyncResponse,
+  withCanvasDeadline,
+} from './canvas-sync-reliability';
 import * as db from '@/lib/supabase/services';
 
 interface CanvasSettings {
@@ -52,6 +61,26 @@ function readLegacySyncInterval(userId: string): number | null {
     : null;
 }
 
+function isSerializedCanvasAssignment(value: unknown): value is CanvasAssignment {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const assignment = value as Record<string, unknown>;
+  const optionalDateValues = ['dueDate', 'startDate', 'endDate', 'dueDateOnly'];
+
+  return typeof assignment.id === 'string'
+    && typeof assignment.courseName === 'string'
+    && typeof assignment.title === 'string'
+    && typeof assignment.hasDueTime === 'boolean'
+    && typeof assignment.type === 'string'
+    && typeof assignment.status === 'string'
+    && optionalDateValues.every(key =>
+      assignment[key] === undefined || typeof assignment[key] === 'string'
+    );
+}
+
+function responseCount(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+}
+
 /**
  * Custom hook for managing Canvas calendar sync with Supabase persistence
  */
@@ -82,6 +111,7 @@ export function useCanvasSyncSupabase(options: UseCanvasSyncOptions): UseCanvasS
   // Refs for cross-request coordination
   const icalUrlRef = useRef('');
   const syncingRef = useRef(false);
+  const connectingRef = useRef(false);
   const settingsMutationVersionRef = useRef(0);
 
   // Supabase is the source of truth for Canvas settings. Polling keeps this
@@ -199,51 +229,79 @@ export function useCanvasSyncSupabase(options: UseCanvasSyncOptions): UseCanvasS
     setIsSyncing(true);
     setError(null);
 
+    let completedSync: { assignments: CanvasAssignment[]; removedCount: number } | null = null;
     try {
-      const response = await fetch('/api/canvas/sync', { method: 'POST' });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to sync Canvas calendar');
-      }
+      const data = await withCanvasDeadline(async signal => {
+        const response = await fetch('/api/canvas/sync', {
+          method: 'POST',
+          cache: 'no-store',
+          signal,
+        });
+        return readCanvasSyncResponse(response);
+      }, CANVAS_MANUAL_SYNC_CLIENT_DEADLINE_MS, CANVAS_SYNC_TIMEOUT_MESSAGE);
 
       // Convert date strings to Date objects in the user's timezone.
       const browserTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-      const hydratedAssignments: CanvasAssignment[] = data.assignments.map((a: CanvasAssignment) => ({
-        ...a,
-        dueDate: hydrateCanvasDueDate(a, browserTimeZone),
-        startDate: a.startDate ? new Date(a.startDate) : undefined,
-        endDate: a.endDate ? new Date(a.endDate) : undefined,
-      }));
+      const hydratedAssignments: CanvasAssignment[] = data.assignments.map(value => {
+        if (!isSerializedCanvasAssignment(value)) {
+          throw new Error('Canvas sync returned an invalid assignment. Please try again.');
+        }
+        const assignment = value as CanvasAssignment;
+        return {
+          ...assignment,
+          dueDate: hydrateCanvasDueDate(assignment, browserTimeZone),
+          startDate: assignment.startDate ? new Date(assignment.startDate) : undefined,
+          endDate: assignment.endDate ? new Date(assignment.endDate) : undefined,
+        };
+      });
 
-      const removedCount = Number(data.removed) || 0;
+      const removedCount = responseCount(data.removed);
       setRemovedAssignmentsCount(removedCount);
 
       setAssignments(hydratedAssignments);
-      setNewAssignmentsCount(Number(data.imported) || 0);
-      
-      // A manual sync is successful only after its assignments have actually
-      // been imported. This prevents last_sync_at from advancing on partial work.
-      await onSyncComplete?.(hydratedAssignments, removedCount);
+      setNewAssignmentsCount(responseCount(data.imported));
 
-      const reportedLastSync = data.lastSyncAt ? new Date(data.lastSyncAt) : new Date();
+      const reportedLastSync = typeof data.lastSyncAt === 'string'
+        ? new Date(data.lastSyncAt)
+        : new Date();
       const now = Number.isNaN(reportedLastSync.getTime()) ? new Date() : reportedLastSync;
+      const reportedBackgroundSync = typeof data.lastBackgroundSyncAt === 'string'
+        ? new Date(data.lastBackgroundSyncAt)
+        : null;
       settingsMutationVersionRef.current += 1;
       setSettings(prev => ({
         ...prev,
         lastSyncAt: now,
-        lastBackgroundSyncAt: data.lastBackgroundSyncAt
-          ? new Date(data.lastBackgroundSyncAt)
+        lastBackgroundSyncAt: reportedBackgroundSync
+          && !Number.isNaN(reportedBackgroundSync.getTime())
+          ? reportedBackgroundSync
           : prev.lastBackgroundSyncAt,
       }));
+      completedSync = { assignments: hydratedAssignments, removedCount };
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+      const errorMessage = err instanceof CanvasOperationTimeoutError
+        ? err.message
+        : err instanceof TypeError
+          ? 'Could not reach Canvas sync. Check your connection and try again.'
+          : err instanceof Error
+            ? err.message
+            : 'Could not sync Canvas. Please try again.';
       setError(errorMessage);
       onSyncError?.(err instanceof Error ? err : new Error(errorMessage));
     } finally {
       syncingRef.current = false;
       setIsSyncing(false);
+    }
+
+    // Updating the rest of the app is useful follow-up work, but it must never
+    // keep this button spinning after the Canvas request itself has settled.
+    if (completedSync && onSyncComplete) {
+      const { assignments: completedAssignments, removedCount } = completedSync;
+      void Promise.resolve()
+        .then(() => onSyncComplete(completedAssignments, removedCount))
+        .catch(refreshError => {
+          console.error('Canvas synced, but app data could not be refreshed:', refreshError);
+        });
     }
   }, [settings.icalUrl, userId, onSyncComplete, onSyncError]);
 
@@ -267,92 +325,108 @@ export function useCanvasSyncSupabase(options: UseCanvasSyncOptions): UseCanvasS
   const setIcalUrl = useCallback(async (url: string) => {
     setError(null);
     const normalizedUrl = url.trim();
-    if (!userId || !normalizedUrl) return false;
+    if (!userId || !normalizedUrl || connectingRef.current) return false;
 
+    connectingRef.current = true;
     settingsMutationVersionRef.current += 1;
     try {
-      const browserTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
-      const legacyKey = `canvas_sync_interval_${userId}`;
-      const legacyInterval = readLegacySyncInterval(userId);
-      let persisted = await db.getCanvasSettings(userId);
+      return await withCanvasDeadline(async signal => {
+        const assertStillConnecting = () => {
+          if (signal.aborted) {
+            throw new CanvasOperationTimeoutError(CANVAS_CONNECT_TIMEOUT_MESSAGE);
+          }
+        };
+        const browserTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+        const legacyKey = `canvas_sync_interval_${userId}`;
+        const legacyInterval = readLegacySyncInterval(userId);
+        let persisted = await db.getCanvasSettings(userId);
+        assertStillConnecting();
 
-      if (
-        persisted &&
-        persisted.sync_interval_migrated !== true &&
-        legacyInterval !== null
-      ) {
-        persisted = await db.migrateCanvasSyncInterval(
-          userId,
-          legacyInterval,
-          browserTimeZone
-        );
-        if (!persisted || persisted.sync_interval_migrated !== true) {
-          setError('Could not migrate the Canvas sync interval. Please try again.');
-          return false;
+        if (
+          persisted &&
+          persisted.sync_interval_migrated !== true &&
+          legacyInterval !== null
+        ) {
+          persisted = await db.migrateCanvasSyncInterval(
+            userId,
+            legacyInterval,
+            browserTimeZone
+          );
+          assertStillConnecting();
+          if (!persisted || persisted.sync_interval_migrated !== true) {
+            setError('Could not migrate the Canvas sync interval. Please try again.');
+            return false;
+          }
         }
-      }
 
-      if (!persisted) {
-        persisted = await db.initializeCanvasSettings(userId, {
+        if (!persisted) {
+          persisted = await db.initializeCanvasSettings(userId, {
+            ical_url: normalizedUrl,
+            sync_enabled: settings.syncEnabled,
+            auto_sync_interval: legacyInterval ?? settings.autoSyncInterval,
+            sync_interval_migrated: true,
+            time_zone: browserTimeZone,
+          });
+          assertStillConnecting();
+          if (!persisted) {
+            setError('Could not connect the Canvas calendar. Please try again.');
+            return false;
+          }
+        }
+
+        // If another first-time flow inserted an unmigrated row during the race,
+        // claim it now before saving the connection. The compare-and-set still
+        // ensures only one browser can choose the initial interval.
+        if (persisted.sync_interval_migrated !== true && legacyInterval !== null) {
+          persisted = await db.migrateCanvasSyncInterval(
+            userId,
+            legacyInterval,
+            browserTimeZone
+          );
+          assertStillConnecting();
+          if (!persisted || persisted.sync_interval_migrated !== true) {
+            setError('Could not migrate the Canvas sync interval. Please try again.');
+            return false;
+          }
+        }
+
+        // Existing rows keep their database interval. This is important for old
+        // browser sessions whose React state still contains the former default.
+        // The URL/timezone patch cannot overwrite the interval chosen by the
+        // browser that won the one-time migration race.
+        const saved = await db.upsertCanvasSettings(userId, {
           ical_url: normalizedUrl,
-          sync_enabled: settings.syncEnabled,
-          auto_sync_interval: legacyInterval ?? settings.autoSyncInterval,
-          sync_interval_migrated: true,
           time_zone: browserTimeZone,
         });
-        if (!persisted) {
+        assertStillConnecting();
+        if (!saved) {
           setError('Could not connect the Canvas calendar. Please try again.');
           return false;
         }
-      }
 
-      // If another first-time flow inserted an unmigrated row during the race,
-      // claim it now before saving the connection. The compare-and-set still
-      // ensures only one browser can choose the initial interval.
-      if (persisted.sync_interval_migrated !== true && legacyInterval !== null) {
-        persisted = await db.migrateCanvasSyncInterval(
-          userId,
-          legacyInterval,
-          browserTimeZone
-        );
-        if (!persisted || persisted.sync_interval_migrated !== true) {
-          setError('Could not migrate the Canvas sync interval. Please try again.');
-          return false;
+        if (saved.sync_interval_migrated === true) {
+          localStorage.removeItem(legacyKey);
         }
-      }
-
-      // Existing rows keep their database interval. This is important for old
-      // browser sessions whose React state still contains the former default.
-      // The URL/timezone patch cannot overwrite the interval chosen by the
-      // browser that won the one-time migration race.
-      const saved = await db.upsertCanvasSettings(userId, {
-        ical_url: normalizedUrl,
-        time_zone: browserTimeZone,
-      });
-      if (!saved) {
-        setError('Could not connect the Canvas calendar. Please try again.');
-        return false;
-      }
-
-      if (saved.sync_interval_migrated === true) {
-        localStorage.removeItem(legacyKey);
-      }
-      icalUrlRef.current = saved.ical_url;
-      setSettings(prev => ({
-        ...prev,
-        icalUrl: saved.ical_url,
-        syncEnabled: saved.sync_enabled,
-        autoSyncInterval: normalizeSyncInterval(
-          saved.auto_sync_interval,
-          prev.autoSyncInterval
-        ),
-      }));
-      return true;
+        icalUrlRef.current = saved.ical_url;
+        setSettings(prev => ({
+          ...prev,
+          icalUrl: saved.ical_url,
+          syncEnabled: saved.sync_enabled,
+          autoSyncInterval: normalizeSyncInterval(
+            saved.auto_sync_interval,
+            prev.autoSyncInterval
+          ),
+        }));
+        return true;
+      }, CANVAS_CONNECT_DEADLINE_MS, CANVAS_CONNECT_TIMEOUT_MESSAGE);
     } catch (err) {
       console.error('Error connecting Canvas calendar:', err);
-      setError('Could not connect the Canvas calendar. Please try again.');
+      setError(err instanceof CanvasOperationTimeoutError
+        ? err.message
+        : 'Could not connect the Canvas calendar. Please try again.');
       return false;
     } finally {
+      connectingRef.current = false;
       // Invalidate a settings poll that began while this write was in flight.
       settingsMutationVersionRef.current += 1;
     }

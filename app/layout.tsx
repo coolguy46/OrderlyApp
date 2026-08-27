@@ -18,8 +18,8 @@ const jakarta = Plus_Jakarta_Sans({
 });
 
 export const metadata: Metadata = {
-  title: "Orderly - Student Time Management Platform",
-  description: "Master your academic journey with intelligent study planning, gamified progress tracking, and collaborative learning features.",
+  title: "Orderly - Student Planner",
+  description: "Plan assignments, schedules, study sessions, exams, and goals in one place.",
   icons: {
     icon: "/logo.svg",
   },

@@ -28,7 +28,7 @@ export default function PrivacyPolicyPage() {
       <main className="pt-28 pb-20 px-6">
         <div className="max-w-3xl mx-auto prose prose-invert">
           <h1 className="text-4xl font-bold mb-2">Privacy Policy</h1>
-          <p className="text-muted-foreground text-lg mb-10">Last updated: January 2025</p>
+          <p className="text-muted-foreground text-lg mb-10">Last updated: August 27, 2026</p>
 
           <section className="space-y-6">
             <div>
@@ -47,18 +47,18 @@ export default function PrivacyPolicyPage() {
               </p>
               <ul className="list-disc list-inside space-y-2 text-muted-foreground">
                 <li>Create an account (email address, name, profile information)</li>
-                <li>Use our study management features (tasks, goals, study sessions, exam schedules)</li>
-                <li>Connect third-party integrations such as Canvas LMS</li>
-                <li>Interact with social features (study groups, leaderboards)</li>
+                <li>Use our planning features (tasks, schedules, goals, study sessions, and exams)</li>
+                <li>Connect supported school services or calendar feeds</li>
               </ul>
             </div>
 
             <div>
-              <h2 className="text-2xl font-semibold mb-3">3. Canvas LMS Integration</h2>
+              <h2 className="text-2xl font-semibold mb-3">3. School Service Integrations</h2>
               <p className="text-muted-foreground leading-relaxed">
-                When you connect your Canvas LMS account via iCal feed URL, we access your calendar 
-                data (assignment names, due dates, and course information) to sync your Canvas assignments 
-                into Orderly. This data is read-only and is not shared with any third parties.
+                When you connect a supported school service or calendar feed, we process the course names,
+                assignments, due dates, and calendar events needed to import and sync your academic data.
+                Depending on how you connect, we may store a feed URL or authorization tokens. We use this
+                access only to provide the integration you request.
               </p>
             </div>
 
@@ -67,9 +67,9 @@ export default function PrivacyPolicyPage() {
               <ul className="list-disc list-inside space-y-2 text-muted-foreground">
                 <li>To provide, maintain, and improve our services</li>
                 <li>To manage your account and provide customer support</li>
-                <li>To sync your academic data from connected integrations</li>
-                <li>To display your study analytics and progress tracking</li>
-                <li>To enable social features like leaderboards and study groups</li>
+                <li>To organize your tasks, schedules, goals, study sessions, and exams</li>
+                <li>To import and sync academic data from connected services</li>
+                <li>To show progress based on the activity you record</li>
                 <li>To send important updates about our services (with your consent)</li>
               </ul>
             </div>
@@ -95,7 +95,7 @@ export default function PrivacyPolicyPage() {
                 <li>With your explicit consent</li>
                 <li>To comply with legal obligations</li>
                 <li>To protect our rights and prevent fraud</li>
-                <li>With service providers who assist in operating our platform (e.g., Supabase for hosting)</li>
+                <li>With service providers that host, secure, or support our platform</li>
               </ul>
             </div>
 
@@ -104,8 +104,9 @@ export default function PrivacyPolicyPage() {
               <p className="text-muted-foreground leading-relaxed">
                 We retain your personal data for as long as your account is active. You may request 
                 deletion of your account and all associated data at any time by contacting us. 
-                When you disconnect a third-party integration, we delete the associated tokens 
-                and stop accessing your data from that service.
+                When you disconnect a third-party integration, we stop future access and remove connection
+                credentials we no longer need. Data already imported into your account may remain until you
+                delete it or delete your account.
               </p>
             </div>
 

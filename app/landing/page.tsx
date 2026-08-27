@@ -1,690 +1,119 @@
-'use client';
-
-import { useEffect, useState } from 'react';
-import { motion } from 'framer-motion';
+import type { Metadata } from 'next';
+import Image from 'next/image';
 import Link from 'next/link';
+import { ArrowRight, CalendarDays, ListTodo, Target } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
-import { supabase } from '@/lib/supabase/client';
-import {
-  Sparkles,
-  CheckCircle2,
-  Clock,
-  Target,
-  Trophy,
-  Users,
-  Calendar,
-  Timer,
-  GraduationCap,
-  ArrowRight,
-  Star,
-  Zap,
-  Brain,
-  Gamepad2,
-  BookOpen,
-  Layout,
-  Shield,
-  Plug,
-} from 'lucide-react';
 
-const features = [
+export const metadata: Metadata = {
+  title: 'Orderly | Plan school without the chaos',
+  description: 'Keep assignments, schedules, study sessions, exams, and goals in one clear place.',
+};
+
+const highlights = [
   {
-    icon: CheckCircle2,
-    title: 'Smart Task Management',
-    description: 'Organize tasks by priority, subject, and deadline. Never miss an assignment again.',
-    color: 'text-green-400',
-    bg: 'bg-green-500/10',
+    icon: ListTodo,
+    title: 'Tasks',
+    description: 'Keep assignments and deadlines together.',
   },
   {
-    icon: Timer,
-    title: 'Pomodoro Timer',
-    description: 'Stay focused with customizable study sessions and break intervals.',
-    color: 'text-red-400',
-    bg: 'bg-red-500/10',
+    icon: CalendarDays,
+    title: 'Schedule',
+    description: 'Turn what is due into a clear plan for the week.',
   },
   {
     icon: Target,
-    title: 'Goal Tracking',
-    description: 'Set short and long-term goals with visual progress tracking.',
-    color: 'text-purple-400',
-    bg: 'bg-purple-500/10',
-  },
-  {
-    icon: GraduationCap,
-    title: 'Exam Tracking',
-    description: 'Track upcoming exams and monitor your preparation progress.',
-    color: 'text-yellow-400',
-    bg: 'bg-yellow-500/10',
-  },
-  {
-    icon: Users,
-    title: 'Social Learning',
-    description: 'Connect with friends, compete on leaderboards, and study together.',
-    color: 'text-pink-400',
-    bg: 'bg-pink-500/10',
-  },
-];
-
-const stats = [
-  { value: '10K+', label: 'Active Students' },
-  { value: '500K+', label: 'Tasks Completed' },
-  { value: '1M+', label: 'Study Hours' },
-  { value: '4.9', label: 'App Rating' },
-];
-
-const testimonials = [
-  {
-    name: 'Sarah M.',
-    role: 'Medical Student',
-    content: 'Orderly completely transformed how I manage my study time. I went from feeling overwhelmed to being in complete control.',
-    avatar: 'S',
-  },
-  {
-    name: 'James L.',
-    role: 'Engineering Student',
-    content: 'The Pomodoro timer and gamification features keep me motivated. I\'ve increased my study time by 40%!',
-    avatar: 'J',
-  },
-  {
-    name: 'Emily R.',
-    role: 'Law Student',
-    content: 'Competing with my study group on the leaderboard makes learning fun. We push each other to do better every day.',
-    avatar: 'E',
+    title: 'Progress',
+    description: 'Track study sessions, exams, and goals as you go.',
   },
 ];
 
 export default function LandingPage() {
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-
-  useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      setIsLoggedIn(!!data.user);
-    });
-  }, []);
-
   return (
-    <div className="min-h-screen bg-background">
-      {/* Navigation */}
-      <nav className="fixed top-0 left-0 right-0 z-50 bg-background/80 backdrop-blur-md border-b border-border/40">
-        <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <img src="/logo.svg" alt="Orderly Logo" className="w-10 h-10 rounded-xl" />
-            <span className="text-xl font-bold">Orderly</span>
-          </div>
-          <div className="hidden md:flex items-center gap-6 text-sm text-muted-foreground">
-            <a href="#features" className="hover:text-foreground transition-colors">Features</a>
-            <a href="#how-it-works" className="hover:text-foreground transition-colors">How It Works</a>
-            <a href="#integrations" className="hover:text-foreground transition-colors">Integrations</a>
-            <a href="#testimonials" className="hover:text-foreground transition-colors">Testimonials</a>
-          </div>
-          <div className="flex items-center gap-4">
-            {isLoggedIn ? (
-              <Link href="/">
-                <Button className="bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700">
-                  Go to Dashboard
-                  <ArrowRight className="w-4 h-4 ml-2" />
-                </Button>
-              </Link>
-            ) : (
-              <>
-                <Link href="/auth/login">
-                  <Button variant="ghost">Sign In</Button>
-                </Link>
-                <Link href="/auth/register">
-                  <Button className="bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700">
-                    Get Started Free
-                  </Button>
-                </Link>
-              </>
-            )}
-          </div>
-        </div>
-      </nav>
+    <div className="relative flex min-h-screen flex-col overflow-hidden bg-background text-foreground">
+      <div className="pointer-events-none absolute inset-0" aria-hidden="true">
+        <div className="absolute left-1/2 top-[-18rem] h-[34rem] w-[34rem] -translate-x-1/2 rounded-full bg-indigo-500/12 blur-3xl" />
+        <div className="absolute bottom-[-20rem] right-[-12rem] h-[32rem] w-[32rem] rounded-full bg-purple-500/10 blur-3xl" />
+      </div>
 
-      {/* Hero Section */}
-      <section className="pt-32 pb-20 px-6 relative overflow-hidden">
-        {/* Background decorations - enhanced */}
-        <div className="absolute inset-0 overflow-hidden pointer-events-none">
-          <motion.div 
-            className="absolute -top-40 -right-40 w-[600px] h-[600px] bg-indigo-500/20 rounded-full blur-3xl"
-            animate={{ scale: [1, 1.1, 1], opacity: [0.2, 0.3, 0.2] }}
-            transition={{ duration: 8, repeat: Infinity, ease: 'easeInOut' }}
-          />
-          <motion.div 
-            className="absolute -bottom-40 -left-40 w-[600px] h-[600px] bg-purple-500/20 rounded-full blur-3xl"
-            animate={{ scale: [1.1, 1, 1.1], opacity: [0.2, 0.3, 0.2] }}
-            transition={{ duration: 10, repeat: Infinity, ease: 'easeInOut' }}
-          />
-          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-gradient-to-r from-indigo-500/5 to-purple-500/5 rounded-full blur-3xl" />
-          {/* Floating particles */}
-          {[...Array(6)].map((_, i) => (
-            <motion.div
-              key={i}
-              className="absolute w-1 h-1 bg-indigo-400/30 rounded-full"
-              style={{ 
-                left: `${15 + i * 15}%`,
-                top: `${20 + (i % 3) * 25}%`,
-              }}
-              animate={{ 
-                y: [0, -30, 0],
-                opacity: [0.3, 0.7, 0.3],
-              }}
-              transition={{ 
-                duration: 3 + i * 0.5,
-                repeat: Infinity,
-                ease: 'easeInOut',
-                delay: i * 0.4,
-              }}
-            />
-          ))}
-        </div>
+      <header className="relative z-10 border-b border-border/60">
+        <nav
+          aria-label="Primary navigation"
+          className="mx-auto flex h-16 w-full max-w-6xl items-center justify-between px-5 sm:px-8"
+        >
+          <Link href="/landing" className="flex items-center gap-2.5 rounded-lg font-display font-bold tracking-tight">
+            <Image src="/logo.svg" alt="" width={36} height={36} className="rounded-lg" priority />
+            <span className="text-lg">Orderly</span>
+          </Link>
 
-        <div className="max-w-7xl mx-auto relative">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6 }}
-            className="text-center max-w-4xl mx-auto"
-          >
-            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-indigo-500/10 border border-indigo-500/20 mb-8">
-              <Zap className="w-4 h-4 text-indigo-400" />
-              <span className="text-sm text-indigo-400 font-medium">Supercharge your studies</span>
-            </div>
-            
-            <h1 className="text-5xl md:text-7xl font-extrabold leading-tight mb-6 font-display">
-              Master Your
-              <span className="gradient-text-animated"> Academic Journey</span>
+          <div className="flex items-center gap-1 sm:gap-3">
+            <Button asChild variant="ghost" size="sm">
+              <Link href="/auth/login">Sign in</Link>
+            </Button>
+            <Button
+              asChild
+              size="sm"
+              className="bg-gradient-to-r from-indigo-500 to-purple-600 text-white shadow-sm hover:from-indigo-600 hover:to-purple-700"
+            >
+              <Link href="/auth/register">Get started</Link>
+            </Button>
+          </div>
+        </nav>
+      </header>
+
+      <main className="relative z-10 flex flex-1 items-center px-5 py-16 sm:px-8 sm:py-24">
+        <div className="mx-auto w-full max-w-6xl">
+          <div className="max-w-3xl">
+            <p className="mb-5 inline-flex rounded-full border border-indigo-500/20 bg-indigo-500/10 px-3 py-1 text-sm font-medium text-indigo-600 dark:text-indigo-300">
+              A calmer way to manage school
+            </p>
+            <h1 className="font-display text-5xl font-extrabold leading-[1.02] tracking-[-0.045em] sm:text-7xl lg:text-8xl">
+              Know what to do next.
             </h1>
-            
-            <p className="text-xl text-muted-foreground mb-10 max-w-2xl mx-auto">
-              The all-in-one study platform that helps you manage tasks, track progress, 
-              and achieve your academic goals with gamified motivation.
+            <p className="mt-6 max-w-2xl text-lg leading-8 text-muted-foreground sm:text-xl">
+              Orderly brings your assignments, schedule, and study plans into one clear place—so you can spend less time organizing and more time getting things done.
             </p>
 
-            <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-              <Link href={isLoggedIn ? '/' : '/auth/register'}>
-                <Button size="lg" className="text-lg px-8 py-6 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 shadow-lg shadow-indigo-500/25">
-                  {isLoggedIn ? 'Go to Dashboard' : 'Start Free Today'}
-                  <ArrowRight className="w-5 h-5 ml-2" />
-                </Button>
-              </Link>
-              <a href="#features">
-                <Button size="lg" variant="outline" className="text-lg px-8 py-6">
-                  See Features
-                </Button>
-              </a>
-            </div>
-
-            {/* Trust badges */}
-            <div className="mt-12 flex items-center justify-center gap-8 text-muted-foreground">
-              <div className="flex items-center gap-2">
-                <div className="flex -space-x-2">
-                  {['S', 'J', 'E', 'M'].map((letter, i) => (
-                    <div
-                      key={i}
-                      className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white text-xs font-medium border-2 border-background"
-                    >
-                      {letter}
-                    </div>
-                  ))}
-                </div>
-                <span className="text-sm">Join 10,000+ students</span>
-              </div>
-              <div className="flex items-center gap-1">
-                {[...Array(5)].map((_, i) => (
-                  <Star key={i} className="w-4 h-4 fill-yellow-400 text-yellow-400" />
-                ))}
-                <span className="text-sm ml-1">4.9/5 rating</span>
-              </div>
-            </div>
-          </motion.div>
-
-          {/* App preview */}
-          <motion.div
-            initial={{ opacity: 0, y: 40 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.8, delay: 0.2 }}
-            className="mt-20 relative"
-          >
-            <div className="relative mx-auto max-w-5xl rounded-2xl overflow-hidden border border-border/50 shadow-2xl shadow-indigo-500/10 bg-card/50 backdrop-blur-sm">
-              <div className="aspect-[16/9] bg-gradient-to-br from-indigo-500/10 to-purple-500/10 flex items-center justify-center">
-                <div className="text-center p-8">
-                  <img src="/logo.svg" alt="Orderly Logo" className="w-20 h-20 rounded-2xl mx-auto mb-6" />
-                  <h3 className="text-2xl font-bold mb-2">Beautiful Dashboard</h3>
-                  <p className="text-muted-foreground">Track all your academic progress in one place</p>
-                </div>
-              </div>
-            </div>
-            
-            {/* Floating cards */}
-            <motion.div
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.6, delay: 0.4 }}
-              className="absolute -left-4 top-1/4 bg-card border border-border/50 rounded-xl p-4 shadow-xl hidden lg:block animate-float"
-            >
-              <div className="flex items-center gap-3">
-                <div className="p-2 rounded-lg bg-green-500/10">
-                  <CheckCircle2 className="w-5 h-5 text-green-400" />
-                </div>
-                <div>
-                  <p className="text-sm font-medium">Task Completed!</p>
-                  <p className="text-xs text-muted-foreground">+50 XP earned</p>
-                </div>
-              </div>
-            </motion.div>
-
-            <motion.div
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.6, delay: 0.5 }}
-              className="absolute -right-4 top-1/3 bg-card border border-border/50 rounded-xl p-4 shadow-xl hidden lg:block animate-float-delayed"
-            >
-              <div className="flex items-center gap-3">
-                <div className="p-2 rounded-lg bg-orange-500/10">
-                  <Trophy className="w-5 h-5 text-orange-400" />
-                </div>
-                <div>
-                  <p className="text-sm font-medium">7 Day Streak! 🔥</p>
-                  <p className="text-xs text-muted-foreground">Keep it going!</p>
-                </div>
-              </div>
-            </motion.div>
-          </motion.div>
-        </div>
-      </section>
-
-      {/* Stats Section */}
-      <section className="py-16 px-6 border-y border-border/40 bg-muted/20">
-        <div className="max-w-7xl mx-auto">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
-            {stats.map((stat, i) => (
-              <motion.div
-                key={stat.label}
-                initial={{ opacity: 0, y: 20 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true }}
-                transition={{ duration: 0.5, delay: i * 0.1 }}
-                className="text-center"
+            <div className="mt-9 flex flex-col gap-3 sm:flex-row">
+              <Button
+                asChild
+                size="lg"
+                className="h-12 bg-gradient-to-r from-indigo-500 to-purple-600 px-7 text-base text-white shadow-lg shadow-indigo-500/20 hover:from-indigo-600 hover:to-purple-700"
               >
-                <p className="text-4xl md:text-5xl font-bold bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent">
-                  {stat.value}
-                </p>
-                <p className="text-muted-foreground mt-2">{stat.label}</p>
-              </motion.div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* Features Section */}
-      <section id="features" className="py-24 px-6">
-        <div className="max-w-7xl mx-auto">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            className="text-center mb-16"
-          >
-            <h2 className="text-4xl md:text-5xl font-bold mb-4 font-display">
-              Everything You Need to
-              <span className="bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent"> Succeed</span>
-            </h2>
-            <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
-              Powerful features designed specifically for students who want to excel academically.
-            </p>
-          </motion.div>
-
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {features.map((feature, i) => (
-              <motion.div
-                key={feature.title}
-                initial={{ opacity: 0, y: 20 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true }}
-                transition={{ duration: 0.5, delay: i * 0.1 }}
-                whileHover={{ y: -6, scale: 1.02 }}
-                className="group p-6 rounded-2xl border border-border/50 bg-card/50 hover:bg-card hover:border-border transition-all hover:shadow-xl hover:shadow-indigo-500/5"
-              >
-                <motion.div 
-                  className={`w-12 h-12 rounded-xl ${feature.bg} flex items-center justify-center mb-4`}
-                  whileHover={{ rotate: [0, -10, 10, 0], transition: { duration: 0.4 } }}
-                >
-                  <feature.icon className={`w-6 h-6 ${feature.color}`} />
-                </motion.div>
-                <h3 className="text-xl font-semibold mb-2">{feature.title}</h3>
-                <p className="text-muted-foreground">{feature.description}</p>
-              </motion.div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* Gamification Section */}
-      <section className="py-24 px-6 bg-gradient-to-b from-indigo-500/5 to-purple-500/5">
-        <div className="max-w-7xl mx-auto">
-          <div className="grid lg:grid-cols-2 gap-16 items-center">
-            <motion.div
-              initial={{ opacity: 0, x: -20 }}
-              whileInView={{ opacity: 1, x: 0 }}
-              viewport={{ once: true }}
-            >
-              <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-purple-500/10 border border-purple-500/20 mb-6">
-                <Gamepad2 className="w-4 h-4 text-purple-400" />
-                <span className="text-sm text-purple-400 font-medium">Gamified Learning</span>
-              </div>
-              <h2 className="text-4xl font-bold mb-6 font-display">
-                Make Studying
-                <span className="bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent"> Fun & Rewarding</span>
-              </h2>
-              <p className="text-lg text-muted-foreground mb-8">
-                Earn XP for completing tasks, maintain study streaks, review your progress,
-                and compete with friends on leaderboards. Learning has never been this engaging!
-              </p>
-              
-              <div className="space-y-4">
-                {[
-                  { icon: Trophy, text: 'Earn XP and level up as you study' },
-                  { icon: Zap, text: 'Maintain daily streaks for bonus rewards' },
-                  { icon: BookOpen, text: 'Review your progress and build better habits' },
-                  { icon: Users, text: 'Compete with friends on leaderboards' },
-                ].map((item, i) => (
-                  <div key={i} className="flex items-center gap-3">
-                    <div className="p-2 rounded-lg bg-purple-500/10">
-                      <item.icon className="w-5 h-5 text-purple-400" />
-                    </div>
-                    <span>{item.text}</span>
-                  </div>
-                ))}
-              </div>
-            </motion.div>
-
-            <motion.div
-              initial={{ opacity: 0, x: 20 }}
-              whileInView={{ opacity: 1, x: 0 }}
-              viewport={{ once: true }}
-              className="relative"
-            >
-              <div className="bg-card border border-border/50 rounded-2xl p-8">
-                <div className="text-center mb-8">
-                  <div className="w-24 h-24 rounded-2xl bg-gradient-to-br from-purple-500 to-pink-600 flex items-center justify-center mx-auto mb-4">
-                    <span className="text-4xl font-bold text-white">12</span>
-                  </div>
-                  <h3 className="text-2xl font-bold">Level 12</h3>
-                  <p className="text-muted-foreground">Scholar</p>
-                </div>
-                
-                <div className="space-y-4">
-                  <div>
-                    <div className="flex justify-between text-sm mb-2">
-                      <span>XP Progress</span>
-                      <span className="text-purple-400">2,450 / 3,000</span>
-                    </div>
-                    <div className="h-3 bg-muted rounded-full overflow-hidden relative">
-                      <div className="h-full w-[82%] bg-gradient-to-r from-purple-500 to-pink-500 rounded-full shimmer" />
-                    </div>
-                  </div>
-                  
-                  <div className="grid grid-cols-3 gap-4 pt-4">
-                    <div className="text-center p-3 rounded-xl bg-muted/50">
-                      <p className="text-2xl font-bold text-orange-400">14</p>
-                      <p className="text-xs text-muted-foreground">Day Streak</p>
-                    </div>
-                    <div className="text-center p-3 rounded-xl bg-muted/50">
-                      <p className="text-2xl font-bold text-green-400">47</p>
-                      <p className="text-xs text-muted-foreground">Tasks Done</p>
-                    </div>
-                    <div className="text-center p-3 rounded-xl bg-muted/50">
-                      <p className="text-2xl font-bold text-blue-400">8</p>
-                      <p className="text-xs text-muted-foreground">Badges</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </motion.div>
-          </div>
-        </div>
-      </section>
-
-      {/* How It Works Section */}
-      <section id="how-it-works" className="py-24 px-6">
-        <div className="max-w-7xl mx-auto">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            className="text-center mb-16"
-          >
-            <h2 className="text-4xl md:text-5xl font-bold mb-4 font-display">
-              Get Started in
-              <span className="bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent"> Minutes</span>
-            </h2>
-            <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
-              Three simple steps to transform your academic life
-            </p>
-          </motion.div>
-
-          <div className="grid md:grid-cols-3 gap-8">
-            {[
-              {
-                step: '01',
-                icon: BookOpen,
-                title: 'Create Your Account',
-                description: 'Sign up for free with your email or Google account. Set up your subjects and preferences in our quick onboarding wizard.',
-                color: 'from-indigo-500 to-blue-600',
-              },
-              {
-                step: '02',
-                icon: Plug,
-                title: 'Connect Your Tools',
-                description: 'Connect your Canvas calendar feed to import assignments and keep deadlines synchronized.',
-                color: 'from-purple-500 to-pink-600',
-              },
-              {
-                step: '03',
-                icon: Target,
-                title: 'Start Achieving',
-                description: 'Use the Pomodoro timer, track your goals, and earn XP as you study. Watch your productivity soar.',
-                color: 'from-pink-500 to-orange-500',
-              },
-            ].map((item, i) => (
-              <motion.div
-                key={item.step}
-                initial={{ opacity: 0, y: 20 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true }}
-                transition={{ duration: 0.5, delay: i * 0.15 }}
-                className="relative text-center"
-              >
-                <div className={`w-16 h-16 rounded-2xl bg-gradient-to-br ${item.color} flex items-center justify-center mx-auto mb-6 shadow-lg`}>
-                  <item.icon className="w-8 h-8 text-white" />
-                </div>
-                <span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Step {item.step}</span>
-                <h3 className="text-xl font-bold mt-2 mb-3">{item.title}</h3>
-                <p className="text-muted-foreground">{item.description}</p>
-                {i < 2 && (
-                  <div className="hidden md:block absolute top-8 -right-4 w-8 text-muted-foreground/30">
-                    <ArrowRight className="w-8 h-8" />
-                  </div>
-                )}
-              </motion.div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* Integrations Section */}
-      <section id="integrations" className="py-24 px-6 bg-gradient-to-b from-transparent via-indigo-500/5 to-transparent">
-        <div className="max-w-7xl mx-auto">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            className="text-center mb-16"
-          >
-            <h2 className="text-4xl md:text-5xl font-bold mb-4 font-display">
-              Works With Your
-              <span className="bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent"> School Calendar</span>
-            </h2>
-            <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
-              Keep Canvas assignments and deadlines synchronized with Orderly
-            </p>
-          </motion.div>
-
-          <div className="max-w-2xl mx-auto">
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true }}
-              whileHover={{ y: -4 }}
-              className="p-8 rounded-2xl border border-border/50 bg-card/50 hover:bg-card transition-all hover:shadow-xl hover:shadow-indigo-500/5"
-            >
-              <div className="w-14 h-14 rounded-xl bg-orange-500/10 flex items-center justify-center mb-5">
-                <Layout className="w-7 h-7 text-orange-400" />
-              </div>
-              <h3 className="text-2xl font-bold mb-3">Canvas LMS</h3>
-              <p className="text-muted-foreground mb-4">
-                Paste your Canvas iCal feed URL to instantly import all your assignments 
-                and deadlines. Calendar events sync automatically to your tasks.
-              </p>
-              <div className="flex flex-wrap gap-2">
-                <span className="px-3 py-1 rounded-full bg-orange-500/10 text-orange-400 text-xs font-medium">iCal Feed</span>
-                <span className="px-3 py-1 rounded-full bg-orange-500/10 text-orange-400 text-xs font-medium">Auto-import</span>
-                <span className="px-3 py-1 rounded-full bg-orange-500/10 text-orange-400 text-xs font-medium">Real-time</span>
-              </div>
-            </motion.div>
-          </div>
-
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            className="text-center mt-10"
-          >
-            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-muted/50 border border-border/50">
-              <Shield className="w-4 h-4 text-indigo-400" />
-              <span className="text-sm text-muted-foreground">Your data is always secure — we never modify your school accounts</span>
-            </div>
-          </motion.div>
-        </div>
-      </section>
-
-      {/* Testimonials Section */}
-      <section id="testimonials" className="py-24 px-6">
-        <div className="max-w-7xl mx-auto">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            className="text-center mb-16"
-          >
-            <h2 className="text-4xl md:text-5xl font-bold mb-4 font-display">
-              Loved by
-              <span className="bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent"> Students Worldwide</span>
-            </h2>
-            <p className="text-xl text-muted-foreground">
-              See what our community has to say about Orderly
-            </p>
-          </motion.div>
-
-          <div className="grid md:grid-cols-3 gap-6">
-            {testimonials.map((testimonial, i) => (
-              <motion.div
-                key={testimonial.name}
-                initial={{ opacity: 0, y: 20 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true }}
-                transition={{ duration: 0.5, delay: i * 0.1 }}
-                whileHover={{ y: -4, scale: 1.02 }}
-                className="p-6 rounded-2xl border border-border/50 bg-card/50 glow-border transition-all"
-              >
-                <div className="flex items-center gap-1 mb-4">
-                  {[...Array(5)].map((_, i) => (
-                    <Star key={i} className="w-4 h-4 fill-yellow-400 text-yellow-400" />
-                  ))}
-                </div>
-                <p className="text-muted-foreground mb-6">"{testimonial.content}"</p>
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-medium">
-                    {testimonial.avatar}
-                  </div>
-                  <div>
-                    <p className="font-medium">{testimonial.name}</p>
-                    <p className="text-sm text-muted-foreground">{testimonial.role}</p>
-                  </div>
-                </div>
-              </motion.div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* CTA Section */}
-      <section className="py-24 px-6">
-        <div className="max-w-4xl mx-auto">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            className="text-center p-12 rounded-3xl bg-gradient-to-br from-indigo-500/10 via-purple-500/10 to-pink-500/10 border border-indigo-500/20"
-          >
-            <h2 className="text-4xl md:text-5xl font-bold mb-4 font-display">
-              Ready to Transform Your Studies?
-            </h2>
-            <p className="text-xl text-muted-foreground mb-8 max-w-2xl mx-auto">
-              Join thousands of students who are already achieving their academic goals with Orderly.
-            </p>
-            <Link href={isLoggedIn ? '/' : '/auth/register'}>
-              <Button size="lg" className="text-lg px-10 py-6 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 shadow-lg shadow-indigo-500/25">
-                {isLoggedIn ? 'Go to Dashboard' : 'Get Started Free'}
-                <ArrowRight className="w-5 h-5 ml-2" />
+                <Link href="/auth/register">
+                  Get started
+                  <ArrowRight className="size-4" />
+                </Link>
               </Button>
-            </Link>
-            <p className="text-sm text-muted-foreground mt-4">
-              No credit card required • Free forever for students
-            </p>
-          </motion.div>
-        </div>
-      </section>
-
-      {/* Footer */}
-      <footer className="py-12 px-6 border-t border-border/40">
-        <div className="max-w-7xl mx-auto">
-          <div className="grid md:grid-cols-4 gap-8 mb-10">
-            <div className="md:col-span-2">
-              <div className="flex items-center gap-3 mb-4">
-                <img src="/logo.svg" alt="Orderly Logo" className="w-10 h-10 rounded-xl" />
-                <span className="text-xl font-bold">Orderly</span>
-              </div>
-              <p className="text-muted-foreground max-w-sm">
-                The all-in-one study platform that helps students manage tasks, track progress, 
-                and achieve their academic goals.
-              </p>
-            </div>
-            <div>
-              <h4 className="font-semibold mb-4">Product</h4>
-              <div className="space-y-3 text-sm text-muted-foreground">
-                <a href="#features" className="block hover:text-foreground transition-colors">Features</a>
-                <a href="#how-it-works" className="block hover:text-foreground transition-colors">How It Works</a>
-                <a href="#integrations" className="block hover:text-foreground transition-colors">Integrations</a>
-                <a href="#testimonials" className="block hover:text-foreground transition-colors">Testimonials</a>
-              </div>
-            </div>
-            <div>
-              <h4 className="font-semibold mb-4">Legal</h4>
-              <div className="space-y-3 text-sm text-muted-foreground">
-                <Link href="/privacy" className="block hover:text-foreground transition-colors">Privacy Policy</Link>
-                <Link href="/terms" className="block hover:text-foreground transition-colors">Terms of Service</Link>
-              </div>
+              <Button asChild size="lg" variant="outline" className="h-12 px-7 text-base">
+                <Link href="/auth/login">I already have an account</Link>
+              </Button>
             </div>
           </div>
-          <div className="pt-8 border-t border-border/40 flex flex-col md:flex-row items-center justify-between gap-4">
-            <p className="text-sm text-muted-foreground">
-              © 2025 Orderly. All rights reserved.
-            </p>
-            <div className="flex items-center gap-6 text-sm text-muted-foreground">
-              <Link href="/privacy" className="hover:text-foreground transition-colors">Privacy</Link>
-              <Link href="/terms" className="hover:text-foreground transition-colors">Terms</Link>
+
+          <section aria-label="What Orderly helps with" className="mt-16 border-t border-border/70 pt-7 sm:mt-24">
+            <div className="grid gap-3 sm:grid-cols-3 sm:gap-6">
+              {highlights.map((highlight) => (
+                <div key={highlight.title} className="flex gap-3 rounded-2xl border border-border/60 bg-card/55 p-4 backdrop-blur-sm sm:border-0 sm:bg-transparent sm:p-0">
+                  <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-indigo-500/10 text-indigo-500">
+                    <highlight.icon className="size-5" aria-hidden="true" />
+                  </div>
+                  <div>
+                    <h2 className="font-display font-semibold">{highlight.title}</h2>
+                    <p className="mt-1 text-sm leading-6 text-muted-foreground">{highlight.description}</p>
+                  </div>
+                </div>
+              ))}
             </div>
+          </section>
+        </div>
+      </main>
+
+      <footer className="relative z-10 border-t border-border/60 px-5 py-5 sm:px-8">
+        <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-4 text-xs text-muted-foreground">
+          <span>Orderly</span>
+          <div className="flex items-center gap-5">
+            <Link href="/privacy" className="transition-colors hover:text-foreground">Privacy</Link>
+            <Link href="/terms" className="transition-colors hover:text-foreground">Terms</Link>
           </div>
         </div>
       </footer>

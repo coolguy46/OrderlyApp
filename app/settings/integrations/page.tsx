@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { MainLayout } from '@/components/layout';
 import { Card, CardContent, Button, Input } from '@/components/ui';
 import { useCanvasSyncSupabase, formatTimeUntilSync, formatLastSync } from '@/lib/integrations/useCanvasSyncSupabase';
@@ -56,7 +56,6 @@ export default function IntegrationsPage() {
   } = useCanvasSyncSupabase({
     userId: user?.id || null,
     defaultInterval: 15, // 15 minutes
-    onSyncComplete: refreshData,
   });
 
   // Live countdown display
@@ -75,17 +74,26 @@ export default function IntegrationsPage() {
     return () => clearInterval(interval);
   }, [nextSyncAt, lastSyncAt]);
 
-  // A background sync writes directly to the persisted tasks/exams tables.
-  // Refresh the app store whenever the server reports a newer completed sync
-  // so the overview stays accurate without requiring a manual Sync Now click.
+  // Both sync modes write directly to the persisted tasks/exams tables. Wait
+  // until a manual request has left its syncing state, then refresh the wider
+  // app without making the Canvas button wait for that unrelated data load.
   const lastSyncTimestamp = lastSyncAt?.getTime() ?? 0;
+  const refreshedSyncTimestampRef = useRef(0);
   useEffect(() => {
-    if (lastSyncTimestamp > 0) void refreshData();
-  }, [lastSyncTimestamp, refreshData]);
+    if (lastSyncTimestamp <= 0 || isCanvasSyncing) return;
+    if (refreshedSyncTimestampRef.current === lastSyncTimestamp) return;
+    refreshedSyncTimestampRef.current = lastSyncTimestamp;
+    void refreshData().catch(error => {
+      console.error('Canvas synced, but app data could not be refreshed:', error);
+    });
+  }, [isCanvasSyncing, lastSyncTimestamp, refreshData]);
 
   // Canvas URL input state (separate from saved settings)
   const [canvasUrlInput, setCanvasUrlInput] = useState('');
   const [feedCourseCount, setFeedCourseCount] = useState<number | null>(null);
+  const [isCanvasConnecting, setIsCanvasConnecting] = useState(false);
+  const connectingFlowRef = useRef(false);
+  const feedSummaryControllerRef = useRef<AbortController | null>(null);
 
   // Sync input with saved URL
   useEffect(() => {
@@ -96,14 +104,18 @@ export default function IntegrationsPage() {
 
   // Course enrollment cannot be inferred reliably from stored tasks because a
   // course may currently have no imported assignment. Read the distinct course
-  // names from the connected Canvas feed instead.
+  // names from the connected Canvas feed instead. Manual sync always gets the
+  // feed request to itself; starting one aborts this lower-priority summary.
   useEffect(() => {
     if (!canvasSettings.icalUrl) {
       setFeedCourseCount(null);
       return;
     }
+    if (isCanvasConnecting || isCanvasSyncing) return;
 
     const controller = new AbortController();
+    feedSummaryControllerRef.current = controller;
+    const timeoutId = window.setTimeout(() => controller.abort(), 20_000);
     const loadFeedSummary = async () => {
       try {
         const response = await fetch('/api/canvas/sync', {
@@ -115,22 +127,52 @@ export default function IntegrationsPage() {
         const summary = await response.json();
         if (Number.isFinite(summary.courses)) setFeedCourseCount(summary.courses);
       } catch (error) {
-        if (error instanceof DOMException && error.name === 'AbortError') return;
+        if (controller.signal.aborted) return;
         console.error('Could not load Canvas feed summary:', error);
+      } finally {
+        window.clearTimeout(timeoutId);
+        if (feedSummaryControllerRef.current === controller) {
+          feedSummaryControllerRef.current = null;
+        }
       }
     };
 
     void loadFeedSummary();
-    return () => controller.abort();
-  }, [canvasSettings.icalUrl, lastSyncTimestamp]);
+    return () => {
+      window.clearTimeout(timeoutId);
+      controller.abort();
+      if (feedSummaryControllerRef.current === controller) {
+        feedSummaryControllerRef.current = null;
+      }
+    };
+  }, [canvasSettings.icalUrl, isCanvasConnecting, isCanvasSyncing, lastSyncTimestamp]);
+
+  const stopFeedSummary = () => {
+    feedSummaryControllerRef.current?.abort();
+    feedSummaryControllerRef.current = null;
+  };
+
+  const handleCanvasSync = async () => {
+    stopFeedSummary();
+    await syncNow();
+  };
 
   const handleCanvasConnect = async () => {
-    if (!canvasUrlInput.trim()) return;
-    const connected = await setIcalUrl(canvasUrlInput);
-    if (!connected) return;
-    // The first import is explicit; subsequent automatic imports are handled
-    // by the server scheduler even when this page or the browser is closed.
-    await syncNow();
+    if (!canvasUrlInput.trim() || connectingFlowRef.current) return;
+
+    connectingFlowRef.current = true;
+    setIsCanvasConnecting(true);
+    stopFeedSummary();
+    try {
+      const connected = await setIcalUrl(canvasUrlInput);
+      if (!connected) return;
+      // The first import is explicit; subsequent automatic imports are handled
+      // by the server scheduler even when this page or the browser is closed.
+      await syncNow();
+    } finally {
+      connectingFlowRef.current = false;
+      setIsCanvasConnecting(false);
+    }
   };
 
   const canvasTasks = tasks.filter((task) => task.source === 'canvas');
@@ -229,12 +271,12 @@ export default function IntegrationsPage() {
 
               {canvasSettings.icalUrl && (
                 <Button
-                  onClick={syncNow}
-                  disabled={isCanvasSyncing}
+                  onClick={handleCanvasSync}
+                  disabled={isCanvasConnecting || isCanvasSyncing}
                   className="shrink-0 bg-[#e13f2a] text-white shadow-lg shadow-[#e13f2a]/20 hover:bg-[#c93624]"
                 >
-                  {isCanvasSyncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                  {isCanvasSyncing ? 'Syncing…' : 'Sync now'}
+                  {isCanvasConnecting || isCanvasSyncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                  {isCanvasSyncing ? 'Syncing…' : isCanvasConnecting ? 'Connecting…' : 'Sync now'}
                 </Button>
               )}
             </div>
@@ -405,11 +447,11 @@ export default function IntegrationsPage() {
                       />
                       <Button
                         onClick={handleCanvasConnect}
-                        disabled={!canvasUrlInput.trim() || isCanvasSyncing}
+                        disabled={!canvasUrlInput.trim() || isCanvasConnecting || isCanvasSyncing}
                         className="h-11 bg-[#e13f2a] px-5 text-white hover:bg-[#c93624]"
                       >
-                        {isCanvasSyncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
-                        Connect Canvas
+                        {isCanvasConnecting || isCanvasSyncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
+                        {isCanvasSyncing ? 'Importing…' : isCanvasConnecting ? 'Connecting…' : 'Connect Canvas'}
                       </Button>
                     </div>
                   </section>

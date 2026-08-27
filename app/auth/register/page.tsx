@@ -10,20 +10,21 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Separator } from '@/components/ui/separator';
-import { Sparkles, Mail, Lock, User, ArrowRight, Github, Chrome, Check } from 'lucide-react';
+import { Sparkles, Mail, Lock, User, ArrowRight, Chrome, Check } from 'lucide-react';
 import { useAppStore } from '@/lib/store';
 import { signInWithGoogle } from '@/lib/supabase/services';
+import { errorMessage } from '@/lib/auth/lifecycle';
 
 const features = [
-  'Smart task management with priorities',
-  'Pomodoro timer with gamification',
-  'Visual progress tracking',
-  'Social study competitions',
+  'Plan tasks and deadlines in one place',
+  'Sync assignments from Canvas',
+  'See tasks and schedules together',
+  'Track your goals and exams',
 ];
 
 export default function RegisterPage() {
   const router = useRouter();
-  const { register, login } = useAppStore();
+  const { register } = useAppStore();
   const [isLoading, setIsLoading] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
@@ -33,6 +34,7 @@ export default function RegisterPage() {
   });
   const [acceptTerms, setAcceptTerms] = useState(false);
   const [error, setError] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFormData({ ...formData, [e.target.id]: e.target.value });
@@ -41,6 +43,7 @@ export default function RegisterPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setSuccessMessage('');
     
     if (formData.password !== formData.confirmPassword) {
       setError('Passwords do not match');
@@ -54,12 +57,16 @@ export default function RegisterPage() {
     setIsLoading(true);
     
     try {
-      const success = await register(formData.email, formData.password, formData.name);
-      if (success) {
-        router.push('/');
+      const result = await register(formData.email, formData.password, formData.name);
+      if (result === 'authenticated') {
+        router.replace('/');
+      } else if (result === 'confirmation-required') {
+        setSuccessMessage('Check your email to confirm your account, then return here to sign in.');
+      } else {
+        setError('Registration failed. Please try again.');
       }
-    } catch (err: any) {
-      setError(err?.message || 'Registration failed. Please try again.');
+    } catch (err) {
+      setError(errorMessage(err, 'Registration failed. Please try again.'));
     } finally {
       setIsLoading(false);
     }
@@ -71,7 +78,7 @@ export default function RegisterPage() {
     try {
       await signInWithGoogle();
     } catch (err) {
-      setError('Google sign-in failed. Please try again.');
+      setError(errorMessage(err, 'Google sign-in failed. Please try again.'));
       setIsLoading(false);
     }
   };
@@ -101,7 +108,7 @@ export default function RegisterPage() {
             </div>
             <h1 className="text-3xl font-bold mb-2">Start your learning journey</h1>
             <p className="text-muted-foreground">
-              Join thousands of students who are mastering their academic goals with Orderly.
+              Build a clear view of your assignments, deadlines, and plans with Orderly.
             </p>
           </div>
 
@@ -155,6 +162,17 @@ export default function RegisterPage() {
                 or
               </span>
             </div>
+
+            {error && (
+              <div role="alert" className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+                {error}
+              </div>
+            )}
+            {successMessage && (
+              <div role="status" className="rounded-lg border border-green-500/30 bg-green-500/10 px-4 py-3 text-sm text-green-300">
+                {successMessage}
+              </div>
+            )}
 
             {/* Registration Form */}
             <form onSubmit={handleSubmit} className="space-y-4">

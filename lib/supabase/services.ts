@@ -9,10 +9,27 @@ import type {
   Exam,
   Friendship,
 } from './types';
+import { AUTH_ACTION_TIMEOUT_MS, authCallbackUrl, withTimeout } from '@/lib/auth/lifecycle';
 
 // Use the supabase client with any to bypass strict typing issues
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const db = supabase as any;
+
+export interface ReadOptions {
+  /** Startup hydration uses this so a failed query cannot look like empty data. */
+  throwOnError?: boolean;
+}
+
+function readFailure<T>(
+  context: string,
+  error: unknown,
+  fallback: T,
+  options?: ReadOptions,
+): T {
+  console.error(context, error);
+  if (options?.throwOnError) throw error;
+  return fallback;
+}
 
 /** Returns true if the error is a harmless request abort (e.g. React Strict Mode). */
 function isAbortError(e: any): boolean {
@@ -26,7 +43,7 @@ function isAbortError(e: any): boolean {
 
 // ============== PROFILE SERVICES ==============
 
-export async function getProfile(userId: string): Promise<Profile | null> {
+export async function getProfile(userId: string, options?: ReadOptions): Promise<Profile | null> {
   
   
   const { data, error } = await db
@@ -36,8 +53,7 @@ export async function getProfile(userId: string): Promise<Profile | null> {
     .single();
   
   if (error) {
-    console.error('Error fetching profile:', error);
-    return null;
+    return readFailure('Error fetching profile:', error, null, options);
   }
   return data as Profile | null;
 }
@@ -61,7 +77,7 @@ export async function updateProfile(userId: string, updates: Partial<Profile>): 
 
 // ============== SUBJECT SERVICES ==============
 
-export async function getSubjects(userId: string): Promise<Subject[]> {
+export async function getSubjects(userId: string, options?: ReadOptions): Promise<Subject[]> {
   
   
   const { data, error } = await db
@@ -71,8 +87,7 @@ export async function getSubjects(userId: string): Promise<Subject[]> {
     .order('created_at', { ascending: true });
   
   if (error) {
-    console.error('Error fetching subjects:', error);
-    return [];
+    return readFailure('Error fetching subjects:', error, [], options);
   }
   return (data || []) as Subject[];
 }
@@ -127,7 +142,7 @@ export async function deleteSubject(id: string): Promise<boolean> {
 
 // ============== TASK SERVICES ==============
 
-export async function getTasks(userId: string): Promise<Task[]> {
+export async function getTasks(userId: string, options?: ReadOptions): Promise<Task[]> {
   
   
   const { data, error } = await db
@@ -137,8 +152,7 @@ export async function getTasks(userId: string): Promise<Task[]> {
     .order('created_at', { ascending: false });
   
   if (error) {
-    console.error('Error fetching tasks:', error);
-    return [];
+    return readFailure('Error fetching tasks:', error, [], options);
   }
   return (data || []) as Task[];
 }
@@ -297,7 +311,7 @@ export async function upsertCanvasTask(task: Omit<Task, 'id' | 'created_at' | 'u
 
 // ============== GOAL SERVICES ==============
 
-export async function getGoals(userId: string): Promise<Goal[]> {
+export async function getGoals(userId: string, options?: ReadOptions): Promise<Goal[]> {
   
   
   const { data, error } = await db
@@ -307,8 +321,7 @@ export async function getGoals(userId: string): Promise<Goal[]> {
     .order('created_at', { ascending: false });
   
   if (error) {
-    console.error('Error fetching goals:', error);
-    return [];
+    return readFailure('Error fetching goals:', error, [], options);
   }
   return (data || []) as Goal[];
 }
@@ -363,7 +376,7 @@ export async function deleteGoal(id: string): Promise<boolean> {
 
 // ============== STUDY SESSION SERVICES ==============
 
-export async function getStudySessions(userId: string): Promise<StudySession[]> {
+export async function getStudySessions(userId: string, options?: ReadOptions): Promise<StudySession[]> {
   
   
   const { data, error } = await db
@@ -373,8 +386,7 @@ export async function getStudySessions(userId: string): Promise<StudySession[]> 
     .order('started_at', { ascending: false });
   
   if (error) {
-    console.error('Error fetching study sessions:', error);
-    return [];
+    return readFailure('Error fetching study sessions:', error, [], options);
   }
   return (data || []) as StudySession[];
 }
@@ -397,7 +409,7 @@ export async function createStudySession(session: Omit<StudySession, 'id' | 'cre
 
 // ============== EXAM SERVICES ==============
 
-export async function getExams(userId: string): Promise<Exam[]> {
+export async function getExams(userId: string, options?: ReadOptions): Promise<Exam[]> {
   
   
   const { data, error } = await db
@@ -407,8 +419,7 @@ export async function getExams(userId: string): Promise<Exam[]> {
     .order('exam_date', { ascending: true });
   
   if (error) {
-    console.error('Error fetching exams:', error);
-    return [];
+    return readFailure('Error fetching exams:', error, [], options);
   }
   return (data || []) as Exam[];
 }
@@ -709,7 +720,7 @@ export interface FriendWithProfile {
   direction: 'sent' | 'received';
 }
 
-export async function getFriends(userId: string): Promise<FriendWithProfile[]> {
+export async function getFriends(userId: string, options?: ReadOptions): Promise<FriendWithProfile[]> {
   // Get friendships where user is either the sender or receiver
   const { data: sent, error: sentError } = await db
     .from('friendships')
@@ -722,8 +733,7 @@ export async function getFriends(userId: string): Promise<FriendWithProfile[]> {
     .eq('friend_id', userId);
 
   if (sentError || recvError) {
-    console.error('Error fetching friendships:', sentError || recvError);
-    return [];
+    return readFailure('Error fetching friendships:', sentError || recvError, [], options);
   }
 
   const results: FriendWithProfile[] = [];
@@ -856,16 +866,17 @@ export async function signOut() {
 }
 
 export async function signInWithGoogle() {
-  const { data, error } = await db.auth.signInWithOAuth({
-    provider: 'google',
-    options: {
-      redirectTo: `${typeof window !== 'undefined' ? window.location.origin : ''}/auth/callback`,
-      queryParams: {
-        access_type: 'offline',
-        prompt: 'consent',
+  const currentOrigin = typeof window !== 'undefined' ? window.location.origin : '';
+  const { data, error } = await withTimeout(
+    db.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: authCallbackUrl(process.env.NEXT_PUBLIC_SITE_URL, currentOrigin),
       },
-    },
-  });
+    }) as Promise<{ data: unknown; error: Error | null }>,
+    AUTH_ACTION_TIMEOUT_MS,
+    'Google sign in',
+  );
 
   if (error) {
     throw error;

@@ -1,12 +1,5 @@
-'use client';
-
-import { MainLayout } from '@/components/layout';
-import { Social } from '@/components/social';
+import { redirect } from 'next/navigation';
 
 export default function SocialPage() {
-  return (
-    <MainLayout>
-      <Social />
-    </MainLayout>
-  );
+  redirect('/');
 }
