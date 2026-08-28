@@ -10,14 +10,14 @@ import {
 } from 'date-fns';
 import {
   CalendarDays,
-  Check,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
-  RotateCcw,
-  Send,
+  ChevronUp,
+  Maximize2,
+  Minimize2,
   Sparkles,
   Undo2,
-  X,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAppStore } from '@/lib/store';
@@ -54,18 +54,29 @@ import type { LocalDate, ScheduleEntry, ScheduleOccurrence } from '@/lib/schedul
 import type { Task } from '@/lib/supabase/types';
 import { Button } from '@/components/ui/Button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
-import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import { WeekTimeGrid, type PlannerBlockView } from '@/components/planner';
+import { AssistantChat } from '@/components/planner/assistant/AssistantChat';
 import type { UntimedScheduleItem } from '@/components/schedule/UntimedTaskShelf';
 
 interface ConversationMessage {
   id: string;
   role: 'assistant' | 'user';
-  text: string;
+  content: string;
+}
+
+interface AssistantChatResponse {
+  reply: string;
+  normalizedCommand: string | null;
+  usage: {
+    remainingDaily: number;
+    remainingMonthly: number;
+  } | null;
+  aiUsed: boolean;
 }
 
 interface UndoState {
+  userId: string;
   entries: ScheduleEntry[];
   createdTaskIds: string[];
   label: string;
@@ -77,10 +88,97 @@ interface CalendarRenderData {
 }
 
 const EXAMPLES = [
-  'Schedule chemistry tomorrow at 4 pm for 45 minutes',
-  'Study for SAT for 2 hours every day for a week',
+  'How does my week look?',
+  'When am I busiest this week?',
   'Find a 45-minute gap for chemistry tomorrow',
 ];
+
+const CHAT_CONTEXT_LIMIT = 14;
+const CHAT_DISPLAY_LIMIT = 50;
+const CHAT_STORAGE_LIMIT = 20;
+const CHAT_STORAGE_CHARACTER_LIMIT = 20_000;
+const CHAT_TIMEOUT_MS = 25_000;
+const CHAT_STORAGE_PREFIX = 'orderly:assistant-chat:v1:';
+
+function assistantChatStorageKey(userId: string): string {
+  return `${CHAT_STORAGE_PREFIX}${userId}`;
+}
+
+function boundedStoredMessages(messages: readonly ConversationMessage[]): ConversationMessage[] {
+  const result: ConversationMessage[] = [];
+  let characters = 0;
+  for (const message of [...messages].reverse()) {
+    if (result.length >= CHAT_STORAGE_LIMIT) break;
+    const content = message.content.slice(0, 4_000);
+    if (!content || characters + content.length > CHAT_STORAGE_CHARACTER_LIMIT) break;
+    characters += content.length;
+    result.push({
+      id: message.id.slice(0, 160) || `${message.role}-${result.length}`,
+      role: message.role,
+      content,
+    });
+  }
+  return result.reverse();
+}
+
+function readStoredAssistantMessages(userId: string): ConversationMessage[] {
+  try {
+    const parsed: unknown = JSON.parse(window.sessionStorage.getItem(assistantChatStorageKey(userId)) || '[]');
+    if (!Array.isArray(parsed)) return [];
+    return boundedStoredMessages(parsed.flatMap((value): ConversationMessage[] => {
+      if (!value || typeof value !== 'object') return [];
+      const candidate = value as Partial<ConversationMessage>;
+      if ((candidate.role !== 'assistant' && candidate.role !== 'user') || typeof candidate.content !== 'string') return [];
+      return [{
+        id: typeof candidate.id === 'string' ? candidate.id : `${candidate.role}-${Date.now()}`,
+        role: candidate.role,
+        content: candidate.content,
+      }];
+    }));
+  } catch {
+    return [];
+  }
+}
+
+function clearLegacyAssistantChatStorage(userId: string): void {
+  try {
+    window.localStorage.removeItem(assistantChatStorageKey(userId));
+  } catch {
+    // This account's older plaintext history is best-effort cleanup when storage is unavailable.
+  }
+}
+
+function nextAssistantQuotaReset(usage: NonNullable<AssistantChatResponse['usage']>, now = new Date()): number | null {
+  if (usage.remainingMonthly <= 0) {
+    return Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1);
+  }
+  if (usage.remainingDaily <= 0) {
+    return Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1);
+  }
+  return null;
+}
+
+function cleanAssistantText(value: string | null | undefined, limit = 700): string {
+  return (value || '')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, limit);
+}
+
+function isAssistantChatResponse(value: unknown): value is AssistantChatResponse {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Partial<AssistantChatResponse>;
+  return typeof candidate.reply === 'string'
+    && (candidate.normalizedCommand === null || typeof candidate.normalizedCommand === 'string')
+    && (candidate.usage === null || (
+      typeof candidate.usage === 'object'
+      && candidate.usage !== null
+      && typeof candidate.usage.remainingDaily === 'number'
+      && typeof candidate.usage.remainingMonthly === 'number'
+    ))
+    && typeof candidate.aiUsed === 'boolean';
+}
 
 function localDate(value: Date): LocalDate {
   return format(value, 'yyyy-MM-dd');
@@ -287,7 +385,7 @@ function occurrenceScheduleInput(entry: ScheduleEntry | undefined, occurrence: S
 }
 
 export function Planner() {
-  const { user, tasks, subjects, addTask, deleteTask } = useAppStore();
+  const { user, tasks, subjects, exams, addTask, deleteTask } = useAppStore();
   const plannerUsers = usePlannerStore(state => state.users);
   const upsertCommitment = usePlannerStore(state => state.upsertCommitment);
   const entriesByUser = useScheduleStore(state => state.entriesByUser);
@@ -317,12 +415,20 @@ export function Planner() {
   const [preview, setPreview] = useState<ScheduleCommandPreview | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [applying, setApplying] = useState(false);
-  const [interpreting, setInterpreting] = useState(false);
   const [undoState, setUndoState] = useState<UndoState | null>(null);
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
+  const [chatOwnerUserId, setChatOwnerUserId] = useState<string | null>(null);
+  const [isThinking, setIsThinking] = useState(false);
+  const [previewMessageId, setPreviewMessageId] = useState<string | null>(null);
+  const [usage, setUsage] = useState<AssistantChatResponse['usage']>(null);
+  const [calendarOpen, setCalendarOpen] = useState(true);
+  const [calendarExpanded, setCalendarExpanded] = useState(false);
+  const [taskDetailsOpen, setTaskDetailsOpen] = useState(false);
   const commandInputRef = useRef<HTMLTextAreaElement>(null);
-  const commandRequestRef = useRef<AbortController | null>(null);
-  const commandRequestIdRef = useRef(0);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+  const chatAbortRef = useRef<AbortController | null>(null);
+  const chatRequestIdRef = useRef(0);
+  const chatHydratedUserRef = useRef<string | null>(null);
 
   useEffect(() => {
     const refresh = () => setStoredEvents(readStoredCalendarEvents());
@@ -335,16 +441,70 @@ export function Planner() {
     };
   }, []);
 
-  useEffect(() => () => {
-    commandRequestIdRef.current += 1;
-    commandRequestRef.current?.abort();
-  }, []);
-
   useEffect(() => {
     const today = dateCarrierInTimeZone(timeZone);
     setWeekStart(startOfWeek(today, { weekStartsOn: 1 }));
     setSelectedDate(today);
   }, [timeZone]);
+
+  useEffect(() => () => {
+    chatRequestIdRef.current += 1;
+    chatAbortRef.current?.abort();
+  }, []);
+
+  useEffect(() => {
+    chatRequestIdRef.current += 1;
+    chatAbortRef.current?.abort();
+    chatAbortRef.current = null;
+    chatHydratedUserRef.current = null;
+    if (userId) clearLegacyAssistantChatStorage(userId);
+    const restored = userId ? readStoredAssistantMessages(userId) : [];
+    setUndoState(null);
+    setUsage(null);
+    setIsThinking(false);
+    setPreview(null);
+    setPreviewMessageId(null);
+    setSelectedTaskId(null);
+    setCommand('');
+    setMessages(restored);
+    setChatOwnerUserId(userId);
+    chatHydratedUserRef.current = userId;
+  }, [userId]);
+
+  useEffect(() => {
+    if (!userId || chatOwnerUserId !== userId || chatHydratedUserRef.current !== userId) return;
+    try {
+      window.sessionStorage.setItem(
+        assistantChatStorageKey(userId),
+        JSON.stringify(boundedStoredMessages(messages)),
+      );
+    } catch {
+      // Chat history is optional. The live conversation still works if storage is unavailable.
+    }
+  }, [chatOwnerUserId, messages, userId]);
+
+  useEffect(() => {
+    if (!usage) return;
+    const resetAt = nextAssistantQuotaReset(usage);
+    if (!resetAt) return;
+    let timer: number | null = null;
+    const armReset = () => {
+      const remaining = resetAt - Date.now();
+      if (remaining <= 0) {
+        setUsage(null);
+        return;
+      }
+      timer = window.setTimeout(armReset, Math.min(remaining + 1_000, 60 * 60 * 1_000));
+    };
+    armReset();
+    return () => {
+      if (timer !== null) window.clearTimeout(timer);
+    };
+  }, [usage]);
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, [isThinking, messages, preview, previewMessageId]);
 
   const entries = useMemo(
     () => selectScheduleEntriesForUser(entriesByUser, userId),
@@ -452,103 +612,179 @@ export function Planner() {
   }, [weekStart]);
 
   const prepareCommand = useCallback((value: string, taskId: string | null = null) => {
-    commandRequestRef.current?.abort();
-    commandRequestIdRef.current += 1;
-    setInterpreting(false);
     setSelectedTaskId(taskId);
     setCommand(value);
-    setPreview(null);
     window.requestAnimationFrame(() => {
-      commandInputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      commandInputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       commandInputRef.current?.focus();
     });
   }, []);
 
+  const stopThinking = useCallback(() => {
+    chatRequestIdRef.current += 1;
+    chatAbortRef.current?.abort();
+    chatAbortRef.current = null;
+    setIsThinking(false);
+  }, []);
+
   const submitCommand = useCallback(async (value = command, taskId = selectedTaskId) => {
     const normalized = value.trim();
-    if (!normalized) return;
-    commandRequestRef.current?.abort();
-    const controller = new AbortController();
-    const requestId = commandRequestIdRef.current + 1;
-    commandRequestIdRef.current = requestId;
-    commandRequestRef.current = controller;
-    setInterpreting(true);
+    if (!normalized || isThinking || chatOwnerUserId !== userId) return;
+
+    const userMessage: ConversationMessage = {
+      id: `user-${Date.now()}`,
+      role: 'user',
+      content: normalized,
+    };
+    const conversation = [...messages, userMessage].slice(-CHAT_CONTEXT_LIMIT);
+    setMessages(previous => [...previous, userMessage].slice(-CHAT_DISPLAY_LIMIT));
+    setCommand('');
     setPreview(null);
-    setCommand(normalized);
-    let interpretedCommand = normalized;
-    const timeout = window.setTimeout(() => controller.abort(), 18_000);
+    setPreviewMessageId(null);
+    setIsThinking(true);
+
+    chatAbortRef.current?.abort();
+    const controller = new AbortController();
+    chatAbortRef.current = controller;
+    const requestId = chatRequestIdRef.current + 1;
+    chatRequestIdRef.current = requestId;
+    let timedOut = false;
+    const timeout = window.setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, CHAT_TIMEOUT_MS);
+
     try {
-      const response = await fetch('/api/planner/command', {
+      const response = await fetch('/api/planner/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        cache: 'no-store',
+        signal: controller.signal,
         body: JSON.stringify({
-          prompt: normalized,
+          messages: conversation.map(message => ({ role: message.role, content: message.content })),
           context: {
-            now: context.now,
-            timeZone: context.timeZone,
+            now: new Date().toISOString(),
+            timeZone,
             selectedTaskId: taskId,
-            selectedDate: context.selectedDate,
-            availableStartTime: context.availableStartTime,
-            availableEndTime: context.availableEndTime,
-            tasks: context.tasks.slice(0, 30).map(task => ({
+            selectedDate: localDate(selectedDate),
+            availableStartTime: plannerSettings.weekendAvailableStart,
+            availableEndTime: plannerSettings.bedtime,
+            tasks: pendingTasks.slice(0, 30).map(task => ({
               id: task.id,
-              title: task.title,
-              description: task.description,
+              title: cleanAssistantText(task.title, 180),
+              description: cleanAssistantText(task.description),
               dueDate: task.due_date,
               dueTime: task.due_time,
             })),
-            occurrences: context.occurrences.slice(0, 60).map(occurrence => ({
+            exams: [...exams]
+              .sort((left, right) => left.exam_date.localeCompare(right.exam_date))
+              .slice(0, 20)
+              .map(exam => ({
+                id: exam.id,
+                title: cleanAssistantText(exam.title, 180),
+                description: cleanAssistantText(exam.description),
+                examDate: exam.exam_date,
+                subject: cleanAssistantText(
+                  subjects.find(subject => subject.id === exam.subject_id)?.name,
+                  120,
+                ) || null,
+              })),
+            occurrences: context.occurrences.slice(0, 80).map(occurrence => ({
+              id: occurrence.id,
               taskId: occurrence.taskId,
-              title: occurrence.title,
+              title: cleanAssistantText(occurrence.title, 180),
               date: occurrence.date,
               startAt: occurrence.startAt,
               endAt: occurrence.endAt,
               durationSeconds: occurrence.durationSeconds,
+              recurrence: occurrence.recurrence,
             })),
-            busy: (context.busy || []).slice(0, 60).map(interval => ({
-              title: interval.title,
+            busy: (context.busy || []).slice(0, 80).map(interval => ({
+              id: interval.id,
+              title: cleanAssistantText(interval.title, 180),
               startAt: interval.startAt,
               endAt: interval.endAt,
             })),
           },
         }),
-        signal: controller.signal,
-        cache: 'no-store',
       });
-      if (response.ok) {
-        const payload = await response.json() as { normalizedCommand?: unknown };
-        if (typeof payload.normalizedCommand === 'string' && payload.normalizedCommand.trim()) {
-          interpretedCommand = payload.normalizedCommand.trim().slice(0, 1_200);
-        }
+
+      const payload: unknown = await response.json().catch(() => null);
+      if (requestId !== chatRequestIdRef.current) return;
+      const validPayload = isAssistantChatResponse(payload);
+      if (!response.ok || !validPayload) {
+        if (validPayload) setUsage(payload.usage);
+        const errorReply = payload && typeof payload === 'object' && 'reply' in payload
+          && typeof (payload as { reply?: unknown }).reply === 'string'
+          ? (payload as { reply: string }).reply
+          : response.status === 429
+            ? 'You have reached your Assistant limit for now. Try again when your allowance resets.'
+            : 'I could not answer that right now. Please try again.';
+        throw new Error(errorReply);
       }
-    } catch {
-      if (requestId !== commandRequestIdRef.current) return;
+
+      const assistantMessageId = `assistant-${Date.now()}`;
+      setMessages(previous => [...previous, {
+        id: assistantMessageId,
+        role: 'assistant' as const,
+        content: payload.reply.trim() || 'Here is what I found.',
+      }].slice(-CHAT_DISPLAY_LIMIT));
+      setUsage(payload.usage);
+
+      if (payload.normalizedCommand) {
+        const nextPreview = interpretScheduleCommand(payload.normalizedCommand, {
+          ...context,
+          now: new Date().toISOString(),
+          selectedTaskId: taskId,
+        });
+        setPreview(nextPreview);
+        setPreviewMessageId(assistantMessageId);
+      }
+    } catch (error) {
+      if (requestId !== chatRequestIdRef.current) return;
+      if (controller.signal.aborted && !timedOut) return;
+      const content = timedOut
+        ? 'That took too long, so I stopped the request. Please try again.'
+        : error instanceof Error
+          ? error.message
+          : 'I could not answer that right now. Please try again.';
+      setMessages(previous => [...previous, {
+        id: `assistant-error-${Date.now()}`,
+        role: 'assistant' as const,
+        content,
+      }].slice(-CHAT_DISPLAY_LIMIT));
+      setCommand(current => current.trim() ? current : normalized);
     } finally {
       window.clearTimeout(timeout);
+      if (requestId === chatRequestIdRef.current) {
+        chatAbortRef.current = null;
+        setIsThinking(false);
+      }
     }
-    if (requestId !== commandRequestIdRef.current) return;
-    const commandContext = { ...context, selectedTaskId: taskId };
-    const interpretedPreview = interpretScheduleCommand(interpretedCommand, commandContext);
-    const localPreview = interpretedCommand === normalized
-      ? interpretedPreview
-      : interpretScheduleCommand(normalized, commandContext);
-    const nextPreview = interpretedPreview.status === 'ready'
-      || localPreview.status !== 'ready'
-      ? interpretedPreview
-      : localPreview;
-    setPreview(nextPreview);
-    const createdAt = Date.now();
-    setMessages(previous => [
-      ...previous,
-      { id: `user-${createdAt}`, role: 'user', text: normalized },
-      { id: `assistant-${createdAt + 1}`, role: 'assistant', text: nextPreview.summary },
-    ].slice(-8) as ConversationMessage[]);
-    setInterpreting(false);
-    commandRequestRef.current = null;
-  }, [command, context, selectedTaskId]);
+  }, [chatOwnerUserId, command, context, exams, isThinking, messages, pendingTasks, plannerSettings.bedtime, plannerSettings.weekendAvailableStart, selectedDate, selectedTaskId, subjects, timeZone, userId]);
 
   const applyPreview = useCallback(async () => {
     if (!userId || !preview || preview.status !== 'ready' || preview.actions.length === 0) return;
+    const freshPreview = interpretScheduleCommand(preview.command, {
+      ...context,
+      now: new Date().toISOString(),
+      selectedTaskId,
+    });
+    if (
+      freshPreview.status !== 'ready'
+      || JSON.stringify(freshPreview.actions) !== JSON.stringify(preview.actions)
+    ) {
+      const recheckMessageId = `assistant-recheck-${Date.now()}`;
+      setPreview(freshPreview);
+      setPreviewMessageId(recheckMessageId);
+      setMessages(previous => [...previous, {
+        id: recheckMessageId,
+        role: 'assistant' as const,
+        content: 'Your schedule changed while we were chatting, so I refreshed the proposal. Please review it once more.',
+      }].slice(-CHAT_DISPLAY_LIMIT));
+      toast.info('Proposal refreshed');
+      return;
+    }
     const before = cloneEntries(entries);
     const createdTaskIds: string[] = [];
     setApplying(true);
@@ -578,14 +814,15 @@ export function Planner() {
         createdTaskIds.push(created.id);
         applyScheduleBatch(userId, [{ type: 'upsert', taskId: created.id, input: action.schedule }]);
       }
-      setUndoState({ entries: before, createdTaskIds, label: preview.summary });
+      setUndoState({ userId, entries: before, createdTaskIds, label: preview.summary });
       setMessages(previous => [...previous, {
         id: `applied-${Date.now()}`,
-        role: 'assistant',
-        text: `Applied: ${preview.summary}`,
-      }].slice(-8) as ConversationMessage[]);
+        role: 'assistant' as const,
+        content: `Done — ${preview.summary}`,
+      }].slice(-CHAT_DISPLAY_LIMIT));
       toast.success('Schedule updated');
       setPreview(null);
+      setPreviewMessageId(null);
       setCommand('');
       setSelectedTaskId(null);
     } catch (error) {
@@ -595,17 +832,17 @@ export function Planner() {
     } finally {
       setApplying(false);
     }
-  }, [addTask, applyScheduleBatch, deleteTask, entries, preview, replaceUserSchedules, userId]);
+  }, [addTask, applyScheduleBatch, context, deleteTask, entries, preview, replaceUserSchedules, selectedTaskId, userId]);
 
   const undo = useCallback(async () => {
-    if (!userId || !undoState) return;
+    if (!userId || !undoState || undoState.userId !== userId) return;
     for (const taskId of undoState.createdTaskIds) await deleteTask(taskId);
     replaceUserSchedules(userId, cloneEntries(undoState.entries));
     setMessages(previous => [...previous, {
       id: `undo-${Date.now()}`,
-      role: 'assistant',
-      text: `Undid: ${undoState.label}`,
-    }].slice(-8) as ConversationMessage[]);
+      role: 'assistant' as const,
+      content: `Undid: ${undoState.label}`,
+    }].slice(-CHAT_DISPLAY_LIMIT));
     setUndoState(null);
     toast.success('Last schedule change undone');
   }, [deleteTask, replaceUserSchedules, undoState, userId]);
@@ -665,7 +902,7 @@ export function Planner() {
     const nextDate = localDateFromIso(nextStart.toISOString(), timeZone);
     if (!nextDate) return;
     const entry = entries.find(item => item.taskId === task.id);
-    setUndoState({ entries: cloneEntries(entries), createdTaskIds: [], label: `Move “${task.title}”` });
+    setUndoState({ userId, entries: cloneEntries(entries), createdTaskIds: [], label: `Move “${task.title}”` });
     if (!entry || occurrence.recurrence === 'none') {
       upsertTaskSchedule(userId, task.id, {
         ...occurrenceScheduleInput(entry, occurrence),
@@ -698,7 +935,7 @@ export function Planner() {
     }
     const durationSeconds = Math.max(15 * 60, Math.round((nextEnd.getTime() - nextStart.getTime()) / 1000));
     const entry = entries.find(item => item.taskId === task.id);
-    setUndoState({ entries: cloneEntries(entries), createdTaskIds: [], label: `Resize “${task.title}”` });
+    setUndoState({ userId, entries: cloneEntries(entries), createdTaskIds: [], label: `Resize “${task.title}”` });
     if (!entry || occurrence.recurrence === 'none') {
       upsertTaskSchedule(userId, task.id, {
         ...occurrenceScheduleInput(entry, occurrence),
@@ -731,7 +968,7 @@ export function Planner() {
     if (!nextDate) return;
     const entry = entries.find(candidate => candidate.taskId === occurrence.taskId);
     const durationSeconds = Math.max(15 * 60, Math.round((nextEnd.getTime() - nextStart.getTime()) / 1000));
-    setUndoState({ entries: cloneEntries(entries), createdTaskIds: [], label: `Schedule “${occurrence.title}”` });
+    setUndoState({ userId, entries: cloneEntries(entries), createdTaskIds: [], label: `Schedule “${occurrence.title}”` });
     if (occurrence.recurrence !== 'none') {
       if (!entry) {
         upsertTaskSchedule(userId, occurrence.taskId, {
@@ -766,7 +1003,7 @@ export function Planner() {
     const entry = entries.find(candidate => candidate.taskId === occurrence.taskId);
     const durationSeconds = occurrence.durationSeconds || 30 * 60;
     const nextDate = targetDate || occurrence.date;
-    setUndoState({ entries: cloneEntries(entries), createdTaskIds: [], label: `Move “${occurrence.title}” to untimed` });
+    setUndoState({ userId, entries: cloneEntries(entries), createdTaskIds: [], label: `Move “${occurrence.title}” to untimed` });
     if (occurrence.recurrence !== 'none') {
       if (!entry) {
         upsertTaskSchedule(userId, occurrence.taskId, {
@@ -794,6 +1031,37 @@ export function Planner() {
     toast.success(`${occurrence.title} moved to untimed`);
   }, [entries, occurrenceById, setOccurrenceOverride, timeZone, upsertTaskSchedule, userId]);
 
+  const startNewChat = useCallback(() => {
+    stopThinking();
+    if (userId) {
+      try {
+        window.sessionStorage.removeItem(assistantChatStorageKey(userId));
+      } catch {
+        // The in-memory conversation can still be cleared when storage is unavailable.
+      }
+    }
+    setMessages([]);
+    setCommand('');
+    setPreview(null);
+    setPreviewMessageId(null);
+    setSelectedTaskId(null);
+    window.requestAnimationFrame(() => commandInputRef.current?.focus());
+  }, [stopThinking, userId]);
+
+  const chatReady = chatOwnerUserId === userId;
+  const activeMessages = chatReady ? messages : [];
+  const activeCommand = chatReady ? command : '';
+  const activePreview = chatReady ? preview : null;
+  const activePreviewMessageId = chatReady ? previewMessageId : null;
+  const activeUsage = chatReady ? usage : null;
+  const activeIsThinking = chatReady && isThinking;
+  const quotaExhausted = Boolean(activeUsage && (activeUsage.remainingDaily <= 0 || activeUsage.remainingMonthly <= 0));
+  const showQuota = Boolean(activeUsage && (
+    activeUsage.remainingDaily <= 5
+    || activeUsage.remainingMonthly <= 20
+    || quotaExhausted
+  ));
+
   if (!userId) {
     return (
       <Card className="mx-auto mt-16 max-w-xl">
@@ -813,11 +1081,11 @@ export function Planner() {
           </span>
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Assistant</h1>
-            <p className="text-sm text-muted-foreground">Describe a change, review it, then fine-tune it on the calendar.</p>
+            <p className="text-sm text-muted-foreground">Talk through your week, then approve any schedule changes.</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {undoState && (
+          {undoState?.userId === userId && (
             <Button type="button" variant="outline" size="sm" onClick={() => void undo()}>
               <Undo2 className="h-4 w-4" /> Undo
             </Button>
@@ -837,154 +1105,89 @@ export function Planner() {
         </div>
       </header>
 
-      <Card className="overflow-hidden border-primary/20">
-        <CardHeader className="border-b border-border/40 px-5 pb-4 pt-5">
-          <div className="flex items-center gap-2">
-            <Sparkles className="h-4 w-4 text-primary" />
-            <CardTitle>What would you like to change?</CardTitle>
-          </div>
-          <p className="text-xs text-muted-foreground">Ask Orderly to add, move, repeat, resize, or find time. Nothing changes until you approve the preview.</p>
-        </CardHeader>
-        <CardContent className="space-y-3 px-5 pb-5 pt-4">
-          {messages.length > 0 && (
-            <div aria-live="polite" className="max-h-36 space-y-2 overflow-y-auto rounded-xl bg-muted/30 p-3">
-              {messages.slice(-4).map(message => (
-                <div key={message.id} className={cn('flex', message.role === 'user' ? 'justify-end' : 'justify-start')}>
-                  <p className={cn(
-                    'max-w-[88%] rounded-xl px-3 py-2 text-xs leading-relaxed',
-                    message.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-background/80 text-foreground',
-                  )}>
-                    {message.text}
-                  </p>
-                </div>
-              ))}
-            </div>
-          )}
+      <AssistantChat
+        messages={activeMessages}
+        command={activeCommand}
+        onCommandChange={setCommand}
+        onSubmit={() => void submitCommand()}
+        onStop={stopThinking}
+        onNewChat={startNewChat}
+        isThinking={activeIsThinking}
+        preview={activePreview}
+        previewMessageId={activePreviewMessageId}
+        applying={chatReady && applying}
+        onApply={() => void applyPreview()}
+        onDismissPreview={() => {
+          setPreview(null);
+          setPreviewMessageId(null);
+        }}
+        onSelectCandidate={taskId => {
+          if (!chatReady || !preview) return;
+          setSelectedTaskId(taskId);
+          setPreview(interpretScheduleCommand(preview.command, {
+            ...context,
+            now: new Date().toISOString(),
+            selectedTaskId: taskId,
+          }));
+        }}
+        examples={EXAMPLES}
+        onExampleClick={example => void submitCommand(example, null)}
+        usage={activeUsage}
+        showQuota={showQuota}
+        quotaExhausted={quotaExhausted}
+        timeZone={timeZone}
+        inputRef={commandInputRef}
+        endRef={chatEndRef}
+      />
 
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-            <Textarea
-              ref={commandInputRef}
-              value={command}
-              onChange={event => {
-                commandRequestRef.current?.abort();
-                commandRequestIdRef.current += 1;
-                setInterpreting(false);
-                setCommand(event.target.value);
-                setPreview(null);
-              }}
-              onKeyDown={event => {
-                if (event.key === 'Enter' && !event.shiftKey) {
-                  event.preventDefault();
-                  void submitCommand();
-                }
-              }}
-              placeholder="Example: Move chemistry to tomorrow at 4 pm"
-              className="min-h-16 resize-none"
-              aria-label="Schedule request"
-            />
-            <Button type="button" onClick={() => void submitCommand()} disabled={!command.trim() || interpreting} className="sm:h-16 sm:px-6">
-              {interpreting ? <RotateCcw className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-              {interpreting ? 'Thinking…' : 'Preview'}
-            </Button>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="mr-1 text-[11px] font-medium text-muted-foreground">Try:</span>
-            {EXAMPLES.map(example => (
-              <button
-                key={example}
+      <Card className="overflow-hidden">
+        <CardHeader className="flex-row items-center justify-between gap-3 px-4 py-3">
+          <button
+            type="button"
+            onClick={() => setCalendarOpen(open => !open)}
+            className="flex min-w-0 items-center gap-3 text-left"
+            aria-expanded={calendarOpen}
+          >
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+              <CalendarDays className="h-4 w-4" />
+            </span>
+            <span className="min-w-0">
+              <span className="block text-sm font-semibold">Week calendar</span>
+              <span className="block truncate text-xs text-muted-foreground">
+                {format(weekStart, 'MMM d')}–{format(addDays(weekStart, 6), 'MMM d, yyyy')}
+              </span>
+            </span>
+            {calendarOpen ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+          </button>
+          {calendarOpen && (
+            <div className="flex items-center gap-1">
+              <Button
                 type="button"
-                onClick={() => prepareCommand(example)}
-                className="rounded-full border border-border/60 bg-background/40 px-2.5 py-1 text-[10px] text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
+                variant={taskDetailsOpen ? 'secondary' : 'ghost'}
+                size="sm"
+                onClick={() => setTaskDetailsOpen(open => !open)}
               >
-                {example}
-              </button>
-            ))}
-          </div>
-
-          {preview && (
-            <div
-              aria-live="polite"
-              className={cn(
-                'rounded-xl border p-4',
-                preview.status === 'ready' ? 'border-primary/40 bg-primary/5' : 'border-amber-500/30 bg-amber-500/5',
-              )}
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Review before applying</p>
-                  <p className="mt-1 text-sm font-medium">{preview.summary}</p>
-                </div>
-                <Button type="button" variant="ghost" size="icon-sm" onClick={() => setPreview(null)} aria-label="Close preview">
-                  <X className="h-4 w-4" />
-                </Button>
-              </div>
-
-              {preview.assumptions.length > 0 && (
-                <ul className="mt-3 space-y-1 text-xs text-muted-foreground">
-                  {preview.assumptions.map(assumption => <li key={assumption}>• {assumption}</li>)}
-                </ul>
-              )}
-
-              {preview.candidates.length > 0 && (
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {preview.candidates.map(candidate => (
-                    <Button
-                      key={candidate.taskId}
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        setSelectedTaskId(candidate.taskId);
-                        void submitCommand(preview.command, candidate.taskId);
-                      }}
-                    >
-                      {candidate.title}
-                    </Button>
-                  ))}
-                </div>
-              )}
-
-              {preview.gaps.length > 0 && (
-                <div className="mt-3 flex flex-wrap gap-2 text-xs">
-                  {preview.gaps.map(gap => (
-                    <span key={gap.startAt} className="rounded-lg border border-border/60 bg-background/50 px-2.5 py-1.5">
-                      {gap.date} · {gap.label}
-                    </span>
-                  ))}
-                </div>
-              )}
-
-              {preview.occurrences.length > 0 && (
-                <div className="mt-3 grid max-h-44 gap-2 overflow-y-auto sm:grid-cols-2 lg:grid-cols-3">
-                  {preview.occurrences.map((occurrence, index) => (
-                    <div key={`${occurrence.date}-${index}`} className="rounded-lg border border-border/50 bg-background/50 p-2.5 text-xs">
-                      <p className="truncate font-medium">{occurrence.title}</p>
-                      <p className="mt-1 text-muted-foreground">
-                        {occurrence.date} · {timeLabel(occurrence.startAt, timeZone)} · {formatDuration(occurrence.durationSeconds)}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              <div className="mt-4 flex justify-end gap-2">
-                <Button type="button" variant="ghost" size="sm" onClick={() => setPreview(null)}>
-                  <X className="h-4 w-4" /> Cancel
-                </Button>
-                {preview.status === 'ready' && preview.actions.length > 0 && (
-                  <Button type="button" size="sm" onClick={() => void applyPreview()} disabled={applying}>
-                    {applying ? <RotateCcw className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-                    Apply changes
-                  </Button>
-                )}
-              </div>
+                Tasks
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                onClick={() => setCalendarExpanded(expanded => !expanded)}
+                aria-label={calendarExpanded ? 'Use compact calendar' : 'Expand calendar'}
+              >
+                {calendarExpanded ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+              </Button>
             </div>
           )}
-        </CardContent>
+        </CardHeader>
       </Card>
 
-      <div className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
+      {calendarOpen && (
+        <div className={cn(
+          'grid min-w-0 gap-5',
+          taskDetailsOpen && 'xl:grid-cols-[minmax(0,1fr)_320px]',
+        )}>
         <main className="min-w-0">
           <Card>
             <CardHeader className="flex-row items-center justify-between px-4 pb-3 pt-4">
@@ -1009,7 +1212,7 @@ export function Planner() {
                 weekStart={weekStart}
                 blocks={blocks}
                 editable
-                viewportClassName="h-[680px]"
+                viewportClassName={calendarExpanded ? 'h-[760px]' : 'h-[420px]'}
                 showSummaryHeader={false}
                 timeZone={timeZone}
                 timeZoneLabel={timeZone.split('/').pop()?.replace('_', ' ') || 'Local'}
@@ -1027,6 +1230,7 @@ export function Planner() {
           </Card>
         </main>
 
+        {taskDetailsOpen && (
         <aside className="min-w-0 self-start xl:sticky xl:top-5">
           <Card>
             <CardHeader className="flex-row items-center justify-between px-4 pb-3 pt-4">
@@ -1095,7 +1299,9 @@ export function Planner() {
             </CardContent>
           </Card>
         </aside>
-      </div>
+        )}
+        </div>
+      )}
     </div>
   );
 }

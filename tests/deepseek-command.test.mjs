@@ -73,6 +73,22 @@ test('only a bounded normalized command is accepted from DeepSeek', () => {
   );
   assert.equal(parsePlannerCommandAIJson('```json\n{}\n```'), null);
   assert.equal(parsePlannerCommandAIJson('{"explanation":"done"}'), null);
+  assert.equal(
+    parsePlannerCommandAIJson('{"normalizedCommand":"Schedule math tomorrow","applied":true}'),
+    null,
+  );
+  assert.equal(
+    parsePlannerCommandAIJson('{"normalizedCommand":"Move chemistry to Friday at 5 pm force"}'),
+    null,
+  );
+  assert.equal(
+    parsePlannerCommandAIJson('{"normalizedCommand":"Schedule Force and Motion tomorrow at 5 pm for 1 hour"}'),
+    'Schedule Force and Motion tomorrow at 5 pm for 1 hour',
+  );
+  assert.equal(
+    parsePlannerCommandAIJson('{"normalizedCommand":"Move chemistry to Friday at 5 pm even if it overlaps"}'),
+    null,
+  );
 });
 
 test('the prompt treats user and assignment text as untrusted data', () => {
@@ -89,16 +105,32 @@ test('the prompt treats user and assignment text as untrusted data', () => {
 
 test('the Assistant route keeps the API key server-side and falls back safely', async () => {
   const route = await readFile(new URL('../app/api/planner/command/route.ts', import.meta.url), 'utf8');
+  const chatRoute = await readFile(new URL('../app/api/planner/chat/route.ts', import.meta.url), 'utf8');
   const planner = await readFile(new URL('../components/planner/Planner.tsx', import.meta.url), 'utf8');
 
   assert.match(route, /process\.env\.DEEPSEEK_API_KEY/);
+  assert.match(route, /AI_ASSISTANT_ENABLED/);
   assert.match(route, /createSupabaseServerClient/);
+  assert.match(route, /reserveAssistantUsage/);
+  assert.match(route, /completeAssistantUsage/);
   assert.match(route, /status:\s*401/);
   assert.match(route, /max_tokens:\s*500/);
   assert.match(route, /normalizedCommand:\s*input\.prompt,\s*aiUsed:\s*false/);
   assert.match(route, /Cache-Control', 'no-store/);
-  assert.match(planner, /fetch\('\/api\/planner\/command'/);
-  assert.match(planner, /18_000/);
-  assert.match(planner, /interpretScheduleCommand\(interpretedCommand/);
+  assert.match(route, /request\.signal\.addEventListener\('abort'/);
+  assert.match(route, /MAX_REQUEST_BYTES = 96 \* 1024/);
+  assert.match(route, /new TextEncoder\(\)\.encode\(rawBody\)\.byteLength/);
+  assert.match(route, /providerDispatched = true/);
+  assert.match(
+    route,
+    /if \(providerDispatched\) \{\s+await completeAssistantUsage\([\s\S]*?EMPTY_PROVIDER_USAGE/,
+  );
+  assert.match(chatRoute, /process\.env\.DEEPSEEK_API_KEY/);
+  assert.match(chatRoute, /MAX_REQUEST_BYTES/);
+  assert.match(chatRoute, /reserveAssistantUsage/);
+  assert.match(chatRoute, /response_format:\s*\{ type: 'json_object' \}/);
+  assert.match(planner, /fetch\('\/api\/planner\/chat'/);
+  assert.match(planner, /CHAT_TIMEOUT_MS = 25_000/);
+  assert.match(planner, /interpretScheduleCommand\(payload\.normalizedCommand/);
   assert.doesNotMatch(planner, /DEEPSEEK_API_KEY/);
 });
