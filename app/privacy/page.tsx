@@ -75,6 +75,17 @@ export default function PrivacyPolicyPage() {
             </div>
 
             <div>
+              <h2 className="text-2xl font-semibold mb-3">AI Assistant</h2>
+              <p className="text-muted-foreground leading-relaxed">
+                When you submit a request to the Assistant, Orderly sends your request and a limited set of
+                relevant task and schedule details to DeepSeek so the request can be interpreted. This may
+                include task titles, assignment descriptions, deadlines, scheduled work, and busy times.
+                This information is sent only when you use the Assistant. The Assistant produces a preview;
+                it does not change your schedule until you approve the preview.
+              </p>
+            </div>
+
+            <div>
               <h2 className="text-2xl font-semibold mb-3">5. Data Storage and Security</h2>
               <p className="text-muted-foreground leading-relaxed">
                 Your data is stored securely using Supabase infrastructure with PostgreSQL databases. 
@@ -96,6 +107,7 @@ export default function PrivacyPolicyPage() {
                 <li>To comply with legal obligations</li>
                 <li>To protect our rights and prevent fraud</li>
                 <li>With service providers that host, secure, or support our platform</li>
+                <li>With our AI provider when you choose to use the Assistant</li>
               </ul>
             </div>
 

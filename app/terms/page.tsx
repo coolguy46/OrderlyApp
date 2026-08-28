@@ -85,6 +85,16 @@ export default function TermsOfServicePage() {
             </div>
 
             <div>
+              <h2 className="text-2xl font-semibold mb-3">AI-Assisted Scheduling</h2>
+              <p className="text-muted-foreground leading-relaxed">
+                The Assistant can interpret scheduling requests and suggest changes. AI output may be
+                incomplete or inaccurate, so you are responsible for reviewing each preview, including its
+                dates, times, durations, conflicts, and deadlines, before applying it. Orderly does not apply
+                an Assistant suggestion without your approval.
+              </p>
+            </div>
+
+            <div>
               <h2 className="text-2xl font-semibold mb-3">6. Intellectual Property</h2>
               <p className="text-muted-foreground leading-relaxed">
                 The Service and its original content (excluding content provided by users) are and will 

@@ -317,9 +317,12 @@ export function Planner() {
   const [preview, setPreview] = useState<ScheduleCommandPreview | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [applying, setApplying] = useState(false);
+  const [interpreting, setInterpreting] = useState(false);
   const [undoState, setUndoState] = useState<UndoState | null>(null);
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const commandInputRef = useRef<HTMLTextAreaElement>(null);
+  const commandRequestRef = useRef<AbortController | null>(null);
+  const commandRequestIdRef = useRef(0);
 
   useEffect(() => {
     const refresh = () => setStoredEvents(readStoredCalendarEvents());
@@ -330,6 +333,11 @@ export function Planner() {
       window.removeEventListener('storage', refresh);
       window.removeEventListener('orderly-calendar-events-changed', refresh);
     };
+  }, []);
+
+  useEffect(() => () => {
+    commandRequestIdRef.current += 1;
+    commandRequestRef.current?.abort();
   }, []);
 
   useEffect(() => {
@@ -444,6 +452,9 @@ export function Planner() {
   }, [weekStart]);
 
   const prepareCommand = useCallback((value: string, taskId: string | null = null) => {
+    commandRequestRef.current?.abort();
+    commandRequestIdRef.current += 1;
+    setInterpreting(false);
     setSelectedTaskId(taskId);
     setCommand(value);
     setPreview(null);
@@ -453,17 +464,87 @@ export function Planner() {
     });
   }, []);
 
-  const submitCommand = useCallback((value = command, taskId = selectedTaskId) => {
+  const submitCommand = useCallback(async (value = command, taskId = selectedTaskId) => {
     const normalized = value.trim();
     if (!normalized) return;
-    const nextPreview = interpretScheduleCommand(normalized, { ...context, selectedTaskId: taskId });
-    setPreview(nextPreview);
+    commandRequestRef.current?.abort();
+    const controller = new AbortController();
+    const requestId = commandRequestIdRef.current + 1;
+    commandRequestIdRef.current = requestId;
+    commandRequestRef.current = controller;
+    setInterpreting(true);
+    setPreview(null);
     setCommand(normalized);
+    let interpretedCommand = normalized;
+    const timeout = window.setTimeout(() => controller.abort(), 18_000);
+    try {
+      const response = await fetch('/api/planner/command', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: normalized,
+          context: {
+            now: context.now,
+            timeZone: context.timeZone,
+            selectedTaskId: taskId,
+            selectedDate: context.selectedDate,
+            availableStartTime: context.availableStartTime,
+            availableEndTime: context.availableEndTime,
+            tasks: context.tasks.slice(0, 30).map(task => ({
+              id: task.id,
+              title: task.title,
+              description: task.description,
+              dueDate: task.due_date,
+              dueTime: task.due_time,
+            })),
+            occurrences: context.occurrences.slice(0, 60).map(occurrence => ({
+              taskId: occurrence.taskId,
+              title: occurrence.title,
+              date: occurrence.date,
+              startAt: occurrence.startAt,
+              endAt: occurrence.endAt,
+              durationSeconds: occurrence.durationSeconds,
+            })),
+            busy: (context.busy || []).slice(0, 60).map(interval => ({
+              title: interval.title,
+              startAt: interval.startAt,
+              endAt: interval.endAt,
+            })),
+          },
+        }),
+        signal: controller.signal,
+        cache: 'no-store',
+      });
+      if (response.ok) {
+        const payload = await response.json() as { normalizedCommand?: unknown };
+        if (typeof payload.normalizedCommand === 'string' && payload.normalizedCommand.trim()) {
+          interpretedCommand = payload.normalizedCommand.trim().slice(0, 1_200);
+        }
+      }
+    } catch {
+      if (requestId !== commandRequestIdRef.current) return;
+    } finally {
+      window.clearTimeout(timeout);
+    }
+    if (requestId !== commandRequestIdRef.current) return;
+    const commandContext = { ...context, selectedTaskId: taskId };
+    const interpretedPreview = interpretScheduleCommand(interpretedCommand, commandContext);
+    const localPreview = interpretedCommand === normalized
+      ? interpretedPreview
+      : interpretScheduleCommand(normalized, commandContext);
+    const nextPreview = interpretedPreview.status === 'ready'
+      || localPreview.status !== 'ready'
+      ? interpretedPreview
+      : localPreview;
+    setPreview(nextPreview);
+    const createdAt = Date.now();
     setMessages(previous => [
       ...previous,
-      { id: `user-${Date.now()}`, role: 'user', text: normalized },
-      { id: `assistant-${Date.now() + 1}`, role: 'assistant', text: nextPreview.summary },
+      { id: `user-${createdAt}`, role: 'user', text: normalized },
+      { id: `assistant-${createdAt + 1}`, role: 'assistant', text: nextPreview.summary },
     ].slice(-8) as ConversationMessage[]);
+    setInterpreting(false);
+    commandRequestRef.current = null;
   }, [command, context, selectedTaskId]);
 
   const applyPreview = useCallback(async () => {
@@ -785,21 +866,25 @@ export function Planner() {
               ref={commandInputRef}
               value={command}
               onChange={event => {
+                commandRequestRef.current?.abort();
+                commandRequestIdRef.current += 1;
+                setInterpreting(false);
                 setCommand(event.target.value);
                 setPreview(null);
               }}
               onKeyDown={event => {
                 if (event.key === 'Enter' && !event.shiftKey) {
                   event.preventDefault();
-                  submitCommand();
+                  void submitCommand();
                 }
               }}
               placeholder="Example: Move chemistry to tomorrow at 4 pm"
               className="min-h-16 resize-none"
               aria-label="Schedule request"
             />
-            <Button type="button" onClick={() => submitCommand()} disabled={!command.trim()} className="sm:h-16 sm:px-6">
-              <Send className="h-4 w-4" /> Preview
+            <Button type="button" onClick={() => void submitCommand()} disabled={!command.trim() || interpreting} className="sm:h-16 sm:px-6">
+              {interpreting ? <RotateCcw className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+              {interpreting ? 'Thinking…' : 'Preview'}
             </Button>
           </div>
 
@@ -851,7 +936,7 @@ export function Planner() {
                       size="sm"
                       onClick={() => {
                         setSelectedTaskId(candidate.taskId);
-                        submitCommand(preview.command, candidate.taskId);
+                        void submitCommand(preview.command, candidate.taskId);
                       }}
                     >
                       {candidate.title}
