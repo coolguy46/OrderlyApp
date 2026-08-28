@@ -17,10 +17,11 @@ import { TaskCard, TaskForm } from '@/components/tasks';
 import { DashboardSchedule } from './DashboardSchedule';
 import { usePlannerStore } from '@/lib/planner/store';
 import { getDefaultPlannerSettings } from '@/lib/planner/types';
-import { localDateFromIso, taskUntimedDisplayDate } from '@/lib/schedule/selectors';
+import { buildCommitmentOccurrences } from '@/lib/planner/commitments';
+import { localDateFromIso } from '@/lib/schedule/selectors';
 import { selectDashboardTasksForDate } from '@/lib/dashboard-tasks';
 import { getDaysUntil, cn, isExamType } from '@/lib/utils';
-import { isTaskMissing, isTaskMissingFromPriorDay } from '@/lib/task-status';
+import { hasMissingTaskOnDate, isTaskMissing, isTaskMissingFromPriorDay } from '@/lib/task-status';
 import { useCurrentTime } from '@/lib/use-current-time';
 import { format, isToday, startOfMonth, endOfMonth, startOfWeek, endOfWeek, addDays } from 'date-fns';
 import Link from 'next/link';
@@ -84,7 +85,8 @@ export function Dashboard() {
   // Derive a Date from the selected string for display/comparison in the calendar UI
   const selectedDate = selectedDateStr ? new Date(selectedDateStr + 'T00:00:00') : null;
   const fallbackTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
-  const plannerSettings = (user?.id ? plannerUsers[user.id]?.settings : null)
+  const plannerRecord = user?.id ? plannerUsers[user.id] : null;
+  const plannerSettings = plannerRecord?.settings
     || getDefaultPlannerSettings(fallbackTimeZone);
   const taskDisplayOptions = useMemo(() => ({
     timeZone: plannerSettings.timeZone,
@@ -163,38 +165,15 @@ export function Dashboard() {
 
   const getEventsForDate = useCallback((date: Date) => {
     const dateStr = format(date, 'yyyy-MM-dd');
-    const dayOfWeek = date.getDay();
-    const dayTasks = tasks.filter((task) => {
-      // Exact due_date match
-      if (task.due_date && taskUntimedDisplayDate(task, taskDisplayOptions) === dateStr) return true;
-
-      // Recurring task expansion
-      if (task.recurrence && task.recurrence !== 'none' && task.status !== 'completed') {
-        const taskStartKey = toLocalDateStr(task.due_date || task.created_at, taskDisplayOptions.timeZone);
-        if (dateStr < taskStartKey) return false;
-        if (task.due_date && toLocalDateStr(task.due_date, taskDisplayOptions.timeZone) === dateStr) return false;
-
-        if (task.recurrence === 'daily') return true;
-        if (task.recurrence === 'weekly') {
-          if (task.recurrence_days && task.recurrence_days.length > 0) {
-            return task.recurrence_days.includes(dayOfWeek);
-          }
-          const taskStart = new Date(`${taskStartKey}T12:00:00`);
-          return date.getDay() === taskStart.getDay();
-        }
-        if (task.recurrence === 'monthly') {
-          const taskStart = new Date(`${taskStartKey}T12:00:00`);
-          return date.getDate() === taskStart.getDate();
-        }
-      }
-
-      return false;
-    });
+    const dayTasks = selectDashboardTasksForDate(tasks, dateStr, now, taskDisplayOptions);
     const dayExams = exams.filter((exam) => {
       return toLocalDateStr(exam.exam_date, taskDisplayOptions.timeZone) === dateStr;
     });
-    return { tasks: dayTasks, exams: dayExams };
-  }, [tasks, exams, taskDisplayOptions]);
+    const dayCommitments = (plannerRecord?.commitments || []).flatMap(commitment =>
+      buildCommitmentOccurrences(commitment, dateStr, dateStr),
+    );
+    return { tasks: dayTasks, exams: dayExams, events: dayCommitments };
+  }, [tasks, exams, now, plannerRecord?.commitments, taskDisplayOptions]);
 
   return (
     <motion.div 
@@ -455,9 +434,12 @@ export function Dashboard() {
                 {calendarDays.map((day, index) => {
                   const dayKey = format(day, 'yyyy-MM-dd');
                   const dayEvents = getEventsForDate(day);
-                  const hasEvents = dayEvents.tasks.length > 0 || dayEvents.exams.length > 0;
-                  const hasMissingTasks = dayEvents.tasks.some(task =>
-                    isTaskMissing(task, now, taskDisplayOptions.timeZone)
+                  const hasEvents = dayEvents.tasks.length > 0 || dayEvents.exams.length > 0 || dayEvents.events.length > 0;
+                  const hasMissingTasks = hasMissingTaskOnDate(
+                    tasks,
+                    dayKey,
+                    now,
+                    taskDisplayOptions.timeZone,
                   );
                   const isCurrentMonth = day.getMonth() === currentDate.getMonth();
                   return (
@@ -487,6 +469,9 @@ export function Dashboard() {
                           ))}
                           {dayEvents.exams.slice(0, 1).map((_, i) => (
                             <div key={`e-${i}`} className="w-1 h-1 rounded-full bg-purple-500" />
+                          ))}
+                          {dayEvents.events.slice(0, 1).map((event) => (
+                            <div key={event.id} className="h-1 w-1 rounded-full bg-cyan-400" />
                           ))}
                         </div>
                       )}

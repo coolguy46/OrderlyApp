@@ -69,14 +69,19 @@ test('tomorrow-during-school work belongs to today', () => {
 
 test('a school-time task returns on its due day once overdue', () => {
   const assignment = task('today-at-school', '2026-08-27T15:00:00.000Z');
+  const afterDeadline = new Date('2026-08-27T15:01:00.000Z');
 
   assert.deepEqual(
     selectDashboardTasksForDate([assignment], '2026-08-27', new Date('2026-08-27T14:59:00.000Z'), options),
     [],
   );
   assert.deepEqual(
-    selectDashboardTasksForDate([assignment], '2026-08-27', new Date('2026-08-27T15:01:00.000Z'), options)
+    selectDashboardTasksForDate([assignment], '2026-08-27', afterDeadline, options)
       .map(item => item.id),
     ['today-at-school'],
+  );
+  assert.deepEqual(
+    selectDashboardTasksForDate([assignment], '2026-08-26', afterDeadline, options),
+    [],
   );
 });

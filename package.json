@@ -8,6 +8,7 @@
     "start": "next start",
     "test:auth": "node --test --experimental-strip-types tests/auth-lifecycle.test.mjs tests/auth-source-regressions.test.mjs",
     "test:canvas-sync": "node --test --experimental-strip-types tests/canvas-sync-schedule.test.mjs",
+    "test:assistant-command-fallback": "node --test --experimental-strip-types tests/assistant-command-fallback.test.mjs",
     "test:task-status": "node --test --experimental-strip-types tests/task-status.test.mjs"
   },
   "dependencies": {

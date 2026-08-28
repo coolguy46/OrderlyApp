@@ -1,8 +1,7 @@
 import type { Task } from './supabase/types.ts';
-import { isTaskMissing, taskDueAt } from './task-status.ts';
+import { taskDueAt, taskMissingDate } from './task-status.ts';
 import {
   localDateFromIso,
-  taskDeadlineDate,
   taskUntimedDisplayDate,
   type TaskUntimedDisplayDateOptions,
 } from './schedule/selectors.ts';
@@ -47,9 +46,8 @@ export function selectDashboardTasksForDate(
 ): Task[] {
   return tasks
     .filter(task => {
-      if (isTaskMissing(task, now, options.timeZone)) {
-        return taskDeadlineDate(task, options.timeZone) === date;
-      }
+      const missingDate = taskMissingDate(task, now, options.timeZone);
+      if (missingDate) return missingDate === date;
       if (task.due_date && taskUntimedDisplayDate(task, options) === date) return true;
       return recurringTaskOccursOn(task, date, options.timeZone);
     })

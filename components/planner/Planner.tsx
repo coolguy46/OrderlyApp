@@ -35,11 +35,13 @@ import {
 import { usePlannerStore } from '@/lib/planner/store';
 import { getDefaultPlannerSettings, type PlannerSettings, type RecurringCommitmentInput } from '@/lib/planner/types';
 import {
+  interpretScheduleCommand,
   interpretScheduleCommands,
   type ScheduleCommandBusyInterval,
   type ScheduleCommandContext,
   type ScheduleCommandPreview,
 } from '@/lib/schedule/commands';
+import { recoverExplicitRangeFromFalseSchoolConflict } from '@/lib/schedule/assistant-command-fallback';
 import {
   addLocalDays,
   buildScheduleOccurrences,
@@ -880,11 +882,24 @@ export function Planner() {
       const assistantMessageId = `assistant-${Date.now()}`;
       let assistantReply = payload.reply.trim() || 'Here is what I found.';
       if (payload.normalizedCommands.length > 0) {
-        const nextPreview = interpretScheduleCommands(payload.normalizedCommands, {
+        const commandContext = {
           ...context,
           now: new Date().toISOString(),
           selectedTaskId: taskId,
-        });
+        };
+        let nextPreview = interpretScheduleCommands(payload.normalizedCommands, commandContext);
+        if (payload.normalizedCommands.length === 1) {
+          const normalizedCommand = payload.normalizedCommands[0];
+          const recovery = recoverExplicitRangeFromFalseSchoolConflict({
+            messages: conversation,
+            normalizedCommand,
+            normalizedPreview: interpretScheduleCommand(normalizedCommand, commandContext),
+            interpret: candidate => interpretScheduleCommand(candidate, commandContext),
+          });
+          if (recovery.recovered) {
+            nextPreview = interpretScheduleCommands([recovery.command], commandContext);
+          }
+        }
         if (nextPreview.status === 'ready' && nextPreview.actions.length > 0) {
           setPreview(nextPreview);
           setPreviewValidatedLocalDate(localDate(dateCarrierInTimeZone(timeZone)));

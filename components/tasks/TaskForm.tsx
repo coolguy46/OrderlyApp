@@ -23,11 +23,12 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Save, Plus, Sparkles, Calendar, Tag, Flag, BookOpen, FileText, Zap, Repeat, Clock, Trash2, Timer } from 'lucide-react';
+import { Save, Plus, Sparkles, Calendar, CalendarDays, Tag, Flag, BookOpen, FileText, Zap, Repeat, Clock, Trash2, Timer } from 'lucide-react';
 import { calculateSuggestedPriority } from '@/lib/utils';
 import { cn } from '@/lib/utils';
 import { useScheduleStore } from '@/lib/schedule/store';
 import { usePlannerStore } from '@/lib/planner/store';
+import type { CommitmentKind } from '@/lib/planner/types';
 import { toast } from 'sonner';
 import {
   DEFAULT_SCHEDULE_DURATION_SECONDS,
@@ -50,9 +51,26 @@ const SUBJECT_COLORS = [
   '#eab308', '#22c55e', '#14b8a6', '#06b6d4', '#3b82f6'
 ];
 
+const EVENT_COLORS = ['#6366f1', '#8b5cf6', '#ec4899', '#f97316', '#14b8a6', '#3b82f6'];
+const WEEK_DAYS = [
+  { label: 'Mon', value: 1 },
+  { label: 'Tue', value: 2 },
+  { label: 'Wed', value: 3 },
+  { label: 'Thu', value: 4 },
+  { label: 'Fri', value: 5 },
+  { label: 'Sat', value: 6 },
+  { label: 'Sun', value: 0 },
+] as const;
+
+function weekdayForLocalDate(value: string): number {
+  const [year, month, day] = value.split('-').map(Number);
+  return new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+}
+
 export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
   const { addTask, updateTask, subjects, addSubject, deleteSubject, user } = useAppStore();
   const plannerUsers = usePlannerStore(state => state.users);
+  const upsertCommitment = usePlannerStore(state => state.upsertCommitment);
   const timeZone = (user?.id ? plannerUsers[user.id]?.settings.timeZone : null)
     || Intl.DateTimeFormat().resolvedOptions().timeZone
     || 'UTC';
@@ -85,6 +103,13 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
   const [scheduleError, setScheduleError] = useState('');
   const [recurrence, setRecurrence] = useState<'none' | 'daily' | 'weekly' | 'monthly'>('none');
   const [recurrenceDays, setRecurrenceDays] = useState<number[]>([]);
+  const [formMode, setFormMode] = useState<'task' | 'event'>('task');
+  const [eventKind, setEventKind] = useState<CommitmentKind>('personal');
+  const [eventDate, setEventDate] = useState('');
+  const [eventStartTime, setEventStartTime] = useState('');
+  const [eventEndTime, setEventEndTime] = useState('');
+  const [eventRepeatDays, setEventRepeatDays] = useState<number[]>([]);
+  const [eventColor, setEventColor] = useState(EVENT_COLORS[0]);
   
   const [showNewSubject, setShowNewSubject] = useState(false);
   const [newSubjectName, setNewSubjectName] = useState('');
@@ -106,6 +131,7 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
 
   useEffect(() => {
     if (task) {
+      setFormMode('task');
       setTitle(task.title);
       setDescription(task.description || '');
       setPriority(task.priority);
@@ -168,6 +194,45 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
     e.preventDefault();
     
     if (!title.trim()) return;
+
+    if (formMode === 'event' && !task) {
+      if (!user?.id) {
+        setScheduleError('Sign in before creating an event.');
+        return;
+      }
+      if (!eventDate || !eventStartTime || !eventEndTime) {
+        setScheduleError('Choose the event date, start time, and end time.');
+        return;
+      }
+      if (eventStartTime === eventEndTime) {
+        setScheduleError('The event start and end time cannot be the same.');
+        return;
+      }
+
+      const repeatsWeekly = eventRepeatDays.length > 0;
+      const daysOfWeek = repeatsWeekly
+        ? [...eventRepeatDays].sort((left, right) => left - right)
+        : [weekdayForLocalDate(eventDate)];
+      upsertCommitment(user.id, {
+        id: `event-${crypto.randomUUID()}`,
+        title: title.trim(),
+        kind: eventKind,
+        daysOfWeek,
+        startTime: eventStartTime,
+        endTime: eventEndTime,
+        startDate: eventDate,
+        endDate: repeatsWeekly ? null : eventDate,
+        timeZone,
+        enabled: true,
+        color: eventColor,
+        updatedAt: new Date().toISOString(),
+        occurrenceOverrides: {},
+      });
+      toast.success(repeatsWeekly ? 'Repeating event created' : 'Event created');
+      onClose();
+      resetForm();
+      return;
+    }
 
     let durationSeconds: number | null = null;
     if (durationInput.trim()) {
@@ -295,6 +360,13 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
     setScheduleError('');
     setRecurrence('none');
     setRecurrenceDays([]);
+    setFormMode('task');
+    setEventKind('personal');
+    setEventDate(localDateFromIso(new Date().toISOString(), timeZone) || '');
+    setEventStartTime('');
+    setEventEndTime('');
+    setEventRepeatDays([]);
+    setEventColor(EVENT_COLORS[0]);
     setShowNewSubject(false);
     setNewSubjectName('');
     setSubjectSelectOpen(false);
@@ -321,10 +393,14 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
               </div>
               <div>
                 <DialogTitle className="text-lg font-bold">
-                  {task ? 'Edit Task' : 'New Task'}
+                  {task ? 'Edit Task' : formMode === 'event' ? 'New Event' : 'New Task'}
                 </DialogTitle>
                 <DialogDescription className="text-xs mt-0.5">
-                  {task ? 'Update the details below' : 'Fill in the details to create a task'}
+                  {task
+                    ? 'Update the details below'
+                    : formMode === 'event'
+                      ? 'Add a class, game, meeting, or fixed commitment'
+                      : 'Fill in the details to create a task'}
                 </DialogDescription>
               </div>
             </div>
@@ -332,6 +408,38 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
         </div>
         
         <form onSubmit={handleSubmit} noValidate className="px-6 pb-6 space-y-4">
+          {!task && (
+            <div className="grid grid-cols-2 rounded-xl border border-border/50 bg-muted/20 p-1" role="tablist" aria-label="Create item type">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={formMode === 'task'}
+                onClick={() => { setFormMode('task'); setScheduleError(''); }}
+                className={cn(
+                  'flex h-9 items-center justify-center gap-2 rounded-lg text-sm font-medium transition-colors',
+                  formMode === 'task' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
+                )}
+              >
+                <FileText className="h-4 w-4" /> Task
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={formMode === 'event'}
+                onClick={() => {
+                  setFormMode('event');
+                  setScheduleError('');
+                  if (!eventDate) setEventDate(localDateFromIso(new Date().toISOString(), timeZone) || '');
+                }}
+                className={cn(
+                  'flex h-9 items-center justify-center gap-2 rounded-lg text-sm font-medium transition-colors',
+                  formMode === 'event' ? 'bg-indigo-500 text-white shadow-sm' : 'text-muted-foreground hover:text-foreground',
+                )}
+              >
+                <CalendarDays className="h-4 w-4" /> Event
+              </button>
+            </div>
+          )}
           {/* Title */}
           <div className="space-y-1.5">
             <Label htmlFor="title" className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
@@ -340,7 +448,7 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
             </Label>
             <Input
               id="title"
-              placeholder="What needs to be done?"
+              placeholder={formMode === 'event' ? 'What is the event?' : 'What needs to be done?'}
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               className="h-10 bg-muted/30 border-border/50 focus:bg-background"
@@ -348,7 +456,7 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
           </div>
 
           {/* Description */}
-          <div className="space-y-1.5">
+          {formMode === 'task' && <div className="space-y-1.5">
             <Label htmlFor="description" className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
               <BookOpen className="w-3 h-3" />
               Description
@@ -362,7 +470,9 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
               rows={2}
               className="resize-none bg-muted/30 border-border/50 focus:bg-background"
             />
-          </div>
+          </div>}
+
+          {formMode === 'task' ? <>
 
           {/* Priority & Status row */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -736,6 +846,119 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
             )}
           </div>
 
+          </> : <>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  <Tag className="h-3 w-3" /> Event type
+                </Label>
+                <Select value={eventKind} onValueChange={value => setEventKind(value as CommitmentKind)}>
+                  <SelectTrigger className="h-9 border-border/50 bg-muted/30"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="class">Class</SelectItem>
+                    <SelectItem value="sports">Game / Sports</SelectItem>
+                    <SelectItem value="appointment">Appointment</SelectItem>
+                    <SelectItem value="work">Work</SelectItem>
+                    <SelectItem value="personal">Personal</SelectItem>
+                    <SelectItem value="other">Other</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="eventDate" className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  <Calendar className="h-3 w-3" /> Date
+                </Label>
+                <Input
+                  id="eventDate"
+                  type="date"
+                  value={eventDate}
+                  onChange={event => { setEventDate(event.target.value); setScheduleError(''); }}
+                  className="h-9 border-border/50 bg-muted/30"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="eventStartTime" className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  <Clock className="h-3 w-3" /> Start time
+                </Label>
+                <Input
+                  id="eventStartTime"
+                  type="time"
+                  value={eventStartTime}
+                  onChange={event => { setEventStartTime(event.target.value); setScheduleError(''); }}
+                  className="h-9 border-border/50 bg-muted/30"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="eventEndTime" className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  <Clock className="h-3 w-3" /> End time
+                </Label>
+                <Input
+                  id="eventEndTime"
+                  type="time"
+                  value={eventEndTime}
+                  onChange={event => { setEventEndTime(event.target.value); setScheduleError(''); }}
+                  className="h-9 border-border/50 bg-muted/30"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2 rounded-xl border border-border/40 bg-muted/15 p-3">
+              <div>
+                <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  <Repeat className="h-3 w-3" /> Repeat weekly
+                </div>
+                <p className="mt-1 text-[11px] text-muted-foreground/70">
+                  Select the days this event repeats. Leave every day unchecked for a one-time event.
+                </p>
+              </div>
+              <div className="grid grid-cols-7 gap-1.5">
+                {WEEK_DAYS.map(day => {
+                  const selected = eventRepeatDays.includes(day.value);
+                  return (
+                    <button
+                      key={day.label}
+                      type="button"
+                      role="checkbox"
+                      aria-checked={selected}
+                      onClick={() => setEventRepeatDays(previous => selected
+                        ? previous.filter(value => value !== day.value)
+                        : [...previous, day.value])}
+                      className={cn(
+                        'h-9 rounded-lg border text-[11px] font-semibold transition-colors sm:text-xs',
+                        selected
+                          ? 'border-indigo-400 bg-indigo-500 text-white'
+                          : 'border-border/50 bg-background/40 text-muted-foreground hover:text-foreground',
+                      )}
+                    >
+                      {day.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Color</Label>
+              <div className="flex gap-2">
+                {EVENT_COLORS.map(color => (
+                  <button
+                    key={color}
+                    type="button"
+                    aria-label={`Use ${color} for this event`}
+                    onClick={() => setEventColor(color)}
+                    className={cn('h-6 w-6 rounded-full transition-transform', eventColor === color && 'scale-110 ring-2 ring-white/70 ring-offset-2 ring-offset-background')}
+                    style={{ backgroundColor: color }}
+                  />
+                ))}
+              </div>
+            </div>
+
+            {scheduleError && <p role="alert" className="text-xs text-red-400">{scheduleError}</p>}
+          </>}
+
           {/* Actions */}
           <div className="flex gap-2 pt-3 border-t border-border/30">
             <Button
@@ -755,7 +978,7 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
               ) : (
                 <>
                   <Plus className="w-4 h-4" />
-                  Create Task
+                  {formMode === 'event' ? 'Create Event' : 'Create Task'}
                 </>
               )}
             </Button>

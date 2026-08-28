@@ -18,6 +18,7 @@ import {
 } from 'date-fns';
 import {
   CalendarDays,
+  CalendarClock,
   ChevronLeft,
   ChevronRight,
   CircleDot,
@@ -42,8 +43,9 @@ import { useScheduleStore } from '@/lib/schedule/store';
 import type { ScheduleEntry } from '@/lib/schedule/types';
 import { getDefaultPlannerSettings } from '@/lib/planner/types';
 import { usePlannerStore } from '@/lib/planner/store';
+import { buildCommitmentOccurrences } from '@/lib/planner/commitments';
 import { cn, isExamType } from '@/lib/utils';
-import { isTaskMissing } from '@/lib/task-status';
+import { hasMissingTaskOnDate, isTaskMissing, taskMissingDate } from '@/lib/task-status';
 import { useCurrentTime } from '@/lib/use-current-time';
 
 type TaskCalendarMode = 'week' | 'month';
@@ -51,6 +53,15 @@ type TaskCalendarMode = 'week' | 'month';
 interface TaskCalendarDay {
   tasks: Task[];
   exams: Exam[];
+  events: CalendarEventItem[];
+}
+
+interface CalendarEventItem {
+  id: string;
+  title: string;
+  startTime: string;
+  endTime: string;
+  color: string;
 }
 
 const WEEK_STARTS_ON = 1 as const;
@@ -73,8 +84,11 @@ function taskOccursOn(
   date: Date,
   scheduleEntry: ScheduleEntry | undefined,
   displayOptions: TaskUntimedDisplayDateOptions,
+  currentTime: Date,
 ): boolean {
   const dateKey = format(date, 'yyyy-MM-dd');
+  const missingDateKey = taskMissingDate(task, currentTime, displayOptions.timeZone);
+  if (missingDateKey) return missingDateKey === dateKey;
   const dueDateKey = taskUntimedDisplayDate(task, displayOptions);
   if (dueDateKey === dateKey) return true;
   const recurrence = scheduleEntry?.recurrence || task.recurrence || 'none';
@@ -213,6 +227,31 @@ function ExamDeadlineChip({ exam, subject, compact = false }: { exam: Exam; subj
   );
 }
 
+function EventChip({ event, compact = false }: { event: CalendarEventItem; compact?: boolean }) {
+  const formatClock = (value: string) => {
+    const [hours, minutes] = value.split(':').map(Number);
+    return format(new Date(2000, 0, 1, hours, minutes), 'h:mm a');
+  };
+  return (
+    <div
+      className={cn('overflow-hidden rounded-md border px-2 py-1.5', compact && 'px-1.5 py-1')}
+      style={{ borderColor: `${event.color}70`, backgroundColor: `${event.color}18` }}
+    >
+      <div className="flex min-w-0 items-start gap-1.5">
+        <CalendarClock className="mt-0.5 h-3 w-3 shrink-0" style={{ color: event.color }} />
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-[11px] font-medium leading-tight">{event.title}</p>
+          {!compact && (
+            <p className="mt-0.5 truncate text-[9px] text-muted-foreground">
+              {formatClock(event.startTime)}–{formatClock(event.endTime)}
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function TaskCalendar() {
   const { tasks, exams, subjects, user } = useAppStore();
   const entriesByUser = useScheduleStore(state => state.entriesByUser);
@@ -236,6 +275,7 @@ export function TaskCalendar() {
   }, [setActiveUser, user?.id]);
 
   const plannerRecord = user?.id ? plannerUsers[user.id] : null;
+  const commitments = plannerRecord?.commitments || [];
   const fallbackTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
   const plannerSettings = plannerRecord?.settings || getDefaultPlannerSettings(fallbackTimeZone);
   const timeZone = plannerSettings.timeZone;
@@ -277,18 +317,38 @@ export function TaskCalendar() {
 
   const itemsByDate = useMemo(() => {
     const result = new Map<string, TaskCalendarDay>();
+    const firstVisibleDate = visibleDays[0] ? format(visibleDays[0], 'yyyy-MM-dd') : null;
+    const lastVisibleDate = visibleDays.length > 0 ? format(visibleDays[visibleDays.length - 1], 'yyyy-MM-dd') : null;
+    const calendarEvents = new Map<string, CalendarEventItem[]>();
+    if (firstVisibleDate && lastVisibleDate) {
+      for (const commitment of commitments) {
+        for (const occurrence of buildCommitmentOccurrences(commitment, firstVisibleDate, lastVisibleDate)) {
+          const values = calendarEvents.get(occurrence.date) || [];
+          values.push({
+            id: occurrence.id,
+            title: commitment.title,
+            startTime: occurrence.startTime,
+            endTime: occurrence.endTime,
+            color: commitment.color || '#6366f1',
+          });
+          calendarEvents.set(occurrence.date, values);
+        }
+      }
+    }
     for (const day of visibleDays) {
       const key = format(day, 'yyyy-MM-dd');
       const dayTasks = tasks
-        .filter(task => taskOccursOn(task, day, scheduleByTaskId.get(task.id), displayOptions))
+        .filter(task => taskOccursOn(task, day, scheduleByTaskId.get(task.id), displayOptions, now))
         .sort((left, right) => taskTimeSortValue(left, timeZone) - taskTimeSortValue(right, timeZone) || left.title.localeCompare(right.title));
       const dayExams = exams
         .filter(exam => localDateKey(exam.exam_date) === key)
         .sort((left, right) => left.exam_date.localeCompare(right.exam_date));
-      result.set(key, { tasks: dayTasks, exams: dayExams });
+      const dayEvents = (calendarEvents.get(key) || [])
+        .sort((left, right) => left.startTime.localeCompare(right.startTime) || left.title.localeCompare(right.title));
+      result.set(key, { tasks: dayTasks, exams: dayExams, events: dayEvents });
     }
     return result;
-  }, [displayOptions, exams, scheduleByTaskId, tasks, timeZone, visibleDays]);
+  }, [commitments, displayOptions, exams, now, scheduleByTaskId, tasks, timeZone, visibleDays]);
 
   const navigate = (direction: -1 | 1) => {
     if (!currentDate) return;
@@ -339,7 +399,7 @@ export function TaskCalendar() {
           </div>
           <Button type="button" size="sm" onClick={() => setTaskFormOpen(true)} className="h-8 px-2.5 text-xs">
             <Plus className="h-3.5 w-3.5" />
-            <span className="hidden sm:inline">New Task</span>
+            <span className="hidden sm:inline">New</span>
           </Button>
         </div>
       </div>
@@ -360,12 +420,13 @@ export function TaskCalendar() {
                 <div className="grid grid-cols-7">
                   {visibleDays.map(day => {
                     const key = format(day, 'yyyy-MM-dd');
-                    const items = itemsByDate.get(key) || { tasks: [], exams: [] };
-                    const allCount = items.tasks.length + items.exams.length;
-                    const visibleTasks = items.tasks.slice(0, 3);
-                    const visibleExams = items.exams.slice(0, Math.max(0, 4 - visibleTasks.length));
-                    const shown = visibleTasks.length + visibleExams.length;
-                    const hasMissingTasks = items.tasks.some(task => isTaskMissing(task, now, timeZone));
+                    const items = itemsByDate.get(key) || { tasks: [], exams: [], events: [] };
+                    const allCount = items.tasks.length + items.exams.length + items.events.length;
+                    const visibleEvents = items.events.slice(0, 2);
+                    const visibleTasks = items.tasks.slice(0, Math.max(0, 4 - visibleEvents.length));
+                    const visibleExams = items.exams.slice(0, Math.max(0, 4 - visibleEvents.length - visibleTasks.length));
+                    const shown = visibleTasks.length + visibleExams.length + visibleEvents.length;
+                    const hasMissingTasks = hasMissingTaskOnDate(tasks, key, now, timeZone);
                     return (
                       <div
                         key={key}
@@ -386,6 +447,7 @@ export function TaskCalendar() {
                           {allCount > 0 && <span className="text-[9px] text-muted-foreground">{allCount}</span>}
                         </div>
                         <div className="space-y-1">
+                          {visibleEvents.map(event => <EventChip key={event.id} event={event} compact />)}
                           {visibleTasks.map(task => (
                             <TaskDeadlineChip key={task.id} task={task} subject={task.subject_id ? subjectById.get(task.subject_id) : undefined} compact displayDateKey={key} timeZone={timeZone} currentTime={now} onClick={() => setDetailTaskId(task.id)} />
                           ))}
@@ -413,8 +475,8 @@ export function TaskCalendar() {
                 <div className="grid grid-cols-7">
                   {visibleDays.map(day => {
                     const key = format(day, 'yyyy-MM-dd');
-                    const items = itemsByDate.get(key) || { tasks: [], exams: [] };
-                    const hasMissingTasks = items.tasks.some(task => isTaskMissing(task, now, timeZone));
+                    const items = itemsByDate.get(key) || { tasks: [], exams: [], events: [] };
+                    const hasMissingTasks = hasMissingTaskOnDate(tasks, key, now, timeZone);
                     return (
                       <div key={key} className={cn(
                         'min-h-[calc(100dvh-15.5rem)] border-r border-border/45 p-2 last:border-r-0',
@@ -427,13 +489,14 @@ export function TaskCalendar() {
                           </span>
                         </div>
                         <div className="space-y-1.5">
+                          {items.events.map(event => <EventChip key={event.id} event={event} />)}
                           {items.tasks.map(task => (
                             <TaskDeadlineChip key={task.id} task={task} subject={task.subject_id ? subjectById.get(task.subject_id) : undefined} displayDateKey={key} timeZone={timeZone} currentTime={now} onClick={() => setDetailTaskId(task.id)} />
                           ))}
                           {items.exams.map(exam => (
                             <ExamDeadlineChip key={exam.id} exam={exam} subject={exam.subject_id ? subjectById.get(exam.subject_id) : undefined} />
                           ))}
-                          {items.tasks.length === 0 && items.exams.length === 0 && (
+                          {items.tasks.length === 0 && items.exams.length === 0 && items.events.length === 0 && (
                             <div className="flex min-h-24 flex-col items-center justify-center text-center text-[10px] text-muted-foreground/60">
                               <CalendarDays className="mb-1 h-4 w-4" />
                               Nothing to handle
@@ -453,6 +516,7 @@ export function TaskCalendar() {
       <div className="flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground">
         <Badge variant="outline" className="gap-1 text-[10px]"><CircleDot className="h-2.5 w-2.5" /> Task deadline</Badge>
         <Badge variant="outline" className="gap-1 text-[10px]"><GraduationCap className="h-2.5 w-2.5" /> Exam</Badge>
+        <Badge variant="outline" className="gap-1 text-[10px]"><CalendarClock className="h-2.5 w-2.5" /> Event</Badge>
       </div>
 
       <TaskForm isOpen={taskFormOpen} onClose={() => setTaskFormOpen(false)} />
