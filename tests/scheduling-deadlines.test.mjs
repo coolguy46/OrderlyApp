@@ -267,6 +267,146 @@ test('Assistant command bundles stage every change atomically and catch internal
   assert.match(incomplete.summary, /change 2 needs attention/i);
 });
 
+test('Assistant bundles keep untouched recurring occurrences busy after an occurrence move', () => {
+  const recurringTask = {
+    id: 'recurring-review',
+    title: 'Recurring Review',
+    status: 'pending',
+    recurrence: 'daily',
+    recurrence_days: null,
+    due_date: null,
+    due_time: null,
+  };
+  const entry = {
+    id: 'entry-recurring-review',
+    userId: 'user-1',
+    taskId: recurringTask.id,
+    scheduledDate: '2026-08-27',
+    startAt: '2026-08-27T17:00:00.000Z',
+    durationSeconds: 3600,
+    recurrence: 'daily',
+    recurrenceDays: null,
+    recurrenceEndDate: '2026-08-28',
+    occurrenceOverrides: {},
+    createdAt: '2026-08-27T00:00:00.000Z',
+    updatedAt: '2026-08-27T00:00:00.000Z',
+  };
+  const occurrence = (date, startAt) => ({
+    id: `occurrence-${date}`,
+    entryId: entry.id,
+    taskId: recurringTask.id,
+    task: recurringTask,
+    title: recurringTask.title,
+    description: null,
+    subjectId: null,
+    subject: null,
+    color: null,
+    date,
+    recurrenceSourceDate: date,
+    startAt,
+    endAt: new Date(new Date(startAt).getTime() + 3_600_000).toISOString(),
+    durationSeconds: 3600,
+    timed: true,
+    virtual: true,
+    recurrence: 'daily',
+  });
+  const context = {
+    now: '2026-08-27T12:00:00.000Z',
+    timeZone: 'UTC',
+    tasks: [recurringTask],
+    entries: [entry],
+    occurrences: [
+      occurrence('2026-08-27', '2026-08-27T17:00:00.000Z'),
+      occurrence('2026-08-28', '2026-08-28T17:00:00.000Z'),
+    ],
+    busy: [],
+  };
+
+  const preview = interpretScheduleCommands([
+    'Move Recurring Review today at 7 pm',
+    'Schedule workout tomorrow at 5:30 pm for 30 minutes',
+  ], context);
+
+  assert.equal(preview.status, 'clarification');
+  assert.deepEqual(preview.actions, []);
+  assert.match(preview.summary, /change 2 needs attention/i);
+  assert.match(preview.summary, /overlaps “Recurring Review”/i);
+});
+
+test('resize keeps the effective occurrence date and start for later bundle collision checks', () => {
+  const recurringTask = {
+    id: 'focus-block',
+    title: 'Focus Block',
+    status: 'pending',
+    recurrence: 'daily',
+    recurrence_days: null,
+    due_date: null,
+    due_time: null,
+  };
+  const entry = {
+    id: 'entry-focus-block',
+    userId: 'user-1',
+    taskId: recurringTask.id,
+    scheduledDate: '2026-08-27',
+    startAt: '2026-08-27T17:00:00.000Z',
+    durationSeconds: 1800,
+    recurrence: 'daily',
+    recurrenceDays: null,
+    recurrenceEndDate: '2026-08-28',
+    occurrenceOverrides: {
+      '2026-08-27': {
+        scheduledDate: '2026-08-28',
+        startAt: '2026-08-28T21:00:00.000Z',
+      },
+    },
+    createdAt: '2026-08-27T00:00:00.000Z',
+    updatedAt: '2026-08-27T00:00:00.000Z',
+  };
+  const movedOccurrence = {
+    id: 'occurrence-focus-block-2026-08-27',
+    entryId: entry.id,
+    taskId: recurringTask.id,
+    task: recurringTask,
+    title: recurringTask.title,
+    description: null,
+    subjectId: null,
+    subject: null,
+    color: null,
+    date: '2026-08-28',
+    recurrenceSourceDate: '2026-08-27',
+    startAt: '2026-08-28T21:00:00.000Z',
+    endAt: '2026-08-28T21:30:00.000Z',
+    durationSeconds: 1800,
+    timed: true,
+    virtual: true,
+    recurrence: 'daily',
+  };
+  const context = {
+    now: '2026-08-27T12:00:00.000Z',
+    timeZone: 'UTC',
+    tasks: [recurringTask],
+    entries: [entry],
+    occurrences: [movedOccurrence],
+    busy: [],
+  };
+
+  const resized = interpretScheduleCommand('Resize Focus Block today to 2 hours', context);
+  assert.equal(resized.status, 'ready');
+  assert.equal(resized.occurrences.length, 1);
+  assert.equal(resized.occurrences[0].date, '2026-08-28');
+  assert.equal(resized.occurrences[0].startAt, '2026-08-28T21:00:00.000Z');
+  assert.equal(resized.occurrences[0].durationSeconds, 7200);
+
+  const bundled = interpretScheduleCommands([
+    'Resize Focus Block today to 2 hours',
+    'Schedule workout tomorrow at 10 pm for 30 minutes',
+  ], context);
+  assert.equal(bundled.status, 'clarification');
+  assert.deepEqual(bundled.actions, []);
+  assert.match(bundled.summary, /change 2 needs attention/i);
+  assert.match(bundled.summary, /overlaps “Focus Block”/i);
+});
+
 test('direct scheduling surfaces deadline misses as warnings instead of returning early', async () => {
   const [planner, calendar, taskForm, store] = await Promise.all([
     readFile(join(projectRoot, 'components/planner/Planner.tsx'), 'utf8'),

@@ -443,3 +443,17 @@ test('chat route is authenticated, usage-tracked, per-minute limited, abortable,
   assert.doesNotMatch(route, /NEXT_PUBLIC_DEEPSEEK/);
   assert.doesNotMatch(route, /applyScheduleBatch|upsertTaskSchedule|addTask\(/);
 });
+
+test('chat route supports legacy single-command clients without partially exposing command bundles', async () => {
+  const route = await readFile(
+    new URL('../app/api/planner/chat/route.ts', import.meta.url),
+    'utf8',
+  );
+  assert.match(route, /normalizedCommand: string \| null/);
+  assert.match(
+    route,
+    /function legacyNormalizedCommand\(commands: readonly string\[\]\): string \| null \{[\s\S]*?commands\.length === 1 \? commands\[0\] : null/,
+  );
+  assert.match(route, /normalizedCommand: legacyNormalizedCommand\(result\.normalizedCommands\)/);
+  assert.match(route, /normalizedCommands: \[\],[\s\S]*?normalizedCommand: null/);
+});

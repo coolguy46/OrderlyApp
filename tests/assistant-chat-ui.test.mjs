@@ -27,15 +27,19 @@ test('Assistant history is account-scoped and bounded', async () => {
   assert.match(source, /const LEGACY_CHAT_STORAGE_PREFIX = 'orderly:assistant-chat:v1:'/);
   assert.match(source, /const CHAT_STORAGE_LIMIT = 20/);
   assert.match(source, /const CHAT_STORAGE_CHARACTER_LIMIT = 20_000/);
-  assert.match(source, /const DRAFT_STORAGE_PREFIX = 'orderly:assistant-calendar-draft:v1:'/);
+  assert.match(source, /const DRAFT_STORAGE_PREFIX = 'orderly:assistant-calendar-draft:v2:'/);
+  assert.match(source, /const LEGACY_DRAFT_STORAGE_PREFIX = 'orderly:assistant-calendar-draft:v1:'/);
   assert.match(source, /sessionStorage\.getItem\(assistantChatStorageKey\(userId\)\)/);
   assert.match(source, /sessionStorage\.setItem\(/);
   assert.match(source, /sessionStorage\.removeItem\(assistantChatStorageKey\(userId\)\)/);
   assert.match(source, /localStorage\.removeItem\(assistantChatStorageKey\(userId\)\)/);
   assert.match(source, /clearLegacyAssistantChatStorage\(userId\)/);
-  assert.match(source, /readStoredAssistantDraftCommands\(userId\)/);
-  assert.match(source, /JSON\.stringify\(preview\.commands\.slice\(0, 8\)\)/);
-  assert.match(source, /interpretScheduleCommands\(storedCommands/);
+  assert.match(source, /readStoredAssistantDraft\(userId\)/);
+  assert.match(source, /commands: preview\.commands\.slice\(0, 8\)/);
+  assert.match(source, /validatedLocalDate: previewValidatedLocalDate/);
+  assert.match(source, /interpretScheduleCommands\(storedDraft\.commands/);
+  assert.match(source, /if \(!userId \|\| !dataLoaded \|\| chatOwnerUserId !== userId/);
+  assert.match(source, /storedDraft\.validatedLocalDate !== currentLocalDate/);
 });
 
 test('account changes isolate chat, quota, and undo snapshots immediately', async () => {
@@ -101,10 +105,28 @@ test('follow-up chat keeps an unsaved calendar draft and accepts atomic command 
     source.indexOf('const applyPreview'),
   );
 
-  assert.doesNotMatch(submitSection, /setPreview\(null\)/);
-  assert.match(submitSection, /if \(payload\.normalizedCommands\.length > 0\)/);
+  const mutationBranch = submitSection.slice(submitSection.indexOf('if (payload.normalizedCommands.length > 0)'));
+  const questionOnlyPath = submitSection.slice(0, submitSection.indexOf('if (payload.normalizedCommands.length > 0)'));
+
+  assert.doesNotMatch(questionOnlyPath, /setPreview\(null\)/);
+  assert.match(mutationBranch, /if \(payload\.normalizedCommands\.length > 0\)/);
   assert.match(submitSection, /setPreview\(nextPreview\)/);
+  assert.match(mutationBranch, /else \{\s+setPreview\(null\);\s+setPreviewValidatedLocalDate\(null\);/);
   assert.match(submitSection, /one draft/);
+});
+
+test('Assistant drafts expire safely across a local-date boundary', async () => {
+  const source = await readFile(plannerUrl, 'utf8');
+  const applySection = source.slice(
+    source.indexOf('const applyPreview'),
+    source.indexOf('const undo'),
+  );
+
+  assert.match(source, /interface StoredAssistantDraft \{\s+commands: string\[\];\s+validatedLocalDate: LocalDate;/);
+  assert.match(source, /storedDraft\.validatedLocalDate !== currentLocalDate/);
+  assert.match(applySection, /previewValidatedLocalDate !== currentLocalDate/);
+  assert.match(applySection, /calendar draft expired at midnight/i);
+  assert.match(applySection, /setPreview\(null\);\s+setPreviewValidatedLocalDate\(null\)/);
 });
 
 test('chat UI keeps the composer visible and calendar controls secondary', async () => {

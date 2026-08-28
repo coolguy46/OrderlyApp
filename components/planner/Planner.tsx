@@ -43,6 +43,7 @@ import {
 import {
   addLocalDays,
   buildScheduleOccurrences,
+  isLocalDate,
   localDateFromIso,
   localDateTimeToIso,
   localTimeFromIso,
@@ -100,7 +101,13 @@ const CHAT_STORAGE_CHARACTER_LIMIT = 20_000;
 const CHAT_TIMEOUT_MS = 25_000;
 const CHAT_STORAGE_PREFIX = 'orderly:assistant-chat:v2:';
 const LEGACY_CHAT_STORAGE_PREFIX = 'orderly:assistant-chat:v1:';
-const DRAFT_STORAGE_PREFIX = 'orderly:assistant-calendar-draft:v1:';
+const DRAFT_STORAGE_PREFIX = 'orderly:assistant-calendar-draft:v2:';
+const LEGACY_DRAFT_STORAGE_PREFIX = 'orderly:assistant-calendar-draft:v1:';
+
+interface StoredAssistantDraft {
+  commands: string[];
+  validatedLocalDate: LocalDate;
+}
 
 function assistantChatStorageKey(userId: string): string {
   return `${CHAT_STORAGE_PREFIX}${userId}`;
@@ -110,15 +117,24 @@ function assistantDraftStorageKey(userId: string): string {
   return `${DRAFT_STORAGE_PREFIX}${userId}`;
 }
 
-function readStoredAssistantDraftCommands(userId: string): string[] {
+function readStoredAssistantDraft(userId: string): StoredAssistantDraft | null {
   try {
-    const parsed: unknown = JSON.parse(window.sessionStorage.getItem(assistantDraftStorageKey(userId)) || '[]');
-    if (!Array.isArray(parsed) || parsed.length === 0 || parsed.length > 8) return [];
-    return parsed.every(command => typeof command === 'string' && command.trim().length > 0)
-      ? parsed.map(command => command.trim())
-      : [];
+    const parsed: unknown = JSON.parse(window.sessionStorage.getItem(assistantDraftStorageKey(userId)) || 'null');
+    if (!parsed || typeof parsed !== 'object') return null;
+    const candidate = parsed as Partial<StoredAssistantDraft>;
+    if (
+      !Array.isArray(candidate.commands)
+      || candidate.commands.length === 0
+      || candidate.commands.length > 8
+      || !candidate.commands.every(command => typeof command === 'string' && command.trim().length > 0)
+      || !isLocalDate(candidate.validatedLocalDate)
+    ) return null;
+    return {
+      commands: candidate.commands.map(command => command.trim()),
+      validatedLocalDate: candidate.validatedLocalDate,
+    };
   } catch {
-    return [];
+    return null;
   }
 }
 
@@ -455,7 +471,7 @@ function occurrenceScheduleInput(entry: ScheduleEntry | undefined, occurrence: S
 }
 
 export function Planner() {
-  const { user, tasks, subjects, exams, addTask, deleteTask } = useAppStore();
+  const { user, tasks, subjects, exams, addTask, deleteTask, dataLoaded } = useAppStore();
   const plannerUsers = usePlannerStore(state => state.users);
   const upsertCommitment = usePlannerStore(state => state.upsertCommitment);
   const entriesByUser = useScheduleStore(state => state.entriesByUser);
@@ -483,6 +499,7 @@ export function Planner() {
   const [storedEvents, setStoredEvents] = useState<StoredCalendarEvent[]>([]);
   const [command, setCommand] = useState('');
   const [preview, setPreview] = useState<ScheduleCommandPreview | null>(null);
+  const [previewValidatedLocalDate, setPreviewValidatedLocalDate] = useState<LocalDate | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [applying, setApplying] = useState(false);
   const [undoState, setUndoState] = useState<UndoState | null>(null);
@@ -534,6 +551,7 @@ export function Planner() {
     setUsage(null);
     setIsThinking(false);
     setPreview(null);
+    setPreviewValidatedLocalDate(null);
     setSelectedTaskId(null);
     setCommand('');
     setMessages(restored);
@@ -675,16 +693,31 @@ export function Planner() {
   }), [commandCommitments.busy, commandEvents.busy, commandOccurrences.timed, commandOccurrences.untimed, entries, pendingTasks, plannerSettings.bedtime, plannerSettings.weekendAvailableStart, selectedDate, selectedTaskId, timeZone]);
 
   useEffect(() => {
-    if (!userId || chatOwnerUserId !== userId || draftHydratedUserRef.current === userId) return;
+    if (!userId || !dataLoaded || chatOwnerUserId !== userId || draftHydratedUserRef.current === userId) return;
     draftHydratedUserRef.current = userId;
-    const storedCommands = readStoredAssistantDraftCommands(userId);
-    if (storedCommands.length === 0) return;
-    const restored = interpretScheduleCommands(storedCommands, {
+    try {
+      window.sessionStorage.removeItem(`${LEGACY_DRAFT_STORAGE_PREFIX}${userId}`);
+    } catch {
+      // Legacy draft cleanup waits until current app data is ready.
+    }
+    const storedDraft = readStoredAssistantDraft(userId);
+    if (!storedDraft) return;
+    const currentLocalDate = localDate(dateCarrierInTimeZone(timeZone));
+    if (storedDraft.validatedLocalDate !== currentLocalDate) {
+      try {
+        window.sessionStorage.removeItem(assistantDraftStorageKey(userId));
+      } catch {
+        // An expired stored draft can be ignored when storage is unavailable.
+      }
+      return;
+    }
+    const restored = interpretScheduleCommands(storedDraft.commands, {
       ...context,
       now: new Date().toISOString(),
     });
     if (restored.status === 'ready' && restored.actions.length > 0) {
       setPreview(restored);
+      setPreviewValidatedLocalDate(storedDraft.validatedLocalDate);
       setCalendarOpen(true);
       return;
     }
@@ -693,15 +726,18 @@ export function Planner() {
     } catch {
       // An invalid stored draft can be ignored when storage is unavailable.
     }
-  }, [chatOwnerUserId, context, userId]);
+  }, [chatOwnerUserId, context, dataLoaded, timeZone, userId]);
 
   useEffect(() => {
     if (!userId || draftHydratedUserRef.current !== userId) return;
     try {
-      if (preview?.status === 'ready' && preview.commands.length > 0) {
+      if (preview?.status === 'ready' && preview.commands.length > 0 && previewValidatedLocalDate) {
         window.sessionStorage.setItem(
           assistantDraftStorageKey(userId),
-          JSON.stringify(preview.commands.slice(0, 8)),
+          JSON.stringify({
+            commands: preview.commands.slice(0, 8),
+            validatedLocalDate: previewValidatedLocalDate,
+          } satisfies StoredAssistantDraft),
         );
       } else {
         window.sessionStorage.removeItem(assistantDraftStorageKey(userId));
@@ -709,7 +745,7 @@ export function Planner() {
     } catch {
       // The active in-memory draft remains usable when storage is unavailable.
     }
-  }, [preview, userId]);
+  }, [preview, previewValidatedLocalDate, userId]);
 
   const selectedDayOccurrences = useMemo(
     () => [...occurrences.timed, ...occurrences.untimed]
@@ -851,6 +887,7 @@ export function Planner() {
         });
         if (nextPreview.status === 'ready' && nextPreview.actions.length > 0) {
           setPreview(nextPreview);
+          setPreviewValidatedLocalDate(localDate(dateCarrierInTimeZone(timeZone)));
           assistantReply = `I placed ${nextPreview.actions.length === 1 ? 'the change' : `${nextPreview.actions.length} changes`} on your calendar as one draft.\n\n${nextPreview.summary}\n\nSelect **Save changes** above the calendar to confirm everything.`;
           const firstOccurrence = nextPreview.occurrences[0];
           if (firstOccurrence) {
@@ -860,6 +897,8 @@ export function Planner() {
           }
           setCalendarOpen(true);
         } else {
+          setPreview(null);
+          setPreviewValidatedLocalDate(null);
           assistantReply = previewReply(nextPreview);
         }
       }
@@ -893,6 +932,18 @@ export function Planner() {
 
   const applyPreview = useCallback(async () => {
     if (!userId || !preview || preview.status !== 'ready' || preview.actions.length === 0) return;
+    const currentLocalDate = localDate(dateCarrierInTimeZone(timeZone));
+    if (!previewValidatedLocalDate || previewValidatedLocalDate !== currentLocalDate) {
+      setPreview(null);
+      setPreviewValidatedLocalDate(null);
+      setMessages(previous => [...previous, {
+        id: `assistant-expired-${Date.now()}`,
+        role: 'assistant' as const,
+        content: 'That calendar draft expired at midnight, so I did not apply it. Ask me again and I will make a fresh draft for today.',
+      }].slice(-CHAT_DISPLAY_LIMIT));
+      toast.info('Calendar draft expired');
+      return;
+    }
     const freshPreview = interpretScheduleCommands(preview.commands, {
       ...context,
       now: new Date().toISOString(),
@@ -903,6 +954,7 @@ export function Planner() {
       || JSON.stringify(freshPreview.actions) !== JSON.stringify(preview.actions)
     ) {
       setPreview(freshPreview);
+      setPreviewValidatedLocalDate(freshPreview.status === 'ready' ? currentLocalDate : null);
       setMessages(previous => [...previous, {
         id: `assistant-recheck-${Date.now()}`,
         role: 'assistant' as const,
@@ -948,6 +1000,7 @@ export function Planner() {
       }].slice(-CHAT_DISPLAY_LIMIT));
       toast.success('Schedule updated');
       setPreview(null);
+      setPreviewValidatedLocalDate(null);
       setCommand('');
       setSelectedTaskId(null);
     } catch (error) {
@@ -957,7 +1010,7 @@ export function Planner() {
     } finally {
       setApplying(false);
     }
-  }, [addTask, applyScheduleBatch, context, deleteTask, entries, preview, replaceUserSchedules, selectedTaskId, userId]);
+  }, [addTask, applyScheduleBatch, context, deleteTask, entries, preview, previewValidatedLocalDate, replaceUserSchedules, selectedTaskId, timeZone, userId]);
 
   const undo = useCallback(async () => {
     if (!userId || !undoState || undoState.userId !== userId) return;
@@ -1171,6 +1224,7 @@ export function Planner() {
     setMessages([]);
     setCommand('');
     setPreview(null);
+    setPreviewValidatedLocalDate(null);
     setSelectedTaskId(null);
     window.requestAnimationFrame(() => commandInputRef.current?.focus());
   }, [stopThinking, userId]);
@@ -1325,7 +1379,16 @@ export function Planner() {
                     </div>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
-                    <Button type="button" variant="ghost" size="sm" onClick={() => setPreview(null)} disabled={applying}>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setPreview(null);
+                        setPreviewValidatedLocalDate(null);
+                      }}
+                      disabled={applying}
+                    >
                       Discard
                     </Button>
                     <Button type="button" size="sm" onClick={() => void applyPreview()} disabled={applying}>

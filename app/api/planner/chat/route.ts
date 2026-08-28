@@ -36,6 +36,7 @@ interface DeepSeekResponse {
 interface ChatResponseBody {
   reply: string;
   normalizedCommands: string[];
+  normalizedCommand: string | null;
   usage: null;
   aiUsed: boolean;
 }
@@ -44,6 +45,11 @@ function noStoreJson(body: ChatResponseBody, init?: ResponseInit) {
   const response = NextResponse.json(body, init);
   response.headers.set('Cache-Control', 'no-store');
   return response;
+}
+
+function legacyNormalizedCommand(commands: readonly string[]): string | null {
+  // Never expose only part of a multi-command request to an already-open legacy client.
+  return commands.length === 1 ? commands[0] : null;
 }
 
 function isRateLimited(userId: string): boolean {
@@ -65,7 +71,13 @@ function unavailable(
   reply: string,
   status: number,
 ) {
-  return noStoreJson({ reply, normalizedCommands: [], usage: null, aiUsed: false }, { status });
+  return noStoreJson({
+    reply,
+    normalizedCommands: [],
+    normalizedCommand: null,
+    usage: null,
+    aiUsed: false,
+  }, { status });
 }
 
 export async function POST(request: NextRequest) {
@@ -178,6 +190,7 @@ export async function POST(request: NextRequest) {
     return noStoreJson({
       reply: result.reply,
       normalizedCommands: result.normalizedCommands,
+      normalizedCommand: legacyNormalizedCommand(result.normalizedCommands),
       usage: null,
       aiUsed: true,
     });

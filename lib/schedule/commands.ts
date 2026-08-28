@@ -728,32 +728,72 @@ function previewForResize(command: string, context: ScheduleCommandContext): Sch
       candidates: resolved.candidates.map(task => ({ taskId: task.id, title: task.title })),
     };
   }
-  const entry = entryForTask(context, resolved.task.id);
+  const task = resolved.task;
+  const entry = entryForTask(context, task.id);
   const duration = normalizedDuration(parseDuration(command), preview.assumptions);
-  if (!entry) return { ...preview, status: 'clarification', summary: `“${resolved.task.title}” has no saved schedule yet.` };
+  if (!entry) return { ...preview, status: 'clarification', summary: `“${task.title}” has no saved schedule yet.` };
   if (!duration) return { ...preview, status: 'clarification', summary: 'What should the new duration be?' };
   const date = parseNaturalDate(command, context);
-  const anchorDate = date.explicit ? date.date : entry.scheduledDate;
-  if (anchorDate) {
-    const placement: ScheduleEntryInput = {
-      scheduledDate: anchorDate,
-      startAt: entry.startAt,
-      durationSeconds: duration,
-      recurrence: 'none',
-      recurrenceDays: null,
-      recurrenceEndDate: null,
-    };
-    const guard = guardSchedulePlacement(command, context, resolved.task, resolved.task.title, placement);
+  const occurrenceDate = date.explicit && entry.recurrence !== 'none' ? date.date : null;
+  const affectedOccurrences = context.occurrences.filter(occurrence => (
+    occurrence.taskId === task.id
+    && (!occurrenceDate || occurrence.recurrenceSourceDate === occurrenceDate)
+  ));
+  const occurrenceOverride = occurrenceDate ? entry.occurrenceOverrides[occurrenceDate] || {} : {};
+  const fallbackDate = occurrenceDate
+    ? isLocalDate(occurrenceOverride.scheduledDate) ? occurrenceOverride.scheduledDate : occurrenceDate
+    : entry.scheduledDate;
+  const fallbackTime = localTimeFromIso(entry.startAt, context);
+  const fallbackStartAt = Object.prototype.hasOwnProperty.call(occurrenceOverride, 'startAt')
+    ? occurrenceOverride.startAt || null
+    : fallbackDate && fallbackTime
+      ? localDateTimeToIso(fallbackDate, `${fallbackTime}:00`, context.timeZone)
+      : null;
+  const resizedOccurrences: ScheduleCommandOccurrencePreview[] = affectedOccurrences.length > 0
+    ? affectedOccurrences.map(occurrence => {
+      const persistedOverride = entry.occurrenceOverrides[occurrence.recurrenceSourceDate] || {};
+      const preservesOverrideDuration = !occurrenceDate
+        && Object.prototype.hasOwnProperty.call(persistedOverride, 'durationSeconds');
+      return {
+        taskId: task.id,
+        title: task.title,
+        date: occurrence.date,
+        startAt: occurrence.startAt,
+        durationSeconds: preservesOverrideDuration ? occurrence.durationSeconds : duration,
+      };
+    })
+    : fallbackDate
+      ? [{
+        taskId: task.id,
+        title: task.title,
+        date: fallbackDate,
+        startAt: fallbackStartAt,
+        durationSeconds: duration,
+      }]
+      : [];
+  const anchorOccurrence = resizedOccurrences[0];
+  if (anchorOccurrence) {
+    const placement: ScheduleEntryInput = occurrenceDate
+      ? {
+        scheduledDate: anchorOccurrence.date,
+        startAt: anchorOccurrence.startAt,
+        durationSeconds: duration,
+        recurrence: 'none',
+        recurrenceDays: null,
+        recurrenceEndDate: null,
+      }
+      : { ...entry, durationSeconds: duration };
+    const guard = guardSchedulePlacement(command, context, task, task.title, placement);
     if (guard.blockedSummary) return { ...preview, status: 'clarification', summary: guard.blockedSummary };
     if (guard.assumption) preview.assumptions.push(guard.assumption);
   }
-  const operation: ScheduleBatchOperation = date.explicit && entry.recurrence !== 'none'
-    ? { type: 'override', taskId: resolved.task.id, occurrenceDate: date.date, override: { durationSeconds: duration } }
-    : { type: 'upsert', taskId: resolved.task.id, input: { ...entry, durationSeconds: duration } };
+  const operation: ScheduleBatchOperation = occurrenceDate
+    ? { type: 'override', taskId: task.id, occurrenceDate, override: { durationSeconds: duration } }
+    : { type: 'upsert', taskId: task.id, input: { ...entry, durationSeconds: duration } };
   preview.status = 'ready';
-  preview.summary = `Set “${resolved.task.title}” to ${formatDuration(duration)}${date.explicit && entry.recurrence !== 'none' ? ' for that occurrence' : ''}.`;
+  preview.summary = `Set “${task.title}” to ${formatDuration(duration)}${occurrenceDate ? ' for that occurrence' : ''}.`;
   preview.actions = [{ type: 'schedule_batch', operations: [operation] }];
-  preview.occurrences = [{ taskId: resolved.task.id, title: resolved.task.title, date: date.date, startAt: null, durationSeconds: duration }];
+  preview.occurrences = resizedOccurrences;
   return preview;
 }
 
@@ -966,6 +1006,17 @@ function affectedTaskIds(actions: readonly ScheduleCommandAction[]): string[] {
     : []);
 }
 
+function occurrenceIsReplacedByActions(
+  occurrence: ScheduleOccurrence,
+  actions: readonly ScheduleCommandAction[],
+): boolean {
+  return actions.some(action => action.type === 'schedule_batch' && action.operations.some(operation => {
+    if (operation.taskId !== occurrence.taskId) return false;
+    if (operation.type === 'upsert' || operation.type === 'remove') return true;
+    return operation.occurrenceDate === occurrence.recurrenceSourceDate;
+  }));
+}
+
 function draftBusyIntervals(
   preview: ScheduleCommandPreview,
   commandIndex: number,
@@ -1056,12 +1107,14 @@ export function interpretScheduleCommands(
     partTaskIds.forEach(taskId => touchedTaskIds.add(taskId));
     parts.push(part);
 
-    // A moved or removed task no longer occupies its old occurrence while the
-    // rest of this draft is checked. Its new draft occurrence is added below.
-    const changedIds = new Set(partTaskIds);
+    // Whole-series changes replace every old occurrence. Occurrence overrides
+    // replace only their source occurrence so the rest of a recurring series
+    // remains busy while later changes in this draft are checked.
     shadowContext = {
       ...shadowContext,
-      occurrences: shadowContext.occurrences.filter(occurrence => !changedIds.has(occurrence.taskId)),
+      occurrences: shadowContext.occurrences.filter(occurrence => (
+        !occurrenceIsReplacedByActions(occurrence, part.actions)
+      )),
       busy: [
         ...(shadowContext.busy || []),
         ...draftBusyIntervals(part, index),
