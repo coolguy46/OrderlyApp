@@ -62,7 +62,7 @@ Object.defineProperty(globalThis, 'localStorage', {
 const { generatePlannerPlan } = compiledRequire(join(buildRoot, 'lib/planner/engine.js'));
 const { getDefaultPlannerSettings } = compiledRequire(join(buildRoot, 'lib/planner/types.js'));
 const { usePlannerStore } = compiledRequire(join(buildRoot, 'lib/planner/store.js'));
-const { interpretScheduleCommand } = compiledRequire(join(buildRoot, 'lib/schedule/commands.js'));
+const { interpretScheduleCommand, interpretScheduleCommands } = compiledRequire(join(buildRoot, 'lib/schedule/commands.js'));
 
 after(async () => {
   delete globalThis.localStorage;
@@ -225,6 +225,46 @@ test('deterministic commands warn about late work while collisions remain blocki
   assert.equal(collision.status, 'clarification');
   assert.deepEqual(collision.actions, []);
   assert.match(collision.summary, /overlaps “Class”/);
+});
+
+test('Assistant command bundles stage every change atomically and catch internal collisions', () => {
+  const context = {
+    now: '2026-08-27T12:00:00.000Z',
+    timeZone: 'UTC',
+    tasks: [],
+    entries: [],
+    occurrences: [],
+    busy: [],
+  };
+  const ready = interpretScheduleCommands([
+    'Schedule workout today at 5 pm for 1 hour',
+    'Schedule Common App tomorrow at 10 pm for 1 hour',
+    'Schedule counselor meeting Saturday at 12 pm for 1 hour',
+  ], context);
+
+  assert.equal(ready.status, 'ready');
+  assert.equal(ready.commands.length, 3);
+  assert.equal(ready.actions.length, 3);
+  assert.equal(ready.occurrences.length, 3);
+  assert.match(ready.summary, /3 calendar changes are ready/);
+
+  const collision = interpretScheduleCommands([
+    'Schedule workout today at 5 pm for 1 hour',
+    'Schedule Common App today at 5:30 pm for 1 hour',
+  ], context);
+  assert.equal(collision.status, 'clarification');
+  assert.deepEqual(collision.actions, []);
+  assert.deepEqual(collision.occurrences, []);
+  assert.match(collision.summary, /change 2 needs attention/i);
+
+  const incomplete = interpretScheduleCommands([
+    'Schedule workout today at 5 pm for 1 hour',
+    'Schedule Common App tomorrow at 10 pm',
+  ], context);
+  assert.equal(incomplete.status, 'clarification');
+  assert.deepEqual(incomplete.actions, []);
+  assert.deepEqual(incomplete.occurrences, []);
+  assert.match(incomplete.summary, /change 2 needs attention/i);
 });
 
 test('direct scheduling surfaces deadline misses as warnings instead of returning early', async () => {

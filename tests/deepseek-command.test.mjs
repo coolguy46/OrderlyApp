@@ -131,6 +131,6 @@ test('the Assistant route keeps the API key server-side and falls back safely', 
   assert.match(chatRoute, /response_format:\s*\{ type: 'json_object' \}/);
   assert.match(planner, /fetch\('\/api\/planner\/chat'/);
   assert.match(planner, /CHAT_TIMEOUT_MS = 25_000/);
-  assert.match(planner, /interpretScheduleCommand\(payload\.normalizedCommand/);
+  assert.match(planner, /interpretScheduleCommands\(payload\.normalizedCommands/);
   assert.doesNotMatch(planner, /DEEPSEEK_API_KEY/);
 });

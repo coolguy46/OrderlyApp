@@ -30,6 +30,7 @@ export interface ScheduleCommandBusyInterval {
   title: string;
   startAt: string;
   endAt: string;
+  taskId?: string | null;
 }
 
 export interface ScheduleCommandContext {
@@ -77,6 +78,7 @@ export interface ScheduleCommandOccurrencePreview {
 export interface ScheduleCommandPreview {
   id: string;
   command: string;
+  commands: string[];
   normalizedCommand: string;
   kind: ScheduleCommandKind | null;
   status: ScheduleCommandStatus;
@@ -173,6 +175,7 @@ function emptyPreview(command: string): ScheduleCommandPreview {
   return {
     id: `command-${stableHash(normalizedCommand.toLowerCase())}`,
     command: normalizedCommand,
+    commands: normalizedCommand ? [normalizedCommand] : [],
     normalizedCommand: normalizedCommand.toLowerCase(),
     kind: null,
     status: 'invalid',
@@ -578,6 +581,7 @@ function guardSchedulePlacement(
       return start < existingEnd && end > existingStart ? [existing.title] : [];
     });
     const busyConflicts = (context.busy || []).flatMap(existing => {
+      if (existing.taskId && existing.taskId === task?.id) return [];
       const existingStart = new Date(existing.startAt).getTime();
       const existingEnd = new Date(existing.endAt).getTime();
       return start < existingEnd && end > existingStart ? [existing.title] : [];
@@ -951,5 +955,129 @@ export function interpretScheduleCommand(
     ...emptyPreview(normalized),
     status: 'clarification',
     summary: 'Try “schedule chemistry tomorrow at 4 pm for 45 minutes”, “move chemistry to Friday at 5”, “repeat chemistry every weekday”, “unschedule chemistry”, or “find a 30 minute gap tomorrow”.',
+  };
+}
+
+const MAX_COMMAND_BUNDLE_SIZE = 8;
+
+function affectedTaskIds(actions: readonly ScheduleCommandAction[]): string[] {
+  return actions.flatMap(action => action.type === 'schedule_batch'
+    ? action.operations.map(operation => operation.taskId)
+    : []);
+}
+
+function draftBusyIntervals(
+  preview: ScheduleCommandPreview,
+  commandIndex: number,
+): ScheduleCommandBusyInterval[] {
+  return preview.occurrences.flatMap((occurrence, occurrenceIndex) => {
+    if (!occurrence.startAt || !occurrence.durationSeconds) return [];
+    const start = new Date(occurrence.startAt);
+    if (Number.isNaN(start.getTime())) return [];
+    return [{
+      id: `assistant-bundle-${commandIndex}-${occurrenceIndex}`,
+      title: occurrence.title,
+      startAt: occurrence.startAt,
+      endAt: new Date(start.getTime() + occurrence.durationSeconds * 1_000).toISOString(),
+      taskId: occurrence.taskId,
+    }];
+  });
+}
+
+/**
+ * Interpret several explicit chat actions as one all-or-nothing calendar
+ * draft. Each action is still handled by the deterministic single-command
+ * engine. Later actions see earlier draft blocks, so conflicts inside the
+ * bundle are caught before anything can be saved.
+ */
+export function interpretScheduleCommands(
+  commands: readonly string[],
+  context: ScheduleCommandContext,
+): ScheduleCommandPreview {
+  const normalized = commands
+    .map(command => command.trim().replace(/\s+/g, ' '))
+    .filter(Boolean);
+  if (normalized.length === 0) {
+    return {
+      ...emptyPreview(''),
+      status: 'clarification',
+      summary: 'Tell me what you want to add, move, resize, repeat, or remove.',
+    };
+  }
+  if (normalized.length > MAX_COMMAND_BUNDLE_SIZE) {
+    const preview = emptyPreview(normalized.join(' | '));
+    return {
+      ...preview,
+      commands: normalized,
+      status: 'clarification',
+      summary: `That request contains more than ${MAX_COMMAND_BUNDLE_SIZE} calendar changes. Split it into two messages so I can verify every change safely.`,
+    };
+  }
+  if (normalized.length === 1) return interpretScheduleCommand(normalized[0], context);
+
+  const base = emptyPreview(normalized.join(' | '));
+  const parts: ScheduleCommandPreview[] = [];
+  const touchedTaskIds = new Set<string>();
+  let shadowContext: ScheduleCommandContext = {
+    ...context,
+    occurrences: [...context.occurrences],
+    busy: [...(context.busy || [])],
+  };
+
+  for (const [index, command] of normalized.entries()) {
+    const part = interpretScheduleCommand(command, shadowContext);
+    if (part.status !== 'ready' || part.actions.length === 0) {
+      return {
+        ...base,
+        commands: normalized,
+        status: part.status === 'invalid' ? 'invalid' : 'clarification',
+        summary: `I did not place any of the changes yet because change ${index + 1} needs attention: ${part.summary}`,
+        assumptions: parts.flatMap(candidate => candidate.assumptions),
+        candidates: part.candidates,
+        gaps: part.gaps,
+        actions: [],
+        occurrences: [],
+      };
+    }
+
+    const partTaskIds = affectedTaskIds(part.actions);
+    const duplicateTaskId = partTaskIds.find(taskId => touchedTaskIds.has(taskId));
+    if (duplicateTaskId) {
+      const duplicateTask = context.tasks.find(task => task.id === duplicateTaskId);
+      return {
+        ...base,
+        commands: normalized,
+        status: 'clarification',
+        summary: `I did not place any changes because “${duplicateTask?.title || 'that task'}” is changed more than once in the same request. Combine those edits into one instruction.`,
+        actions: [],
+        occurrences: [],
+      };
+    }
+    partTaskIds.forEach(taskId => touchedTaskIds.add(taskId));
+    parts.push(part);
+
+    // A moved or removed task no longer occupies its old occurrence while the
+    // rest of this draft is checked. Its new draft occurrence is added below.
+    const changedIds = new Set(partTaskIds);
+    shadowContext = {
+      ...shadowContext,
+      occurrences: shadowContext.occurrences.filter(occurrence => !changedIds.has(occurrence.taskId)),
+      busy: [
+        ...(shadowContext.busy || []),
+        ...draftBusyIntervals(part, index),
+      ],
+    };
+  }
+
+  return {
+    ...base,
+    commands: normalized,
+    status: 'ready',
+    summary: `${parts.length} calendar changes are ready:\n${parts.map((part, index) => `${index + 1}. ${part.summary}`).join('\n')}`,
+    actions: parts.flatMap(part => part.actions),
+    assumptions: parts.flatMap(part => part.assumptions),
+    candidates: [],
+    gaps: parts.flatMap(part => part.gaps),
+    occurrences: parts.flatMap(part => part.occurrences),
   };
 }

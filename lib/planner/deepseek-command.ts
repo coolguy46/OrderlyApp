@@ -10,6 +10,7 @@ const MAX_CHAT_MESSAGES = 14;
 const MAX_CHAT_MESSAGE_LENGTH = 1_600;
 const MAX_CHAT_HISTORY_LENGTH = 10_000;
 const MAX_CHAT_REPLY_LENGTH = 2_000;
+const MAX_NORMALIZED_COMMANDS = 8;
 const MAX_DESCRIPTION_CONTEXT_ITEMS = 3;
 
 export interface PlannerCommandTaskSnapshot {
@@ -73,7 +74,7 @@ export interface PlannerChatAIInput {
 
 export interface PlannerChatAIResult {
   reply: string;
-  normalizedCommand: string | null;
+  normalizedCommands: string[];
 }
 
 const SIMPLE_CHAT_PATTERN = /^(?:hi|hello|hey|yo|thanks|thank you|good (?:morning|afternoon|evening)|who are you|what can you do)[!.?\s]*$/i;
@@ -81,6 +82,7 @@ const SCHEDULE_CONTEXT_PATTERN = /\b(?:schedule|calendar|task|assignment|homewor
 const DESCRIPTION_REQUEST_PATTERN = /\b(?:description|details?|instructions?|requirements?|summari[sz]e|break down|estimate|how long|what does (?:it|the assignment|this) say)\b/i;
 const DIRECT_DESCRIPTION_FOLLOW_UP_PATTERN = /^(?:and\b|also\b|what about\b|how about\b|what are\b|yes\b|yeah\b|yep\b|sure\b|okay\b|ok\b|please\b|go ahead\b|do that\b|that\b|this\b|it\b|the one\b|which one\b|how long\b|summari[sz]e\b|give me\b|show me\b|tell me\b)/i;
 const EXPLICIT_SAFEGUARD_OVERRIDE_PATTERN = /(?:\b(?:anyway|allow\s+(?:the\s+)?overlap|even\s+if\s+(?:it\s+)?overlaps?|bypass\s+(?:the\s+)?(?:safeguards?|conflicts?|overlap\s+checks?)|override\s+(?:the\s+)?(?:safeguards?|conflicts?|overlap\s+checks?))\b)|(?:^|\s)force\s*[.!?]*$/i;
+const EMPTY_DRAFT_PROMISE_PATTERN = /\b(?:i(?:'ll|\s+will)|i\s+am\s+going\s+to|orderly\s+will)\b[\s\S]{0,220}\b(?:preview|calendar\s+draft)\b/i;
 const DESCRIPTION_MATCH_STOP_WORDS = new Set([
   'a', 'about', 'an', 'and', 'ap', 'assignment', 'break', 'canvas', 'class',
   'course', 'details', 'description', 'does', 'estimate', 'exam', 'for', 'give',
@@ -117,17 +119,18 @@ Rules:
 export const PLANNER_CHAT_SYSTEM_PROMPT = `You are Orderly Assistant, a conversational scheduling assistant for students. Talk naturally, directly, and concisely, like a helpful chatbot.
 
 Return only a JSON object with exactly this shape:
-{"reply":"...","normalizedCommand":null}
+{"reply":"...","normalizedCommands":[]}
 
-The normalizedCommand field must be either null or one concise command for Orderly's deterministic schedule engine.
+The normalizedCommands field must be an array containing zero to eight concise commands for Orderly's deterministic schedule engine.
 
 Conversation rules:
 1. Answer questions about the user's workload, deadlines, free time, and schedule using only the supplied context. Be honest when the context does not contain enough information.
 2. Use the conversation history to understand follow-ups such as "do that", "make it later", and "what about tomorrow?".
-3. For questions, analysis, recommendations, brainstorming, or clarification, set normalizedCommand to null.
-4. Set normalizedCommand only when the user explicitly asks to add, schedule, move, resize, repeat, unschedule, or remove something. If the requested change is ambiguous, ask a brief clarifying question and set normalizedCommand to null.
-5. Never claim a schedule change was applied. When normalizedCommand is present, briefly state the requested change without claiming success. Orderly will independently validate it and place valid changes on the calendar as a draft for confirmation.
-6. Keep replies under 180 words. Use short paragraphs and, when helpful, bullet or numbered lists and **bold** emphasis. Do not use markdown tables, headings, code blocks, links, or HTML.
+3. For questions, analysis, recommendations, brainstorming, or clarification, return an empty normalizedCommands array.
+4. Add one normalizedCommands item for every distinct change the user explicitly asks to add, schedule, move, resize, repeat, unschedule, or remove. Keep the same order as the request. If any required date, time, or duration is genuinely missing, ask one brief clarifying question and return an empty array.
+5. A short confirmation such as "yes", "do it", "go ahead", or "that's fine" means execute the concrete plan established in the immediately preceding conversation. Convert every concrete change in that plan into normalizedCommands. Do not merely repeat or promise the plan.
+6. Never use the word "preview" and never promise a future action. When normalizedCommands is non-empty, briefly say the changes are ready to be placed on the calendar. Orderly independently validates them and renders them as one calendar draft for confirmation.
+7. Keep replies under 180 words. Use short paragraphs and, when helpful, bullet or numbered lists and **bold** emphasis. Do not use markdown tables, headings, code blocks, links, or HTML.
 
 Supported normalized command forms:
 - Schedule <task or activity> <date> at <time> for <duration>
@@ -479,27 +482,37 @@ export function parsePlannerChatAIJson(value: unknown): PlannerChatAIResult | nu
     const parsed = JSON.parse(value) as unknown;
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
     const record = parsed as Record<string, unknown>;
-    if (Object.keys(record).some(key => key !== 'reply' && key !== 'normalizedCommand')) return null;
-    const reply = boundedMultilineString(record.reply, MAX_CHAT_REPLY_LENGTH);
+    const keys = Object.keys(record);
+    const hasCommandArray = keys.includes('normalizedCommands');
+    const hasLegacyCommand = keys.includes('normalizedCommand');
+    if (keys.some(key => key !== 'reply' && key !== 'normalizedCommands' && key !== 'normalizedCommand')) return null;
+    if (hasCommandArray && hasLegacyCommand) return null;
+    let reply = boundedMultilineString(record.reply, MAX_CHAT_REPLY_LENGTH);
     if (!reply) return null;
-    if (record.normalizedCommand !== null && record.normalizedCommand !== undefined) {
-      const normalizedCommand = boundedString(
-        record.normalizedCommand,
-        MAX_NORMALIZED_COMMAND_LENGTH,
-      );
-      if (!normalizedCommand) return null;
-      // The deterministic engine supports a powerful `force` escape hatch.
-      // Never let model output invoke it; a user can choose an explicit
-      // override through Orderly's own reviewed UI instead.
-      if (EXPLICIT_SAFEGUARD_OVERRIDE_PATTERN.test(normalizedCommand)) {
-        return {
-          reply: 'I cannot bypass Orderly’s schedule safeguards. Choose a different time or edit the schedule manually.',
-          normalizedCommand: null,
-        };
-      }
-      return { reply, normalizedCommand };
+
+    const rawCommands = hasCommandArray
+      ? record.normalizedCommands
+      : record.normalizedCommand === null || record.normalizedCommand === undefined
+        ? []
+        : [record.normalizedCommand];
+    if (!Array.isArray(rawCommands) || rawCommands.length > MAX_NORMALIZED_COMMANDS) return null;
+    const normalizedCommands = rawCommands.map(command => boundedString(command, MAX_NORMALIZED_COMMAND_LENGTH));
+    if (normalizedCommands.some(command => !command)) return null;
+    const commands = normalizedCommands as string[];
+
+    // The deterministic engine supports a powerful `force` escape hatch.
+    // Never let model output invoke it; overlap permission stays in Orderly's
+    // own reviewed calendar UI.
+    if (commands.some(command => EXPLICIT_SAFEGUARD_OVERRIDE_PATTERN.test(command))) {
+      return {
+        reply: 'I cannot bypass Orderly’s schedule safeguards. Choose a different time or edit the schedule manually.',
+        normalizedCommands: [],
+      };
     }
-    return { reply, normalizedCommand: null };
+    if (commands.length === 0 && EMPTY_DRAFT_PROMISE_PATTERN.test(reply)) {
+      reply = 'I could not turn that into calendar changes yet. Tell me the missing date, time, or duration and I’ll place the complete draft on your calendar.';
+    }
+    return { reply, normalizedCommands: commands };
   } catch {
     return null;
   }

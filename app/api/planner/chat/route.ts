@@ -35,7 +35,7 @@ interface DeepSeekResponse {
 
 interface ChatResponseBody {
   reply: string;
-  normalizedCommand: string | null;
+  normalizedCommands: string[];
   usage: null;
   aiUsed: boolean;
 }
@@ -65,7 +65,7 @@ function unavailable(
   reply: string,
   status: number,
 ) {
-  return noStoreJson({ reply, normalizedCommand: null, usage: null, aiUsed: false }, { status });
+  return noStoreJson({ reply, normalizedCommands: [], usage: null, aiUsed: false }, { status });
 }
 
 export async function POST(request: NextRequest) {
@@ -177,7 +177,7 @@ export async function POST(request: NextRequest) {
 
     return noStoreJson({
       reply: result.reply,
-      normalizedCommand: result.normalizedCommand,
+      normalizedCommands: result.normalizedCommands,
       usage: null,
       aiUsed: true,
     });

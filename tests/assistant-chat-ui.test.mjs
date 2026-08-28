@@ -16,20 +16,26 @@ test('Assistant uses the bounded multi-turn chat API contract', async () => {
   assert.match(source, /\.slice\(0, 20\)[\s\S]*examDate: exam\.exam_date/);
   assert.match(source, /occurrences: context\.occurrences\.slice\(0, 80\)/);
   assert.match(source, /busy: \(context\.busy \|\| \[\]\)\.slice\(0, 80\)/);
-  assert.match(source, /interpretScheduleCommand\(payload\.normalizedCommand/);
+  assert.match(source, /interpretScheduleCommands\(payload\.normalizedCommands/);
+  assert.match(source, /payload\.normalizedCommands\.length > 0/);
 });
 
 test('Assistant history is account-scoped and bounded', async () => {
   const source = await readFile(plannerUrl, 'utf8');
 
-  assert.match(source, /const CHAT_STORAGE_PREFIX = 'orderly:assistant-chat:v1:'/);
+  assert.match(source, /const CHAT_STORAGE_PREFIX = 'orderly:assistant-chat:v2:'/);
+  assert.match(source, /const LEGACY_CHAT_STORAGE_PREFIX = 'orderly:assistant-chat:v1:'/);
   assert.match(source, /const CHAT_STORAGE_LIMIT = 20/);
   assert.match(source, /const CHAT_STORAGE_CHARACTER_LIMIT = 20_000/);
+  assert.match(source, /const DRAFT_STORAGE_PREFIX = 'orderly:assistant-calendar-draft:v1:'/);
   assert.match(source, /sessionStorage\.getItem\(assistantChatStorageKey\(userId\)\)/);
   assert.match(source, /sessionStorage\.setItem\(/);
   assert.match(source, /sessionStorage\.removeItem\(assistantChatStorageKey\(userId\)\)/);
   assert.match(source, /localStorage\.removeItem\(assistantChatStorageKey\(userId\)\)/);
   assert.match(source, /clearLegacyAssistantChatStorage\(userId\)/);
+  assert.match(source, /readStoredAssistantDraftCommands\(userId\)/);
+  assert.match(source, /JSON\.stringify\(preview\.commands\.slice\(0, 8\)\)/);
+  assert.match(source, /interpretScheduleCommands\(storedCommands/);
 });
 
 test('account changes isolate chat, quota, and undo snapshots immediately', async () => {
@@ -78,7 +84,7 @@ test('Assistant stages changes on the calendar and revalidates before saving', a
     source.indexOf('const undo'),
   );
 
-  assert.match(applySection, /const freshPreview = interpretScheduleCommand\(preview\.command/);
+  assert.match(applySection, /const freshPreview = interpretScheduleCommands\(preview\.commands/);
   assert.match(applySection, /JSON\.stringify\(freshPreview\.actions\) !== JSON\.stringify\(preview\.actions\)/);
   assert.match(applySection, /refreshed the draft on the calendar/);
   assert.match(source, /function scheduleDraftBlocks/);
@@ -86,6 +92,19 @@ test('Assistant stages changes on the calendar and revalidates before saving', a
   assert.match(source, /Save changes/);
   assert.match(source, /Discard/);
   assert.doesNotMatch(source, /preview=\{activePreview\}/);
+});
+
+test('follow-up chat keeps an unsaved calendar draft and accepts atomic command bundles', async () => {
+  const source = await readFile(plannerUrl, 'utf8');
+  const submitSection = source.slice(
+    source.indexOf('const submitCommand'),
+    source.indexOf('const applyPreview'),
+  );
+
+  assert.doesNotMatch(submitSection, /setPreview\(null\)/);
+  assert.match(submitSection, /if \(payload\.normalizedCommands\.length > 0\)/);
+  assert.match(submitSection, /setPreview\(nextPreview\)/);
+  assert.match(submitSection, /one draft/);
 });
 
 test('chat UI keeps the composer visible and calendar controls secondary', async () => {

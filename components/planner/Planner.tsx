@@ -35,7 +35,7 @@ import {
 import { usePlannerStore } from '@/lib/planner/store';
 import { getDefaultPlannerSettings, type PlannerSettings, type RecurringCommitmentInput } from '@/lib/planner/types';
 import {
-  interpretScheduleCommand,
+  interpretScheduleCommands,
   type ScheduleCommandBusyInterval,
   type ScheduleCommandContext,
   type ScheduleCommandPreview,
@@ -67,7 +67,7 @@ interface ConversationMessage {
 
 interface AssistantChatResponse {
   reply: string;
-  normalizedCommand: string | null;
+  normalizedCommands: string[];
   usage: {
     remainingDaily: number;
     remainingMonthly: number;
@@ -98,10 +98,28 @@ const CHAT_DISPLAY_LIMIT = 50;
 const CHAT_STORAGE_LIMIT = 20;
 const CHAT_STORAGE_CHARACTER_LIMIT = 20_000;
 const CHAT_TIMEOUT_MS = 25_000;
-const CHAT_STORAGE_PREFIX = 'orderly:assistant-chat:v1:';
+const CHAT_STORAGE_PREFIX = 'orderly:assistant-chat:v2:';
+const LEGACY_CHAT_STORAGE_PREFIX = 'orderly:assistant-chat:v1:';
+const DRAFT_STORAGE_PREFIX = 'orderly:assistant-calendar-draft:v1:';
 
 function assistantChatStorageKey(userId: string): string {
   return `${CHAT_STORAGE_PREFIX}${userId}`;
+}
+
+function assistantDraftStorageKey(userId: string): string {
+  return `${DRAFT_STORAGE_PREFIX}${userId}`;
+}
+
+function readStoredAssistantDraftCommands(userId: string): string[] {
+  try {
+    const parsed: unknown = JSON.parse(window.sessionStorage.getItem(assistantDraftStorageKey(userId)) || '[]');
+    if (!Array.isArray(parsed) || parsed.length === 0 || parsed.length > 8) return [];
+    return parsed.every(command => typeof command === 'string' && command.trim().length > 0)
+      ? parsed.map(command => command.trim())
+      : [];
+  } catch {
+    return [];
+  }
 }
 
 function boundedStoredMessages(messages: readonly ConversationMessage[]): ConversationMessage[] {
@@ -142,7 +160,9 @@ function readStoredAssistantMessages(userId: string): ConversationMessage[] {
 
 function clearLegacyAssistantChatStorage(userId: string): void {
   try {
+    window.sessionStorage.removeItem(`${LEGACY_CHAT_STORAGE_PREFIX}${userId}`);
     window.localStorage.removeItem(assistantChatStorageKey(userId));
+    window.localStorage.removeItem(`${LEGACY_CHAT_STORAGE_PREFIX}${userId}`);
   } catch {
     // This account's older plaintext history is best-effort cleanup when storage is unavailable.
   }
@@ -170,7 +190,9 @@ function isAssistantChatResponse(value: unknown): value is AssistantChatResponse
   if (!value || typeof value !== 'object') return false;
   const candidate = value as Partial<AssistantChatResponse>;
   return typeof candidate.reply === 'string'
-    && (candidate.normalizedCommand === null || typeof candidate.normalizedCommand === 'string')
+    && Array.isArray(candidate.normalizedCommands)
+    && candidate.normalizedCommands.length <= 8
+    && candidate.normalizedCommands.every(command => typeof command === 'string' && command.trim().length > 0)
     && (candidate.usage === null || (
       typeof candidate.usage === 'object'
       && candidate.usage !== null
@@ -476,6 +498,7 @@ export function Planner() {
   const chatAbortRef = useRef<AbortController | null>(null);
   const chatRequestIdRef = useRef(0);
   const chatHydratedUserRef = useRef<string | null>(null);
+  const draftHydratedUserRef = useRef<string | null>(null);
 
   useEffect(() => {
     const refresh = () => setStoredEvents(readStoredCalendarEvents());
@@ -504,6 +527,7 @@ export function Planner() {
     chatAbortRef.current?.abort();
     chatAbortRef.current = null;
     chatHydratedUserRef.current = null;
+    draftHydratedUserRef.current = null;
     if (userId) clearLegacyAssistantChatStorage(userId);
     const restored = userId ? readStoredAssistantMessages(userId) : [];
     setUndoState(null);
@@ -650,6 +674,43 @@ export function Planner() {
     availableEndTime: plannerSettings.bedtime,
   }), [commandCommitments.busy, commandEvents.busy, commandOccurrences.timed, commandOccurrences.untimed, entries, pendingTasks, plannerSettings.bedtime, plannerSettings.weekendAvailableStart, selectedDate, selectedTaskId, timeZone]);
 
+  useEffect(() => {
+    if (!userId || chatOwnerUserId !== userId || draftHydratedUserRef.current === userId) return;
+    draftHydratedUserRef.current = userId;
+    const storedCommands = readStoredAssistantDraftCommands(userId);
+    if (storedCommands.length === 0) return;
+    const restored = interpretScheduleCommands(storedCommands, {
+      ...context,
+      now: new Date().toISOString(),
+    });
+    if (restored.status === 'ready' && restored.actions.length > 0) {
+      setPreview(restored);
+      setCalendarOpen(true);
+      return;
+    }
+    try {
+      window.sessionStorage.removeItem(assistantDraftStorageKey(userId));
+    } catch {
+      // An invalid stored draft can be ignored when storage is unavailable.
+    }
+  }, [chatOwnerUserId, context, userId]);
+
+  useEffect(() => {
+    if (!userId || draftHydratedUserRef.current !== userId) return;
+    try {
+      if (preview?.status === 'ready' && preview.commands.length > 0) {
+        window.sessionStorage.setItem(
+          assistantDraftStorageKey(userId),
+          JSON.stringify(preview.commands.slice(0, 8)),
+        );
+      } else {
+        window.sessionStorage.removeItem(assistantDraftStorageKey(userId));
+      }
+    } catch {
+      // The active in-memory draft remains usable when storage is unavailable.
+    }
+  }, [preview, userId]);
+
   const selectedDayOccurrences = useMemo(
     () => [...occurrences.timed, ...occurrences.untimed]
       .filter(occurrence => occurrence.date === localDate(selectedDate))
@@ -696,7 +757,6 @@ export function Planner() {
     const conversation = [...messages, userMessage].slice(-CHAT_CONTEXT_LIMIT);
     setMessages(previous => [...previous, userMessage].slice(-CHAT_DISPLAY_LIMIT));
     setCommand('');
-    setPreview(null);
     setIsThinking(true);
 
     chatAbortRef.current?.abort();
@@ -783,15 +843,15 @@ export function Planner() {
 
       const assistantMessageId = `assistant-${Date.now()}`;
       let assistantReply = payload.reply.trim() || 'Here is what I found.';
-      if (payload.normalizedCommand) {
-        const nextPreview = interpretScheduleCommand(payload.normalizedCommand, {
+      if (payload.normalizedCommands.length > 0) {
+        const nextPreview = interpretScheduleCommands(payload.normalizedCommands, {
           ...context,
           now: new Date().toISOString(),
           selectedTaskId: taskId,
         });
-        setPreview(nextPreview);
         if (nextPreview.status === 'ready' && nextPreview.actions.length > 0) {
-          assistantReply = `I placed this change on the calendar as a draft.\n\n${nextPreview.summary}\n\nSelect **Save changes** above the calendar to confirm it.`;
+          setPreview(nextPreview);
+          assistantReply = `I placed ${nextPreview.actions.length === 1 ? 'the change' : `${nextPreview.actions.length} changes`} on your calendar as one draft.\n\n${nextPreview.summary}\n\nSelect **Save changes** above the calendar to confirm everything.`;
           const firstOccurrence = nextPreview.occurrences[0];
           if (firstOccurrence) {
             const nextDate = localDateCarrier(firstOccurrence.date);
@@ -833,7 +893,7 @@ export function Planner() {
 
   const applyPreview = useCallback(async () => {
     if (!userId || !preview || preview.status !== 'ready' || preview.actions.length === 0) return;
-    const freshPreview = interpretScheduleCommand(preview.command, {
+    const freshPreview = interpretScheduleCommands(preview.commands, {
       ...context,
       now: new Date().toISOString(),
       selectedTaskId,
