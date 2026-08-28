@@ -45,15 +45,30 @@ test('account changes isolate chat, quota, and undo snapshots immediately', asyn
   assert.match(source, /usage=\{activeUsage\}/);
 });
 
-test('quota exhaustion unlocks only after the applicable UTC reset', async () => {
-  const source = await readFile(plannerUrl, 'utf8');
+test('Assistant UI does not show or enforce stale daily/monthly quota values', async () => {
+  const source = await readFile(chatUrl, 'utf8');
 
-  assert.match(source, /function nextAssistantQuotaReset/);
-  assert.match(source, /Date\.UTC\(now\.getUTCFullYear\(\), now\.getUTCMonth\(\) \+ 1, 1\)/);
-  assert.match(source, /Date\.UTC\(now\.getUTCFullYear\(\), now\.getUTCMonth\(\), now\.getUTCDate\(\) \+ 1\)/);
-  assert.match(source, /window\.setTimeout\(armReset/);
-  const newChatSection = source.slice(source.indexOf('const startNewChat'), source.indexOf('const chatReady'));
-  assert.doesNotMatch(newChatSection, /setUsage\(/);
+  assert.doesNotMatch(source, /AI messages? left today/i);
+  assert.doesNotMatch(source, /used your Assistant allowance/i);
+  assert.doesNotMatch(source, /Assistant limit reached/i);
+  assert.doesNotMatch(source, /disabled=\{quotaExhausted\}/);
+  assert.doesNotMatch(source, /!quotaExhausted/);
+});
+
+test('Assistant replies render safe paragraphs, line breaks, lists, and bold text', async () => {
+  const source = await readFile(chatUrl, 'utf8');
+
+  assert.match(source, /function parseAssistantMessageBlocks/);
+  assert.match(source, /function normalizeAssistantMessageLines/);
+  assert.match(source, /Older stored replies were flattened/);
+  assert.match(source, /\(\?=\[-\+\*\]\\s\+\(\?:\\\*\\\*\|__\)\)/);
+  assert.match(source, /kind: 'paragraph'/);
+  assert.match(source, /'unordered-list' \| 'ordered-list'/);
+  assert.match(source, /<p key=/);
+  assert.match(source, /<br \/>/);
+  assert.match(source, /<strong key=/);
+  assert.match(source, /const List = block\.kind === 'ordered-list' \? 'ol' : 'ul'/);
+  assert.doesNotMatch(source, /dangerouslySetInnerHTML|innerHTML\s*=/);
 });
 
 test('Assistant requires a fresh deterministic preview before applying', async () => {

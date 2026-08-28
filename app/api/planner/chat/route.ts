@@ -11,9 +11,7 @@ import {
   failAssistantUsage,
   parseAssistantProviderUsage,
   reserveAssistantUsage,
-  restoreFailedReservationUsage,
   type AssistantProviderUsage,
-  type AssistantUsageRemaining,
   type AssistantUsageRpcClient,
 } from '@/lib/planner/assistant-usage';
 
@@ -38,7 +36,7 @@ interface DeepSeekResponse {
 interface ChatResponseBody {
   reply: string;
   normalizedCommand: string | null;
-  usage: AssistantUsageRemaining | null;
+  usage: null;
   aiUsed: boolean;
 }
 
@@ -66,9 +64,8 @@ function isRateLimited(userId: string): boolean {
 function unavailable(
   reply: string,
   status: number,
-  usage: AssistantUsageRemaining | null = null,
 ) {
-  return noStoreJson({ reply, normalizedCommand: null, usage, aiUsed: false }, { status });
+  return noStoreJson({ reply, normalizedCommand: null, usage: null, aiUsed: false }, { status });
 }
 
 export async function POST(request: NextRequest) {
@@ -111,16 +108,8 @@ export async function POST(request: NextRequest) {
   const requestId = crypto.randomUUID();
   const usageClient = supabase as unknown as AssistantUsageRpcClient;
   const usageAttempt = await reserveAssistantUsage(usageClient, requestId);
-  if (usageAttempt.error || !usageAttempt.reservation) {
-    return unavailable('Orderly could not verify your Assistant allowance. Try again in a moment.', 503);
-  }
-  const { reservation } = usageAttempt;
-  if (!reservation.allowed) {
-    return unavailable(
-      'You have reached your Assistant message limit. Your planner and manual scheduling still work.',
-      429,
-      reservation.usage,
-    );
+  if (usageAttempt.error || !usageAttempt.reservation?.allowed) {
+    return unavailable('Orderly could not start Assistant usage tracking. Try again in a moment.', 503);
   }
 
   const providerController = new AbortController();
@@ -168,7 +157,6 @@ export async function POST(request: NextRequest) {
       return unavailable(
         'I could not reach the Assistant right now. Try again in a moment.',
         503,
-        reservation.usage,
       );
     }
 
@@ -184,30 +172,26 @@ export async function POST(request: NextRequest) {
       return unavailable(
         'I received an incomplete response. Please send that message again.',
         502,
-        reservation.usage,
       );
     }
 
     return noStoreJson({
       reply: result.reply,
       normalizedCommand: result.normalizedCommand,
-      usage: reservation.usage,
+      usage: null,
       aiUsed: true,
     });
   } catch {
-    let failureUsage = reservation.usage;
     if (providerDispatched) {
       await completeAssistantUsage(usageClient, requestId, EMPTY_PROVIDER_USAGE, model);
     } else {
-      const failed = await failAssistantUsage(usageClient, requestId);
-      if (failed) failureUsage = restoreFailedReservationUsage(reservation.usage);
+      await failAssistantUsage(usageClient, requestId);
     }
     return unavailable(
       request.signal.aborted
         ? 'That response was stopped.'
         : 'The Assistant took too long to respond. Try again in a moment.',
       request.signal.aborted ? 499 : 504,
-      failureUsage,
     );
   } finally {
     clearTimeout(timeout);

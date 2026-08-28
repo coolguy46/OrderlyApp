@@ -1,5 +1,7 @@
--- Durable, per-user DeepSeek request quotas for Orderly Assistant.
+-- Durable, per-user DeepSeek request and token usage for Orderly Assistant.
 -- Additive and idempotent: safe to run more than once in Supabase SQL Editor.
+-- Passing zero limits disables daily/monthly quota enforcement while retaining
+-- the per-request ledger and provider token accounting.
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
@@ -23,16 +25,15 @@ CREATE INDEX IF NOT EXISTS idx_assistant_ai_usage_user_created
 
 ALTER TABLE assistant_ai_usage ENABLE ROW LEVEL SECURITY;
 
--- Usage details and reservation UUIDs are intentionally server-only. The API
--- returns only remaining counts; exposing active request IDs would let a
--- browser mark an in-flight reservation as failed.
+-- Usage details and reservation UUIDs are intentionally server-only. Exposing
+-- active request IDs would let a browser mark an in-flight reservation failed.
 DROP POLICY IF EXISTS "Users view own Assistant usage" ON assistant_ai_usage;
 REVOKE ALL ON assistant_ai_usage FROM PUBLIC, anon, authenticated;
 
 CREATE OR REPLACE FUNCTION assistant_reserve_ai_request(
   p_request_id UUID,
-  p_daily_limit INTEGER DEFAULT 10,
-  p_monthly_limit INTEGER DEFAULT 100
+  p_daily_limit INTEGER DEFAULT 0,
+  p_monthly_limit INTEGER DEFAULT 0
 )
 RETURNS TABLE (
   allowed BOOLEAN,
@@ -47,36 +48,46 @@ SET search_path = public, pg_temp
 AS $$
 DECLARE
   v_user_id UUID := auth.uid();
-  v_daily_limit INTEGER := LEAST(GREATEST(COALESCE(p_daily_limit, 10), 1), 1000);
-  v_monthly_limit INTEGER := LEAST(GREATEST(COALESCE(p_monthly_limit, 100), 1), 20000);
-  v_daily_used INTEGER;
-  v_monthly_used INTEGER;
+  v_limits_enabled BOOLEAN := COALESCE(p_daily_limit, 0) > 0
+    AND COALESCE(p_monthly_limit, 0) > 0;
+  v_daily_limit INTEGER := CASE WHEN v_limits_enabled
+    THEN LEAST(GREATEST(p_daily_limit, 1), 1000)
+    ELSE 0
+  END;
+  v_monthly_limit INTEGER := CASE WHEN v_limits_enabled
+    THEN LEAST(GREATEST(p_monthly_limit, 1), 20000)
+    ELSE 0
+  END;
+  v_daily_used INTEGER := 0;
+  v_monthly_used INTEGER := 0;
 BEGIN
   IF v_user_id IS NULL THEN
     RAISE EXCEPTION 'Authentication required' USING ERRCODE = '42501';
   END IF;
 
-  -- Serialize quota checks for one account so simultaneous requests cannot
-  -- both pass the count and overspend the user's allowance.
-  PERFORM pg_advisory_xact_lock(hashtextextended(v_user_id::TEXT, 0));
+  IF v_limits_enabled THEN
+    -- Serialize optional quota checks for one account so simultaneous requests
+    -- cannot both pass the count and overspend an enabled allowance.
+    PERFORM pg_advisory_xact_lock(hashtextextended(v_user_id::TEXT, 0));
 
-  SELECT COUNT(*)::INTEGER
-    INTO v_daily_used
-    FROM assistant_ai_usage AS usage_row
-   WHERE usage_row.user_id = v_user_id
-     AND usage_row.status IN ('reserved', 'completed')
-     AND usage_row.created_at >= date_trunc('day', NOW() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC';
+    SELECT COUNT(*)::INTEGER
+      INTO v_daily_used
+      FROM assistant_ai_usage AS usage_row
+     WHERE usage_row.user_id = v_user_id
+       AND usage_row.status IN ('reserved', 'completed')
+       AND usage_row.created_at >= date_trunc('day', NOW() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC';
 
-  SELECT COUNT(*)::INTEGER
-    INTO v_monthly_used
-    FROM assistant_ai_usage AS usage_row
-   WHERE usage_row.user_id = v_user_id
-     AND usage_row.status IN ('reserved', 'completed')
-     AND usage_row.created_at >= date_trunc('month', NOW() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC';
+    SELECT COUNT(*)::INTEGER
+      INTO v_monthly_used
+      FROM assistant_ai_usage AS usage_row
+     WHERE usage_row.user_id = v_user_id
+       AND usage_row.status IN ('reserved', 'completed')
+       AND usage_row.created_at >= date_trunc('month', NOW() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC';
 
-  IF v_daily_used >= v_daily_limit OR v_monthly_used >= v_monthly_limit THEN
-    RETURN QUERY SELECT FALSE, v_daily_used, v_monthly_used, v_daily_limit, v_monthly_limit;
-    RETURN;
+    IF v_daily_used >= v_daily_limit OR v_monthly_used >= v_monthly_limit THEN
+      RETURN QUERY SELECT FALSE, v_daily_used, v_monthly_used, v_daily_limit, v_monthly_limit;
+      RETURN;
+    END IF;
   END IF;
 
   INSERT INTO assistant_ai_usage (request_id, user_id, status)
@@ -158,4 +169,4 @@ GRANT EXECUTE ON FUNCTION assistant_complete_ai_request(UUID, INTEGER, INTEGER, 
 GRANT EXECUTE ON FUNCTION assistant_fail_ai_request(UUID) TO authenticated;
 
 COMMENT ON TABLE assistant_ai_usage IS
-  'Per-request Orderly Assistant quota ledger and provider token usage, reset by UTC day/month.';
+  'Per-request Orderly Assistant provider token usage ledger; optional message quotas use UTC boundaries.';

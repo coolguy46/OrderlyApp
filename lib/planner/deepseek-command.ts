@@ -127,7 +127,7 @@ Conversation rules:
 3. For questions, analysis, recommendations, brainstorming, or clarification, set normalizedCommand to null.
 4. Set normalizedCommand only when the user explicitly asks to add, schedule, move, resize, repeat, unschedule, or remove something. If the requested change is ambiguous, ask a brief clarifying question and set normalizedCommand to null.
 5. Never claim a schedule change was applied. When normalizedCommand is present, explain that Orderly prepared a preview that the user can review.
-6. Keep replies under 180 words. Do not use markdown tables.
+6. Keep replies under 180 words. Use short paragraphs and, when helpful, bullet or numbered lists and **bold** emphasis. Do not use markdown tables, headings, code blocks, links, or HTML.
 
 Supported normalized command forms:
 - Schedule <task or activity> <date> at <time> for <duration>
@@ -154,6 +154,19 @@ function boundedString(value: unknown, maximum: number): string | null {
     .trim()
     .replace(/\s+/g, ' ');
   return normalized ? normalized.slice(0, maximum) : null;
+}
+
+function boundedMultilineString(value: unknown, maximum: number): string | null {
+  if (typeof value !== 'string') return null;
+  const normalized = value
+    .replace(/\r\n?/g, '\n')
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, ' ')
+    .split('\n')
+    .map(line => line.replace(/\s+/g, ' ').trim())
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+  return normalized ? normalized.slice(0, maximum).trimEnd() : null;
 }
 
 function boundedUntrustedText(value: unknown, maximum: number): string | null {
@@ -467,7 +480,7 @@ export function parsePlannerChatAIJson(value: unknown): PlannerChatAIResult | nu
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
     const record = parsed as Record<string, unknown>;
     if (Object.keys(record).some(key => key !== 'reply' && key !== 'normalizedCommand')) return null;
-    const reply = boundedString(record.reply, MAX_CHAT_REPLY_LENGTH);
+    const reply = boundedMultilineString(record.reply, MAX_CHAT_REPLY_LENGTH);
     if (!reply) return null;
     if (record.normalizedCommand !== null && record.normalizedCommand !== undefined) {
       const normalizedCommand = boundedString(

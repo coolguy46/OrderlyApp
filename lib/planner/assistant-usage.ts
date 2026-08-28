@@ -9,7 +9,7 @@ export interface AssistantUsageRemaining {
 export interface AssistantUsageReservation {
   allowed: boolean;
   requestId: string;
-  usage: AssistantUsageRemaining;
+  usage: AssistantUsageRemaining | null;
 }
 
 export interface AssistantProviderUsage {
@@ -45,6 +45,7 @@ function boundedLimit(value: string | undefined, fallback: number, maximum: numb
 }
 
 export function getAssistantUsageLimits(environment: NodeJS.ProcessEnv = process.env) {
+  if (environment.AI_ASSISTANT_MESSAGE_LIMITS_ENABLED !== 'true') return null;
   return {
     daily: boundedLimit(environment.DEEPSEEK_DAILY_MESSAGE_LIMIT, DEFAULT_ASSISTANT_DAILY_LIMIT, 1_000),
     monthly: boundedLimit(
@@ -97,13 +98,16 @@ export function parseAssistantUsageReservation(
   if (dailyUsed === null || monthlyUsed === null || dailyLimit === null || monthlyLimit === null) {
     return null;
   }
+  if ((dailyLimit === 0) !== (monthlyLimit === 0)) return null;
   return {
     allowed: record.allowed,
     requestId,
-    usage: {
-      remainingDaily: Math.max(0, dailyLimit - dailyUsed),
-      remainingMonthly: Math.max(0, monthlyLimit - monthlyUsed),
-    },
+    usage: dailyLimit === 0
+      ? null
+      : {
+        remainingDaily: Math.max(0, dailyLimit - dailyUsed),
+        remainingMonthly: Math.max(0, monthlyLimit - monthlyUsed),
+      },
   };
 }
 
@@ -115,14 +119,18 @@ export async function reserveAssistantUsage(
   const limits = getAssistantUsageLimits(environment);
   const { data, error } = await client.rpc('assistant_reserve_ai_request', {
     p_request_id: requestId,
-    p_daily_limit: limits.daily,
-    p_monthly_limit: limits.monthly,
+    p_daily_limit: limits?.daily || 0,
+    p_monthly_limit: limits?.monthly || 0,
   });
   if (error) {
-    console.error('Assistant quota reservation failed:', error.code || error.message || 'unknown error');
+    console.error('Assistant usage reservation failed:', error.code || error.message || 'unknown error');
     return { reservation: null, error: 'unavailable' };
   }
   const reservation = parseAssistantUsageReservation(data, requestId);
+  if (reservation && !limits && reservation.usage !== null) {
+    console.error('Assistant usage reservation failed: database migration does not support disabled limits');
+    return { reservation: null, error: 'unavailable' };
+  }
   return reservation
     ? { reservation, error: null }
     : { reservation: null, error: 'unavailable' };
@@ -175,6 +183,7 @@ export function restoreFailedReservationUsage(
   environment: NodeJS.ProcessEnv = process.env,
 ): AssistantUsageRemaining {
   const limits = getAssistantUsageLimits(environment);
+  if (!limits) return usage;
   return {
     remainingDaily: Math.min(limits.daily, usage.remainingDaily + 1),
     remainingMonthly: Math.min(limits.monthly, usage.remainingMonthly + 1),

@@ -208,11 +208,25 @@ test('chat parser accepts replies and optional preview commands but rejects mode
     parsePlannerChatAIJson('{"reply":"Done","normalizedCommand":null,"applied":true}'),
     null,
   );
+
+  const formatted = parsePlannerChatAIJson(JSON.stringify({
+    reply: 'Start here:\r\n\r\n- **Review** chemistry\r\n- Take a break\r\n\r\n1. Pick a time\r\n2. Start',
+    normalizedCommand: null,
+  }));
+  assert.equal(
+    formatted?.reply,
+    'Start here:\n\n- **Review** chemistry\n- Take a break\n\n1. Pick a time\n2. Start',
+  );
 });
 
-test('usage helpers enforce defaults and parse provider token accounting', () => {
-  assert.deepEqual(getAssistantUsageLimits({}), { daily: 10, monthly: 100 });
+test('usage helpers disable message quotas by default and parse provider token accounting', () => {
+  assert.equal(getAssistantUsageLimits({}), null);
+  assert.equal(getAssistantUsageLimits({
+    DEEPSEEK_DAILY_MESSAGE_LIMIT: '25',
+    DEEPSEEK_MONTHLY_MESSAGE_LIMIT: '500',
+  }), null);
   assert.deepEqual(getAssistantUsageLimits({
+    AI_ASSISTANT_MESSAGE_LIMITS_ENABLED: 'true',
     DEEPSEEK_DAILY_MESSAGE_LIMIT: '25',
     DEEPSEEK_MONTHLY_MESSAGE_LIMIT: '500',
   }), { daily: 25, monthly: 500 });
@@ -236,17 +250,50 @@ test('usage helpers enforce defaults and parse provider token accounting', () =>
   });
   assert.deepEqual(
     restoreFailedReservationUsage({ remainingDaily: 6, remainingMonthly: 82 }, {}),
-    { remainingDaily: 7, remainingMonthly: 83 },
+    { remainingDaily: 6, remainingMonthly: 82 },
   );
+  assert.deepEqual(parseAssistantUsageReservation([{
+    allowed: true,
+    daily_used: 1,
+    monthly_used: 1,
+    daily_limit: 0,
+    monthly_limit: 0,
+  }], 'request-unlimited'), {
+    allowed: true,
+    requestId: 'request-unlimited',
+    usage: null,
+  });
 });
 
-test('quota reservation fails closed and completion records actual token use', async () => {
-  const unavailable = await reserveAssistantUsage({
-    async rpc() {
-      return { data: null, error: { code: 'PGRST202', message: 'function missing' } };
-    },
-  }, 'request-missing', {});
-  assert.deepEqual(unavailable, { reservation: null, error: 'unavailable' });
+test('usage reservation fails closed, disables quotas, and records actual provider tokens', async () => {
+  const originalConsoleError = console.error;
+  console.error = () => {};
+  try {
+    const unavailable = await reserveAssistantUsage({
+      async rpc() {
+        return { data: null, error: { code: 'PGRST202', message: 'function missing' } };
+      },
+    }, 'request-missing', {});
+    assert.deepEqual(unavailable, { reservation: null, error: 'unavailable' });
+
+    const oldSchema = await reserveAssistantUsage({
+      async rpc() {
+        return {
+          data: [{
+            allowed: true,
+            daily_used: 1,
+            monthly_used: 1,
+            daily_limit: 1,
+            monthly_limit: 1,
+          }],
+          error: null,
+        };
+      },
+    }, 'request-old-schema', {});
+    assert.deepEqual(oldSchema, { reservation: null, error: 'unavailable' });
+  } finally {
+    console.error = originalConsoleError;
+  }
 
   const calls = [];
   const client = {
@@ -258,8 +305,8 @@ test('quota reservation fails closed and completion records actual token use', a
             allowed: true,
             daily_used: 1,
             monthly_used: 1,
-            daily_limit: 10,
-            monthly_limit: 100,
+            daily_limit: 0,
+            monthly_limit: 0,
           }],
           error: null,
         };
@@ -269,7 +316,15 @@ test('quota reservation fails closed and completion records actual token use', a
   };
   const allowed = await reserveAssistantUsage(client, 'request-allowed', {});
   assert.equal(allowed.reservation.allowed, true);
-  assert.deepEqual(allowed.reservation.usage, { remainingDaily: 9, remainingMonthly: 99 });
+  assert.equal(allowed.reservation.usage, null);
+  assert.deepEqual(calls[0], {
+    name: 'assistant_reserve_ai_request',
+    parameters: {
+      p_request_id: 'request-allowed',
+      p_daily_limit: 0,
+      p_monthly_limit: 0,
+    },
+  });
   assert.equal(await completeAssistantUsage(client, 'request-allowed', {
     promptTokens: 90,
     completionTokens: 25,
@@ -291,7 +346,7 @@ test('quota reservation fails closed and completion records actual token use', a
       return { data: false, error: null };
     },
   };
-  const originalConsoleError = console.error;
+  const originalCompletionConsoleError = console.error;
   console.error = () => {};
   try {
     assert.equal(await completeAssistantUsage(unconfirmedClient, 'not-completed', {
@@ -301,11 +356,11 @@ test('quota reservation fails closed and completion records actual token use', a
     }, 'deepseek-v4-flash'), false);
     assert.equal(await failAssistantUsage(unconfirmedClient, 'not-failed'), false);
   } finally {
-    console.error = originalConsoleError;
+    console.error = originalCompletionConsoleError;
   }
 });
 
-test('quota migration is atomic, authenticated, and records provider tokens', async () => {
+test('usage migration is authenticated, keeps token logging, and supports disabled quotas', async () => {
   const migration = await readFile(
     new URL('../lib/supabase/assistant-usage-migration.sql', import.meta.url),
     'utf8',
@@ -315,12 +370,17 @@ test('quota migration is atomic, authenticated, and records provider tokens', as
   assert.match(migration, /auth\.uid\(\)/i);
   assert.match(migration, /assistant_reserve_ai_request/i);
   assert.match(migration, /assistant_complete_ai_request/i);
+  assert.match(migration, /p_daily_limit INTEGER DEFAULT 0/i);
+  assert.match(migration, /p_monthly_limit INTEGER DEFAULT 0/i);
+  assert.match(migration, /IF v_limits_enabled THEN/i);
+  assert.match(migration, /v_daily_limit INTEGER := CASE WHEN v_limits_enabled[\s\S]*?ELSE 0/i);
+  assert.match(migration, /v_monthly_limit INTEGER := CASE WHEN v_limits_enabled[\s\S]*?ELSE 0/i);
   assert.match(migration, /prompt_tokens/i);
   assert.match(migration, /ENABLE ROW LEVEL SECURITY/i);
   assert.match(migration, /REVOKE ALL ON assistant_ai_usage FROM PUBLIC, anon, authenticated/i);
 });
 
-test('chat route is authenticated, quota-gated, abortable, and server-only', async () => {
+test('chat route is authenticated, usage-tracked, per-minute limited, abortable, and server-only', async () => {
   const route = await readFile(
     new URL('../app/api/planner/chat/route.ts', import.meta.url),
     'utf8',
@@ -331,6 +391,9 @@ test('chat route is authenticated, quota-gated, abortable, and server-only', asy
   assert.match(route, /AI_ASSISTANT_ENABLED/);
   assert.match(route, /reserveAssistantUsage/);
   assert.match(route, /completeAssistantUsage/);
+  assert.match(route, /isRateLimited\(user\.id\)/);
+  assert.match(route, /Retry-After', '60'/);
+  assert.match(route, /usage: null/);
   assert.match(route, /selectPlannerChatProviderContext/);
   assert.match(route, /request\.signal\.addEventListener\('abort'/);
   assert.match(route, /20_000/);
@@ -342,6 +405,8 @@ test('chat route is authenticated, quota-gated, abortable, and server-only', asy
     route,
     /if \(providerDispatched\) \{\s+await completeAssistantUsage\([\s\S]*?EMPTY_PROVIDER_USAGE/,
   );
+  assert.doesNotMatch(route, /reached your Assistant message limit/i);
+  assert.doesNotMatch(route, /verify your Assistant allowance/i);
   assert.doesNotMatch(route, /NEXT_PUBLIC_DEEPSEEK/);
   assert.doesNotMatch(route, /applyScheduleBatch|upsertTaskSchedule|addTask\(/);
 });

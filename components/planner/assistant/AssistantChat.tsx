@@ -1,6 +1,6 @@
 'use client';
 
-import type { RefObject } from 'react';
+import { Fragment, type ReactNode, type RefObject } from 'react';
 import {
   Bot,
   Check,
@@ -68,6 +68,126 @@ function timeLabel(value: string | null, timeZone: string): string {
     hour: 'numeric',
     minute: '2-digit',
   }).format(parsed);
+}
+
+type AssistantMessageBlock =
+  | { kind: 'paragraph'; lines: string[] }
+  | { kind: 'unordered-list' | 'ordered-list'; items: string[] };
+
+const BULLET_ITEM_PATTERN = /^\s*[-+*]\s+(.+)$/;
+const NUMBERED_ITEM_PATTERN = /^\s*\d+[.)]\s+(.+)$/;
+const BOLD_PATTERN = /(\*\*[^*\n]+?\*\*|__[^_\n]+?__)/g;
+
+function normalizeAssistantMessageLines(content: string): string[] {
+  const recoveredBullets = content
+    .replace(/\r\n?/g, '\n')
+    // Older stored replies were flattened by the API parser. Recover the
+    // provider's most obvious inline list boundaries without interpreting HTML.
+    .replace(/[ \t]+(?=[-+*]\s+(?:\*\*|__))/g, '\n');
+  return recoveredBullets.split('\n').flatMap(line => {
+    const hasNumberedListStart = /(?:^|[ \t])1[.)]\s+(?:\*\*|__|[A-Z])/.test(line);
+    return hasNumberedListStart
+      ? line.replace(/[ \t]+(?=\d+[.)]\s+(?:\*\*|__|[A-Z]))/g, '\n').split('\n')
+      : [line];
+  });
+}
+
+function parseAssistantMessageBlocks(content: string): AssistantMessageBlock[] {
+  const blocks: AssistantMessageBlock[] = [];
+  let paragraphLines: string[] = [];
+  let canContinueList = false;
+
+  const flushParagraph = () => {
+    if (paragraphLines.length > 0) {
+      blocks.push({ kind: 'paragraph', lines: paragraphLines });
+      paragraphLines = [];
+    }
+  };
+  for (const rawLine of normalizeAssistantMessageLines(content)) {
+    const line = rawLine.trim();
+    if (!line) {
+      flushParagraph();
+      canContinueList = false;
+      continue;
+    }
+
+    const bullet = line.match(BULLET_ITEM_PATTERN);
+    const numbered = line.match(NUMBERED_ITEM_PATTERN);
+    if (bullet || numbered) {
+      flushParagraph();
+      const kind = bullet ? 'unordered-list' : 'ordered-list';
+      const item = (bullet || numbered)?.[1] || line;
+      const previous = canContinueList ? blocks.at(-1) : null;
+      if (previous && previous.kind === kind) {
+        previous.items.push(item);
+      } else {
+        blocks.push({ kind, items: [item] });
+      }
+      canContinueList = true;
+      continue;
+    }
+
+    canContinueList = false;
+    paragraphLines.push(line);
+  }
+
+  flushParagraph();
+  return blocks;
+}
+
+function renderInlineBold(content: string, keyPrefix: string): ReactNode[] {
+  const result: ReactNode[] = [];
+  let start = 0;
+  let match: RegExpExecArray | null;
+  BOLD_PATTERN.lastIndex = 0;
+
+  while ((match = BOLD_PATTERN.exec(content)) !== null) {
+    if (match.index > start) result.push(content.slice(start, match.index));
+    result.push(
+      <strong key={`${keyPrefix}-bold-${match.index}`} className="font-semibold">
+        {match[0].slice(2, -2)}
+      </strong>,
+    );
+    start = match.index + match[0].length;
+  }
+  if (start < content.length) result.push(content.slice(start));
+  return result;
+}
+
+function AssistantMessageContent({ content }: { content: string }) {
+  const blocks = parseAssistantMessageBlocks(content);
+  return (
+    <div className="space-y-3">
+      {blocks.map((block, blockIndex) => {
+        if (block.kind === 'paragraph') {
+          return (
+            <p key={`paragraph-${blockIndex}`}>
+              {block.lines.map((line, lineIndex) => (
+                <Fragment key={`paragraph-${blockIndex}-line-${lineIndex}`}>
+                  {lineIndex > 0 && <br />}
+                  {renderInlineBold(line, `paragraph-${blockIndex}-line-${lineIndex}`)}
+                </Fragment>
+              ))}
+            </p>
+          );
+        }
+
+        const List = block.kind === 'ordered-list' ? 'ol' : 'ul';
+        return (
+          <List
+            key={`${block.kind}-${blockIndex}`}
+            className={cn('space-y-1 pl-5', block.kind === 'ordered-list' ? 'list-decimal' : 'list-disc')}
+          >
+            {block.items.map((item, itemIndex) => (
+              <li key={`${block.kind}-${blockIndex}-item-${itemIndex}`}>
+                {renderInlineBold(item, `${block.kind}-${blockIndex}-item-${itemIndex}`)}
+              </li>
+            ))}
+          </List>
+        );
+      })}
+    </div>
+  );
 }
 
 function PreviewCard({
@@ -183,9 +303,6 @@ export function AssistantChat({
   onSelectCandidate,
   examples,
   onExampleClick,
-  usage,
-  showQuota,
-  quotaExhausted,
   timeZone,
   inputRef,
   endRef,
@@ -243,12 +360,14 @@ export function AssistantChat({
                     </p>
                   )}
                   <div className={cn(
-                    'whitespace-pre-wrap rounded-2xl px-4 py-3 text-sm leading-6',
+                    'break-words rounded-2xl px-4 py-3 text-sm leading-6',
                     message.role === 'user'
                       ? 'rounded-br-md bg-primary text-primary-foreground'
                       : 'rounded-bl-md border border-border/60 bg-muted/45 text-foreground',
                   )}>
-                    {message.content}
+                    {message.role === 'assistant'
+                      ? <AssistantMessageContent content={message.content} />
+                      : <span className="whitespace-pre-wrap">{message.content}</span>}
                   </div>
                   {preview && previewMessageId === message.id && (
                     <PreviewCard
@@ -285,16 +404,6 @@ export function AssistantChat({
 
       <div className="sticky bottom-0 border-t border-border/50 bg-background/90 px-4 py-3 backdrop-blur-xl sm:px-6 sm:py-4">
         <div className="mx-auto max-w-4xl">
-          {showQuota && usage && (
-            <p className={cn(
-              'mb-2 text-xs',
-              quotaExhausted ? 'font-medium text-destructive' : 'text-muted-foreground',
-            )}>
-              {quotaExhausted
-                ? 'You have used your Assistant allowance for now.'
-                : `${usage.remainingDaily} AI message${usage.remainingDaily === 1 ? '' : 's'} left today · ${usage.remainingMonthly} this month`}
-            </p>
-          )}
           <div className="flex items-end gap-2 rounded-2xl border border-border/70 bg-card px-3 py-2 shadow-sm focus-within:border-primary/50 focus-within:ring-2 focus-within:ring-primary/10">
             <Textarea
               ref={inputRef}
@@ -303,13 +412,12 @@ export function AssistantChat({
               onKeyDown={event => {
                 if (event.key === 'Enter' && !event.shiftKey) {
                   event.preventDefault();
-                  if (!isThinking && !quotaExhausted) onSubmit();
+                  if (!isThinking) onSubmit();
                 }
               }}
-              placeholder={quotaExhausted ? 'Assistant limit reached' : 'Message Orderly…'}
+              placeholder="Message Orderly…"
               className="max-h-36 min-h-11 flex-1 resize-none border-0 bg-transparent px-1 py-2 shadow-none focus-visible:ring-0"
               aria-label="Message Orderly"
-              disabled={quotaExhausted}
             />
             {isThinking ? (
               <Button type="button" size="icon" variant="outline" onClick={onStop} aria-label="Stop response" className="mb-0.5 shrink-0 rounded-xl">
@@ -320,7 +428,7 @@ export function AssistantChat({
                 type="button"
                 size="icon"
                 onClick={onSubmit}
-                disabled={!command.trim() || quotaExhausted}
+                disabled={!command.trim()}
                 aria-label="Send message"
                 className="mb-0.5 shrink-0 rounded-xl"
               >

@@ -21,11 +21,15 @@ weekly Planner works without an AI key by using deterministic estimates. To add
 chat-based interpretation and richer assignment estimates, configure
 `DEEPSEEK_API_KEY`; `DEEPSEEK_MODEL` defaults to `deepseek-v4-flash`. Before
 enabling AI calls, apply `lib/supabase/assistant-usage-migration.sql`. It stores
-durable per-user request counts and provider token usage. The server defaults to
-10 messages per UTC day and 100 per UTC month; the optional
+durable per-user requests and provider token usage. Daily/monthly message quotas
+are temporarily disabled by default; existing installations must reapply that
+idempotent migration before deploying this version. The per-user
+`DEEPSEEK_REQUESTS_PER_MINUTE` abuse limit remains active. To restore the UTC
+day/month quotas later, apply the current migration and set
+`AI_ASSISTANT_MESSAGE_LIMITS_ENABLED=true`; the optional
 `DEEPSEEK_DAILY_MESSAGE_LIMIT` and `DEEPSEEK_MONTHLY_MESSAGE_LIMIT` variables
-override those limits. Set `AI_ASSISTANT_ENABLED=false` for an immediate kill
-switch without removing the API key.
+then control the allowances. Set `AI_ASSISTANT_ENABLED=false` for an immediate
+kill switch without removing the API key.
 
 The Planner migration is in `lib/supabase/planner-migration.sql`. Until that
 migration is applied, planner state is kept per user in the browser so the UI can
