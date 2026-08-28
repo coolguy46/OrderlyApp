@@ -62,7 +62,11 @@ Object.defineProperty(globalThis, 'localStorage', {
 const { generatePlannerPlan } = compiledRequire(join(buildRoot, 'lib/planner/engine.js'));
 const { getDefaultPlannerSettings } = compiledRequire(join(buildRoot, 'lib/planner/types.js'));
 const { usePlannerStore } = compiledRequire(join(buildRoot, 'lib/planner/store.js'));
-const { interpretScheduleCommand, interpretScheduleCommands } = compiledRequire(join(buildRoot, 'lib/schedule/commands.js'));
+const {
+  interpretDirectScheduleRequest,
+  interpretScheduleCommand,
+  interpretScheduleCommands,
+} = compiledRequire(join(buildRoot, 'lib/schedule/commands.js'));
 
 after(async () => {
   delete globalThis.localStorage;
@@ -225,6 +229,277 @@ test('deterministic commands warn about late work while collisions remain blocki
   assert.equal(collision.status, 'clarification');
   assert.deepEqual(collision.actions, []);
   assert.match(collision.summary, /overlaps “Class”/);
+});
+
+test('direct Assistant scheduling keeps explicit PM ranges authoritative across timezone boundaries', () => {
+  const context = {
+    now: '2026-08-28T19:00:00.000Z', // Friday noon in Los Angeles.
+    timeZone: 'America/Los_Angeles',
+    tasks: [],
+    entries: [],
+    occurrences: [],
+    selectedDate: '2026-08-24', // A calendar selection must not redefine “tonight”.
+    busy: [{
+      id: 'school-day',
+      title: 'School day (07:00–15:30)',
+      startAt: '2026-08-28T14:00:00.000Z',
+      endAt: '2026-08-28T22:30:00.000Z',
+    }],
+  };
+
+  for (const command of [
+    'create a task for tonight from 10 pm to 11 pm to work on my common app',
+    'Can you create a task tonight from 10 to 11 PM to work on my common app?',
+    'please schedule Common App tonight from 22:00 to 23:00',
+    'could u actually just add Common App tonight 10–11 PM',
+  ]) {
+    const preview = interpretDirectScheduleRequest(command, context);
+    assert.ok(preview, command);
+    assert.equal(preview.status, 'ready', `${command}: ${preview.summary}`);
+    assert.equal(preview.actions.length, 1);
+    assert.equal(preview.occurrences[0].date, '2026-08-28');
+    assert.equal(preview.occurrences[0].startAt, '2026-08-29T05:00:00.000Z');
+    assert.equal(preview.occurrences[0].durationSeconds, 3600);
+    assert.doesNotMatch(preview.summary, /overlap/i);
+  }
+});
+
+test('direct Assistant scheduling still blocks a genuine school-time intersection', () => {
+  const preview = interpretDirectScheduleRequest(
+    'create Common App tonight from 10 am to 11 am',
+    {
+      now: '2026-08-28T19:00:00.000Z',
+      timeZone: 'America/Los_Angeles',
+      tasks: [],
+      entries: [],
+      occurrences: [],
+      busy: [{
+        id: 'school-day',
+        title: 'School day (07:00–15:30)',
+        startAt: '2026-08-28T14:00:00.000Z',
+        endAt: '2026-08-28T22:30:00.000Z',
+      }],
+    },
+  );
+
+  assert.ok(preview);
+  assert.equal(preview.status, 'clarification');
+  assert.deepEqual(preview.actions, []);
+  assert.match(preview.summary, /overlaps “School day/);
+});
+
+test('direct Assistant scheduling supports overnight ranges and keeps conversation as chat', () => {
+  const context = {
+    now: '2026-08-28T19:00:00.000Z',
+    timeZone: 'America/Los_Angeles',
+    tasks: [],
+    entries: [],
+    occurrences: [],
+    busy: [],
+  };
+  const overnight = interpretDirectScheduleRequest(
+    'schedule late study tonight from 11 pm to 12 am',
+    context,
+  );
+  assert.ok(overnight);
+  assert.equal(overnight.status, 'ready');
+  assert.equal(overnight.occurrences[0].startAt, '2026-08-29T06:00:00.000Z');
+  assert.equal(overnight.occurrences[0].durationSeconds, 3600);
+
+  assert.equal(interpretDirectScheduleRequest('How does my week look?', context), null);
+  assert.equal(interpretDirectScheduleRequest('What assignments are missing?', context), null);
+});
+
+test('direct scheduling requires an actual mutation request and preserves multi-action messages', () => {
+  const context = {
+    now: '2026-08-28T19:00:00.000Z',
+    timeZone: 'America/Los_Angeles',
+    tasks: [],
+    entries: [],
+    occurrences: [],
+    busy: [],
+  };
+
+  for (const question of [
+    'Can I study tonight from 4 pm to 5 pm?',
+    'Should I study tonight from 4 pm to 5 pm?',
+    'Can you tell me whether I can study tonight from 4 pm to 5 pm?',
+    'Is 4 pm to 5 pm a good time to study?',
+  ]) {
+    assert.equal(interpretDirectScheduleRequest(question, context), null, question);
+  }
+  for (const bundle of [
+    'Schedule workout today at 5 pm and Common App tomorrow at 10 pm for 1 hour',
+    'Add homework today and workout tomorrow for 30 minutes',
+    'Schedule workout from 5 pm to 6 pm and Common App from 10 pm to 11 pm',
+  ]) {
+    assert.equal(interpretDirectScheduleRequest(bundle, context), null, bundle);
+  }
+});
+
+test('explicit direct multi-action requests preserve exact dates and meridiems before AI', () => {
+  const context = {
+    now: '2026-08-28T19:00:00.000Z', // Friday noon in Los Angeles.
+    timeZone: 'America/Los_Angeles',
+    tasks: [],
+    entries: [],
+    occurrences: [],
+    busy: [{
+      id: 'school-day',
+      title: 'School day (07:00–15:30)',
+      startAt: '2026-08-28T14:00:00.000Z',
+      endAt: '2026-08-28T22:30:00.000Z',
+    }],
+  };
+
+  const preview = interpretDirectScheduleRequest(
+    'schedule workout today 5–6 PM and schedule Common App tonight 10–11 PM',
+    context,
+  );
+
+  assert.ok(preview);
+  assert.equal(preview.status, 'ready', preview.summary);
+  assert.deepEqual(preview.commands, [
+    'schedule workout today 5–6 PM',
+    'schedule Common App tonight 10–11 PM',
+  ]);
+  assert.equal(preview.actions.length, 2);
+  assert.equal(preview.occurrences.length, 2);
+  assert.deepEqual(preview.occurrences.map(occurrence => ({
+    title: occurrence.title,
+    date: occurrence.date,
+    startAt: occurrence.startAt,
+    durationSeconds: occurrence.durationSeconds,
+  })), [
+    {
+      title: 'Workout',
+      date: '2026-08-28',
+      startAt: '2026-08-29T00:00:00.000Z',
+      durationSeconds: 3600,
+    },
+    {
+      title: 'Common App',
+      date: '2026-08-28',
+      startAt: '2026-08-29T05:00:00.000Z',
+      durationSeconds: 3600,
+    },
+  ]);
+});
+
+test('explicit direct bundles are atomic when any action is incomplete or ambiguous', () => {
+  const context = {
+    now: '2026-08-28T19:00:00.000Z',
+    timeZone: 'America/Los_Angeles',
+    tasks: [],
+    entries: [],
+    occurrences: [],
+    busy: [],
+  };
+
+  for (const command of [
+    'schedule workout today 5–6 PM and schedule Common App tonight',
+    'schedule workout today 5–6 and schedule Common App tonight 10–11 PM',
+  ]) {
+    const preview = interpretDirectScheduleRequest(command, context);
+    assert.ok(preview, command);
+    assert.equal(preview.status, 'clarification', command);
+    assert.deepEqual(preview.actions, [], command);
+    assert.deepEqual(preview.occurrences, [], command);
+    assert.match(preview.summary, /did not place any/i, command);
+  }
+});
+
+test('safe multi-action splitting does not turn questions or activity prose into writes', () => {
+  const context = {
+    now: '2026-08-28T19:00:00.000Z',
+    timeZone: 'America/Los_Angeles',
+    tasks: [],
+    entries: [],
+    occurrences: [],
+    busy: [],
+  };
+
+  assert.equal(
+    interpretDirectScheduleRequest(
+      'Can I schedule workout today 5–6 PM and schedule Common App tonight 10–11 PM?',
+      context,
+    ),
+    null,
+  );
+  assert.equal(
+    interpretDirectScheduleRequest(
+      'I am deciding whether to schedule workout today and schedule Common App tonight',
+      context,
+    ),
+    null,
+  );
+
+  const single = interpretDirectScheduleRequest(
+    'schedule research and write essay tonight 5–6 PM',
+    context,
+  );
+  assert.ok(single);
+  assert.equal(single.status, 'ready');
+  assert.equal(single.actions.length, 1);
+});
+
+test('direct scheduling cleans titles, rejects equal endpoints, and distinguishes title numbers from times', () => {
+  const context = {
+    now: '2026-08-28T19:00:00.000Z',
+    timeZone: 'America/Los_Angeles',
+    tasks: [],
+    entries: [],
+    occurrences: [],
+    busy: [],
+  };
+  const clean = interpretDirectScheduleRequest(
+    'schedule Common App tonight from 10 pm to 11 pm',
+    context,
+  );
+  assert.equal(clean.status, 'ready');
+  assert.equal(clean.actions[0].title, 'Common App');
+
+  const numbered = interpretDirectScheduleRequest(
+    'schedule 1-4 Problem Set tonight from 10 pm to 11 pm',
+    context,
+  );
+  assert.equal(numbered.status, 'ready');
+  assert.equal(numbered.actions[0].title, '1-4 Problem Set');
+  assert.equal(numbered.occurrences[0].durationSeconds, 3600);
+
+  const equal = interpretDirectScheduleRequest(
+    'schedule Common App tonight from 10 pm to 10 pm',
+    context,
+  );
+  assert.equal(equal.status, 'clarification');
+  assert.match(equal.summary, /start and end time are the same/i);
+  assert.deepEqual(equal.actions, []);
+});
+
+test('dayparts resolve short cross-midnight ranges and recurrence boundaries use the start date', () => {
+  const context = {
+    now: '2026-08-28T19:00:00.000Z',
+    timeZone: 'America/Los_Angeles',
+    tasks: [],
+    entries: [],
+    occurrences: [],
+    busy: [],
+  };
+  const overnight = interpretDirectScheduleRequest(
+    'schedule reading tonight from 11 to 1',
+    context,
+  );
+  assert.equal(overnight.status, 'ready');
+  assert.equal(overnight.occurrences[0].durationSeconds, 7200);
+
+  const recurring = interpretDirectScheduleRequest(
+    'schedule study for SAT next Monday at 6 pm for 30 minutes every day through Friday',
+    context,
+  );
+  assert.equal(recurring.status, 'ready');
+  assert.equal(recurring.actions[0].schedule.scheduledDate, '2026-08-31');
+  assert.equal(recurring.actions[0].schedule.recurrenceEndDate, '2026-09-04');
+  assert.equal(recurring.actions[0].title, 'SAT Study');
 });
 
 test('Assistant command bundles stage every change atomically and catch internal collisions', () => {

@@ -243,6 +243,34 @@ test('chat parser accepts replies and optional schedule commands but rejects mod
       normalizedCommands: [],
     },
   );
+
+  const emptyCommandOutcomeClaims = [
+    'I can\'t add it at 10–11 PM because that time overlaps the “School day” block.',
+    'That time conflicts with soccer practice, so I could not schedule it.',
+    'There would be a schedule conflict with school.',
+    'I added the workout to your calendar.',
+    'The requested event cannot be scheduled at that time.',
+    'Your event has been scheduled on the calendar.',
+    'I couldn’t move the task because the slot is occupied.',
+    'Unable to add that event because school is in the way.',
+    'Done.',
+  ];
+  for (const reply of emptyCommandOutcomeClaims) {
+    assert.deepEqual(
+      parsePlannerChatAIJson(JSON.stringify({ reply, normalizedCommands: [] })),
+      {
+        reply: 'I could not turn that into calendar changes yet. Tell me the missing date, time, or duration and I’ll place the complete draft on your calendar.',
+        normalizedCommands: [],
+      },
+    );
+  }
+
+  const workloadReply = 'You have three assignments due today. Thursday is your busiest day, and your overdue chemistry worksheet should be the first priority.';
+  assert.deepEqual(
+    parsePlannerChatAIJson(JSON.stringify({ reply: workloadReply, normalizedCommands: [] })),
+    { reply: workloadReply, normalizedCommands: [] },
+  );
+
   assert.equal(
     parsePlannerChatAIJson(JSON.stringify({
       reply: 'Too many',

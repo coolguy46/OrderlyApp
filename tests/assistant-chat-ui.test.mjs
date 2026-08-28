@@ -18,6 +18,13 @@ test('Assistant uses the bounded multi-turn chat API contract', async () => {
   assert.match(source, /busy: \(context\.busy \|\| \[\]\)\.slice\(0, 80\)/);
   assert.match(source, /interpretScheduleCommands\(payload\.normalizedCommands/);
   assert.match(source, /payload\.normalizedCommands\.length > 0/);
+  assert.match(source, /interpretDirectScheduleRequest\(normalized, commandContext\)/);
+  assert.ok(
+    source.indexOf('interpretDirectScheduleRequest(normalized, commandContext)')
+      < source.indexOf("fetch('/api/planner/chat'"),
+    'direct calendar commands must be validated before the paid AI request',
+  );
+  assert.match(source, /isUnverifiedCalendarOutcome\(assistantReply\)/);
 });
 
 test('Assistant history is account-scoped and bounded', async () => {
@@ -104,15 +111,20 @@ test('follow-up chat keeps an unsaved calendar draft and accepts atomic command 
     source.indexOf('const submitCommand'),
     source.indexOf('const applyPreview'),
   );
+  const presentationSection = source.slice(
+    source.indexOf('const presentCommandPreview'),
+    source.indexOf('const submitCommand'),
+  );
 
   const mutationBranch = submitSection.slice(submitSection.indexOf('if (payload.normalizedCommands.length > 0)'));
   const questionOnlyPath = submitSection.slice(0, submitSection.indexOf('if (payload.normalizedCommands.length > 0)'));
 
   assert.doesNotMatch(questionOnlyPath, /setPreview\(null\)/);
   assert.match(mutationBranch, /if \(payload\.normalizedCommands\.length > 0\)/);
-  assert.match(submitSection, /setPreview\(nextPreview\)/);
-  assert.match(mutationBranch, /else \{\s+setPreview\(null\);\s+setPreviewValidatedLocalDate\(null\);/);
-  assert.match(submitSection, /one draft/);
+  assert.match(presentationSection, /setPreview\(nextPreview\)/);
+  assert.doesNotMatch(presentationSection, /setPreview\(null\)/);
+  assert.match(submitSection, /presentCommandPreview\(nextPreview\)/);
+  assert.match(presentationSection, /one draft/);
 });
 
 test('Assistant drafts expire safely across a local-date boundary', async () => {

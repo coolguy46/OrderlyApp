@@ -35,13 +35,17 @@ import {
 import { usePlannerStore } from '@/lib/planner/store';
 import { getDefaultPlannerSettings, type PlannerSettings, type RecurringCommitmentInput } from '@/lib/planner/types';
 import {
+  interpretDirectScheduleRequest,
   interpretScheduleCommand,
   interpretScheduleCommands,
   type ScheduleCommandBusyInterval,
   type ScheduleCommandContext,
   type ScheduleCommandPreview,
 } from '@/lib/schedule/commands';
-import { recoverExplicitRangeFromFalseSchoolConflict } from '@/lib/schedule/assistant-command-fallback';
+import {
+  isUnverifiedCalendarOutcome,
+  recoverExplicitRangeFromFalseSchoolConflict,
+} from '@/lib/schedule/assistant-command-fallback';
 import {
   addLocalDays,
   buildScheduleOccurrences,
@@ -783,6 +787,26 @@ export function Planner() {
     setIsThinking(false);
   }, []);
 
+  const presentCommandPreview = useCallback((nextPreview: ScheduleCommandPreview): string => {
+    if (nextPreview.status === 'ready' && nextPreview.actions.length > 0) {
+      setPreview(nextPreview);
+      setPreviewValidatedLocalDate(localDate(dateCarrierInTimeZone(timeZone)));
+      const firstOccurrence = nextPreview.occurrences[0];
+      if (firstOccurrence) {
+        const nextDate = localDateCarrier(firstOccurrence.date);
+        setSelectedDate(nextDate);
+        setWeekStart(startOfWeek(nextDate, { weekStartsOn: 1 }));
+      }
+      setCalendarOpen(true);
+      return `I placed ${nextPreview.actions.length === 1 ? 'the change' : `${nextPreview.actions.length} changes`} on your calendar as one draft.\n\n${nextPreview.summary}\n\nSelect **Save changes** above the calendar to confirm everything.`;
+    }
+
+    // A question or clarification must not erase a different unsaved draft.
+    // Only a new, fully validated mutation replaces the active draft; users
+    // can explicitly discard it with the calendar control.
+    return previewReply(nextPreview);
+  }, [timeZone]);
+
   const submitCommand = useCallback(async (value = command, taskId = selectedTaskId) => {
     const normalized = value.trim();
     if (!normalized || isThinking || chatOwnerUserId !== userId) return;
@@ -795,6 +819,28 @@ export function Planner() {
     const conversation = [...messages, userMessage].slice(-CHAT_CONTEXT_LIMIT);
     setMessages(previous => [...previous, userMessage].slice(-CHAT_DISPLAY_LIMIT));
     setCommand('');
+
+    // Exact user-authored calendar operations go through the deterministic
+    // scheduler before any model request. The model must never decide whether
+    // 10 PM means 10 AM, whether two ISO intervals overlap, or whether a
+    // calendar change happened. This also avoids charging for requests the
+    // local scheduler can answer completely.
+    const commandContext = {
+      ...context,
+      now: new Date().toISOString(),
+      selectedTaskId: taskId,
+    };
+    const directPreview = interpretDirectScheduleRequest(normalized, commandContext);
+    if (directPreview) {
+      const assistantReply = presentCommandPreview(directPreview);
+      setMessages(previous => [...previous, {
+        id: `assistant-${Date.now()}`,
+        role: 'assistant' as const,
+        content: assistantReply,
+      }].slice(-CHAT_DISPLAY_LIMIT));
+      return;
+    }
+
     setIsThinking(true);
 
     chatAbortRef.current?.abort();
@@ -882,11 +928,6 @@ export function Planner() {
       const assistantMessageId = `assistant-${Date.now()}`;
       let assistantReply = payload.reply.trim() || 'Here is what I found.';
       if (payload.normalizedCommands.length > 0) {
-        const commandContext = {
-          ...context,
-          now: new Date().toISOString(),
-          selectedTaskId: taskId,
-        };
         let nextPreview = interpretScheduleCommands(payload.normalizedCommands, commandContext);
         if (payload.normalizedCommands.length === 1) {
           const normalizedCommand = payload.normalizedCommands[0];
@@ -900,22 +941,11 @@ export function Planner() {
             nextPreview = interpretScheduleCommands([recovery.command], commandContext);
           }
         }
-        if (nextPreview.status === 'ready' && nextPreview.actions.length > 0) {
-          setPreview(nextPreview);
-          setPreviewValidatedLocalDate(localDate(dateCarrierInTimeZone(timeZone)));
-          assistantReply = `I placed ${nextPreview.actions.length === 1 ? 'the change' : `${nextPreview.actions.length} changes`} on your calendar as one draft.\n\n${nextPreview.summary}\n\nSelect **Save changes** above the calendar to confirm everything.`;
-          const firstOccurrence = nextPreview.occurrences[0];
-          if (firstOccurrence) {
-            const nextDate = localDateCarrier(firstOccurrence.date);
-            setSelectedDate(nextDate);
-            setWeekStart(startOfWeek(nextDate, { weekStartsOn: 1 }));
-          }
-          setCalendarOpen(true);
-        } else {
-          setPreview(null);
-          setPreviewValidatedLocalDate(null);
-          assistantReply = previewReply(nextPreview);
-        }
+        assistantReply = presentCommandPreview(nextPreview);
+      } else if (isUnverifiedCalendarOutcome(assistantReply)) {
+        // A prose-only model response has no validated action or collision
+        // result behind it. Never present such a claim as calendar truth.
+        assistantReply = 'I could not verify that calendar claim, so I did not use it. Tell me the item, date, start time, and either an end time or duration, and Orderly will check the real calendar directly.';
       }
       setMessages(previous => [...previous, {
         id: assistantMessageId,
@@ -943,7 +973,7 @@ export function Planner() {
         setIsThinking(false);
       }
     }
-  }, [chatOwnerUserId, command, context, exams, isThinking, messages, pendingTasks, plannerSettings.bedtime, plannerSettings.weekendAvailableStart, selectedDate, selectedTaskId, subjects, timeZone, userId]);
+  }, [chatOwnerUserId, command, context, exams, isThinking, messages, pendingTasks, plannerSettings.bedtime, plannerSettings.weekendAvailableStart, presentCommandPreview, selectedDate, selectedTaskId, subjects, timeZone, userId]);
 
   const applyPreview = useCallback(async () => {
     if (!userId || !preview || preview.status !== 'ready' || preview.actions.length === 0) return;

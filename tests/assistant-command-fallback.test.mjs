@@ -1,7 +1,18 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { recoverExplicitRangeFromFalseSchoolConflict } from '../lib/schedule/assistant-command-fallback.ts';
+import {
+  isUnverifiedCalendarOutcome,
+  recoverExplicitRangeFromFalseSchoolConflict,
+} from '../lib/schedule/assistant-command-fallback.ts';
+
+test('prose-only model calendar outcomes are never treated as verified facts', () => {
+  assert.equal(isUnverifiedCalendarOutcome('I can\'t add it at 10–11 PM because that time overlaps school.'), true);
+  assert.equal(isUnverifiedCalendarOutcome('Orderly scheduled the task on your calendar.'), true);
+  assert.equal(isUnverifiedCalendarOutcome('That conflicts with your workout.'), true);
+  assert.equal(isUnverifiedCalendarOutcome('Your week has three assignments due Friday.'), false);
+  assert.equal(isUnverifiedCalendarOutcome('Would you like help organizing those assignments?'), false);
+});
 import { localDateTimeToIso } from '../lib/schedule/selectors.ts';
 
 const normalizedSchoolConflict = {

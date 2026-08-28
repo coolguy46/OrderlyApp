@@ -27,6 +27,17 @@ function hasExplicitClockRange(value: string): boolean {
 }
 
 /**
+ * Model prose is never authoritative evidence that a calendar mutation was
+ * applied, rejected, or conflicted. These phrases require a deterministic
+ * command preview before they may be shown as calendar facts.
+ */
+export function isUnverifiedCalendarOutcome(value: string): boolean {
+  return /\b(?:overlaps?|conflicts?)\b/i.test(value)
+    || /\b(?:i|orderly)\s+(?:can(?:not|'t)?|could(?:\s+not|n't)?|did(?:\s+not|n't)?|will|would|have|has)\s+(?:add|schedule|create|move|resize|repeat|remove|place|apply)\b/i.test(value)
+    || /\b(?:added|scheduled|created|moved|resized|repeated|removed|placed|applied)\b[\s\S]{0,80}\b(?:calendar|schedule|task|event|change)\b/i.test(value);
+}
+
+/**
  * Recovers an explicit user clock range when an AI rewrite accidentally
  * changes its meridiem or duration and creates a false school-time conflict.
  */

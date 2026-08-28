@@ -83,6 +83,22 @@ const DESCRIPTION_REQUEST_PATTERN = /\b(?:description|details?|instructions?|req
 const DIRECT_DESCRIPTION_FOLLOW_UP_PATTERN = /^(?:and\b|also\b|what about\b|how about\b|what are\b|yes\b|yeah\b|yep\b|sure\b|okay\b|ok\b|please\b|go ahead\b|do that\b|that\b|this\b|it\b|the one\b|which one\b|how long\b|summari[sz]e\b|give me\b|show me\b|tell me\b)/i;
 const EXPLICIT_SAFEGUARD_OVERRIDE_PATTERN = /(?:\b(?:anyway|allow\s+(?:the\s+)?overlap|even\s+if\s+(?:it\s+)?overlaps?|bypass\s+(?:the\s+)?(?:safeguards?|conflicts?|overlap\s+checks?)|override\s+(?:the\s+)?(?:safeguards?|conflicts?|overlap\s+checks?))\b)|(?:^|\s)force\s*[.!?]*$/i;
 const EMPTY_DRAFT_PROMISE_PATTERN = /\b(?:i(?:'ll|\s+will)|i\s+am\s+going\s+to|orderly\s+will)\b[\s\S]{0,220}\b(?:preview|calendar\s+draft)\b/i;
+const EMPTY_COMMAND_REPLY = 'I could not turn that into calendar changes yet. Tell me the missing date, time, or duration and I’ll place the complete draft on your calendar.';
+const EMPTY_COMMAND_MUTATION_RESULT_PATTERNS = [
+  // A model reply is not evidence that Orderly performed (or refused) a
+  // mutation. Those outcomes must come from the deterministic schedule engine.
+  /\b(?:i|orderly)\s+(?:(?:have|[’']ve|already)\s+)?(?:added|scheduled|created|moved|rescheduled|shifted|resized|extended|shortened|repeated|unscheduled|removed|deleted|placed|booked|saved|applied)\b/i,
+  /\b(?:i|orderly)\s+(?:can(?:not|[’']t)|could(?:not|n[’']t)|did(?:not|n[’']t)|will\s+not|won[’']t|(?:am|was)\s+(?:not\s+)?able\s+to|failed\s+to)\s+(?:add|schedule|create|move|reschedule|shift|resize|extend|shorten|repeat|unschedule|remove|delete|place|put|book|save|apply|fit)\b/i,
+  /\b(?:the|that|this|your|requested|proposed)?\s*(?:task|event|activity|change|request|time|slot|schedule)\s+(?:can(?:not|[’']t)|could(?:not|n[’']t)|will\s+not|won[’']t)\s+(?:be\s+)?(?:added|scheduled|created|moved|rescheduled|shifted|resized|extended|shortened|repeated|unscheduled|removed|deleted|placed|booked|saved|applied)\b/i,
+  /\b(?:the|that|this|it|your|requested|proposed)?\s*(?:time|slot|task|event|activity|change|request|schedule)\s+(?:(?:would|does?|will)\s+)?(?:overlaps?|conflicts?\s+with)\b/i,
+  /\b(?:there\s+(?:is|would\s+be)|i\s+(?:found|see))\s+(?:an?\s+)?(?:schedule\s+)?(?:overlap|conflict)\b/i,
+  /\b(?:the|that|this|your|requested|proposed)?\s*(?:time|slot|task|event|activity|change|request|schedule)\s+(?:is|would\s+be)\s+(?:blocked|unavailable|occupied)\b/i,
+  /\b(?:the|that|this|your|requested|proposed)?\s*(?:task|event|activity|change|request|time|slot|schedule)\s+(?:has|have|was|were|is|are)\s+(?:not\s+)?(?:been\s+)?(?:added|scheduled|created|moved|rescheduled|shifted|resized|extended|shortened|repeated|unscheduled|removed|deleted|placed|booked|saved|applied)\b/i,
+  /(?:^|[.!?]\s*)unable\s+to\s+(?:add|schedule|create|move|reschedule|shift|resize|extend|shorten|repeat|unschedule|remove|delete|place|put|book|save|apply|fit)\b/i,
+  /\b(?:adding|scheduling|creating|moving|rescheduling|shifting|resizing|extending|shortening|repeating|unscheduling|removing|deleting|placing|booking|saving|applying)\s+(?:the\s+)?(?:task|event|activity|change|request)?\s*(?:has\s+)?failed\b/i,
+  /\b(?:added|scheduled|created|moved|rescheduled|shifted|resized|extended|shortened|repeated|unscheduled|removed|deleted|placed|booked|saved|applied)\s+(?:it\s+)?(?:to|on|in|from)\s+(?:your\s+)?(?:calendar|schedule)\b/i,
+  /^\s*(?:done|added|scheduled|created|moved|rescheduled|removed|deleted|saved|applied)[.!\s\u2013\u2014-]*$/i,
+];
 const DESCRIPTION_MATCH_STOP_WORDS = new Set([
   'a', 'about', 'an', 'and', 'ap', 'assignment', 'break', 'canvas', 'class',
   'course', 'details', 'description', 'does', 'estimate', 'exam', 'for', 'give',
@@ -130,7 +146,8 @@ Conversation rules:
 4. Add one normalizedCommands item for every distinct change the user explicitly asks to add, schedule, move, resize, repeat, unschedule, or remove. Keep the same order as the request. If any required date, time, or duration is genuinely missing, ask one brief clarifying question and return an empty array.
 5. A short confirmation such as "yes", "do it", "go ahead", or "that's fine" means execute the concrete plan established in the immediately preceding conversation. Convert every concrete change in that plan into normalizedCommands. Do not merely repeat or promise the plan.
 6. Never use the word "preview" and never promise a future action. When normalizedCommands is non-empty, briefly say the changes are ready to be placed on the calendar. Orderly independently validates them and renders them as one calendar draft for confirmation.
-7. Keep replies under 180 words. Use short paragraphs and, when helpful, bullet or numbered lists and **bold** emphasis. Do not use markdown tables, headings, code blocks, links, or HTML.
+7. Never decide or claim that a requested time overlaps, conflicts, is blocked, or is unavailable. Emit the requested normalizedCommands and let Orderly's deterministic schedule engine check the actual instants. Likewise, never claim that a calendar change succeeded or failed based on conversation alone.
+8. Keep replies under 180 words. Use short paragraphs and, when helpful, bullet or numbered lists and **bold** emphasis. Do not use markdown tables, headings, code blocks, links, or HTML.
 
 Supported normalized command forms:
 - Schedule <task or activity> <date> at <time> for <duration>
@@ -487,8 +504,9 @@ export function parsePlannerChatAIJson(value: unknown): PlannerChatAIResult | nu
     const hasLegacyCommand = keys.includes('normalizedCommand');
     if (keys.some(key => key !== 'reply' && key !== 'normalizedCommands' && key !== 'normalizedCommand')) return null;
     if (hasCommandArray && hasLegacyCommand) return null;
-    let reply = boundedMultilineString(record.reply, MAX_CHAT_REPLY_LENGTH);
-    if (!reply) return null;
+    const parsedReply = boundedMultilineString(record.reply, MAX_CHAT_REPLY_LENGTH);
+    if (!parsedReply) return null;
+    let reply: string = parsedReply;
 
     const rawCommands = hasCommandArray
       ? record.normalizedCommands
@@ -509,8 +527,14 @@ export function parsePlannerChatAIJson(value: unknown): PlannerChatAIResult | nu
         normalizedCommands: [],
       };
     }
-    if (commands.length === 0 && EMPTY_DRAFT_PROMISE_PATTERN.test(reply)) {
-      reply = 'I could not turn that into calendar changes yet. Tell me the missing date, time, or duration and I’ll place the complete draft on your calendar.';
+    if (
+      commands.length === 0
+      && (
+        EMPTY_DRAFT_PROMISE_PATTERN.test(reply)
+        || EMPTY_COMMAND_MUTATION_RESULT_PATTERNS.some(pattern => pattern.test(reply))
+      )
+    ) {
+      reply = EMPTY_COMMAND_REPLY;
     }
     return { reply, normalizedCommands: commands };
   } catch {

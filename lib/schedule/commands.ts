@@ -110,6 +110,8 @@ interface ParsedClock {
 interface ParsedTimeRange {
   start: ParsedClock | null;
   end: ParsedClock | null;
+  ambiguous: boolean;
+  equalEndpoints: boolean;
 }
 
 interface ParsedRecurrence {
@@ -220,13 +222,19 @@ function localDateFromParts(year: number, month: number, day: number): LocalDate
 
 function parseNaturalDate(text: string, context: ScheduleCommandContext): ParsedDate {
   const nowDate = localDateParts(new Date(context.now), context.timeZone).date;
-  const isoMatch = text.match(/\b(\d{4})-(\d{1,2})-(\d{1,2})\b/);
+  // A date after "through" / "until" is a recurrence boundary, not the
+  // activity's start date. Parse that tail separately in recurrenceFromText.
+  const recurrenceBoundaryIndex = text.search(/\b(?:through|until|ending(?:\s+on)?)\b/i);
+  const startDateText = recurrenceBoundaryIndex >= 0
+    ? text.slice(0, recurrenceBoundaryIndex)
+    : text;
+  const isoMatch = startDateText.match(/\b(\d{4})-(\d{1,2})-(\d{1,2})\b/);
   if (isoMatch) {
     const parsed = localDateFromParts(Number(isoMatch[1]), Number(isoMatch[2]), Number(isoMatch[3]));
     if (parsed) return { date: parsed, explicit: true };
   }
 
-  const slashMatch = text.match(/\b(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\b/);
+  const slashMatch = startDateText.match(/\b(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\b/);
   if (slashMatch) {
     const currentYear = Number(nowDate.slice(0, 4));
     const rawYear = slashMatch[3] ? Number(slashMatch[3]) : currentYear;
@@ -236,7 +244,7 @@ function parseNaturalDate(text: string, context: ScheduleCommandContext): Parsed
   }
 
   const monthPattern = new RegExp(`\\b(${Object.keys(MONTHS).join('|')})\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:,?\\s+(\\d{4}))?\\b`, 'i');
-  const monthMatch = text.match(monthPattern);
+  const monthMatch = startDateText.match(monthPattern);
   if (monthMatch) {
     const parsed = localDateFromParts(
       Number(monthMatch[3] || nowDate.slice(0, 4)),
@@ -246,11 +254,11 @@ function parseNaturalDate(text: string, context: ScheduleCommandContext): Parsed
     if (parsed) return { date: parsed, explicit: true };
   }
 
-  if (/\bday\s+after\s+tomorrow\b/i.test(text)) return { date: addLocalDays(nowDate, 2), explicit: true };
-  if (/\btomorrow\b/i.test(text)) return { date: addLocalDays(nowDate, 1), explicit: true };
-  if (/\btoday\b/i.test(text)) return { date: nowDate, explicit: true };
+  if (/\bday\s+after\s+tomorrow\b/i.test(startDateText)) return { date: addLocalDays(nowDate, 2), explicit: true };
+  if (/\btomorrow\b/i.test(startDateText)) return { date: addLocalDays(nowDate, 1), explicit: true };
+  if (/\b(?:today|tonight)\b/i.test(startDateText)) return { date: nowDate, explicit: true };
 
-  const repeatedNext = text.match(/\b((?:next\s+)+)(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/i);
+  const repeatedNext = startDateText.match(/\b((?:next\s+)+)(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/i);
   if (repeatedNext) {
     const nextCount = repeatedNext[1].trim().split(/\s+/).length;
     const targetDay = DAY_NAMES.indexOf(repeatedNext[2].toLowerCase() as typeof DAY_NAMES[number]);
@@ -266,7 +274,7 @@ function parseNaturalDate(text: string, context: ScheduleCommandContext): Parsed
     // exam versus Saturday). Accept a full weekday anywhere, or a shorthand
     // only in explicit date language such as "on Sat" / "this Sat".
     const pattern = new RegExp(`\\b${full}\\b|\\b(?:on|this)\\s+${abbreviation}\\b`, 'i');
-    if (!pattern.test(text)) continue;
+    if (!pattern.test(startDateText)) continue;
     const difference = (day - localDayOfWeek(nowDate) + 7) % 7;
     return { date: addLocalDays(nowDate, difference), explicit: true };
   }
@@ -302,47 +310,151 @@ function normalizedDuration(duration: ParsedDuration | null, assumptions: string
   return rounded;
 }
 
-function clockValue(hourValue: string, minuteValue: string | undefined, periodValue: string | undefined): { time: string; assumption?: string } | null {
+function clockValue(
+  hourValue: string,
+  minuteValue: string | undefined,
+  periodValue: string | undefined,
+  assumedPeriod?: 'am' | 'pm',
+): { time: string; assumption?: string } | null {
   let hour = Number(hourValue);
   const minute = Number(minuteValue || 0);
   if (!Number.isInteger(hour) || !Number.isInteger(minute) || minute > 59 || hour > 23) return null;
-  const period = periodValue?.toLowerCase();
+  const explicitPeriod = periodValue?.toLowerCase();
+  const period = explicitPeriod || assumedPeriod;
   let assumption: string | undefined;
   if (period) {
     if (hour < 1 || hour > 12) return null;
     if (period === 'pm' && hour !== 12) hour += 12;
     if (period === 'am' && hour === 12) hour = 0;
-  } else if (hour >= 1 && hour <= 7) {
-    assumption = `Interpreted ${hourValue}${minuteValue ? `:${minuteValue}` : ''} as PM.`;
-    hour += 12;
+    if (!explicitPeriod) {
+      assumption = `Interpreted ${hourValue}${minuteValue ? `:${minuteValue}` : ''} as ${period.toUpperCase()}.`;
+    }
+  } else if (hour >= 1 && hour <= 12) {
+    // A bare 8 must not silently mean 8 AM while a bare 7 means 7 PM. The
+    // caller can supply a daypart or ask the user for AM/PM.
+    return null;
   }
   return { time: `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`, assumption };
 }
 
 function parseTimeRange(text: string): ParsedTimeRange {
-  const range = /\b(?:from\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*(?:-|–|—|to|until)\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/i.exec(text);
+  const daypart: 'am' | 'pm' | undefined = /\b(?:tonight|evening)\b/i.test(text)
+    ? 'pm'
+    : /\b(?:morning)\b/i.test(text)
+      ? 'am'
+      : undefined;
+  const rangePattern = /\b(from\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*(-|–|—|to|until)\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/gi;
+  const range = [...text.matchAll(rangePattern)].find(candidate => {
+    const separator = candidate[5].toLowerCase();
+    const prefix = text.slice(Math.max(0, (candidate.index || 0) - 24), candidate.index || 0);
+    const suffix = text.slice((candidate.index || 0) + candidate[0].length, (candidate.index || 0) + candidate[0].length + 16);
+    const nearbyDayOrTimeLanguage = /\b(?:today|tonight|tomorrow|morning|evening|between|at)\s*$/i.test(prefix);
+    const nearbyDaypart = /^\s*(?:tonight|morning|evening)\b/i.test(suffix);
+    // A hyphenated title such as "1-4 Problem Set" is not a clock range.
+    // Dashes need a clock signal; "to" and "until" are themselves signals.
+    return Boolean(
+      candidate[1]
+      || candidate[3]
+      || candidate[4]
+      || candidate[7]
+      || candidate[8]
+      || separator === 'to'
+      || separator === 'until'
+      || nearbyDaypart
+      || nearbyDayOrTimeLanguage
+    );
+  });
   if (range?.index !== undefined) {
-    const inheritedStartPeriod = range[3] || range[6];
-    const inheritedEndPeriod = range[6] || range[3];
-    const startValue = clockValue(range[1], range[2], inheritedStartPeriod);
-    const endValue = clockValue(range[4], range[5], inheritedEndPeriod);
+    const candidatePeriods = (
+      hourValue: string,
+      minuteValue: string | undefined,
+      explicitPeriod: string | undefined,
+      role: 'start' | 'end',
+    ) => {
+      if (explicitPeriod) return [clockValue(hourValue, minuteValue, explicitPeriod)].filter(Boolean);
+      const hour = Number(hourValue);
+      if (hour === 0 || hour > 12) return [clockValue(hourValue, minuteValue, undefined)].filter(Boolean);
+      // A daypart anchors the start. Keep both possibilities for an inferred
+      // end so "11 to 1 tonight" can correctly cross midnight.
+      if (daypart && role === 'start') {
+        return [clockValue(hourValue, minuteValue, undefined, daypart)].filter(Boolean);
+      }
+      return [
+        clockValue(hourValue, minuteValue, undefined, 'am'),
+        clockValue(hourValue, minuteValue, undefined, 'pm'),
+      ].filter(Boolean);
+    };
+    const startHour = range[2];
+    const startMinute = range[3];
+    const startPeriod = range[4];
+    const endHour = range[6];
+    const endMinute = range[7];
+    const endPeriod = range[8];
+    const sameWrittenClock = Number(startHour) === Number(endHour)
+      && Number(startMinute || 0) === Number(endMinute || 0);
+    const explicitlyDifferentPeriods = Boolean(
+      startPeriod
+      && endPeriod
+      && startPeriod.toLowerCase() !== endPeriod.toLowerCase()
+    );
+    if (sameWrittenClock && !explicitlyDifferentPeriods) {
+      return { start: null, end: null, ambiguous: false, equalEndpoints: true };
+    }
+    const starts = candidatePeriods(startHour, startMinute, startPeriod, 'start');
+    const ends = candidatePeriods(endHour, endMinute, endPeriod, 'end');
+    const bothBareTwelveHourClocks = !startPeriod && !endPeriod && !daypart
+      && Number(startHour) >= 1 && Number(startHour) <= 12
+      && Number(endHour) >= 1 && Number(endHour) <= 12;
+    if (bothBareTwelveHourClocks) {
+      return { start: null, end: null, ambiguous: true, equalEndpoints: false };
+    }
+
+    const pairs = starts.flatMap(start => ends.flatMap(end => {
+      if (!start || !end) return [];
+      const [startHour, startMinute] = start.time.split(':').map(Number);
+      const [endHour, endMinute] = end.time.split(':').map(Number);
+      const startTotal = startHour * 60 + startMinute;
+      const endTotal = endHour * 60 + endMinute;
+      const durationMinutes = endTotal > startTotal
+        ? endTotal - startTotal
+        : endTotal + 24 * 60 - startTotal;
+      return durationMinutes > 0 ? [{ start, end, durationMinutes }] : [];
+    })).sort((left, right) => left.durationMinutes - right.durationMinutes);
+    const selected = pairs[0];
+    const usedInference = !startPeriod || !endPeriod;
+    if (!selected || (usedInference && selected.durationMinutes > 12 * 60)) {
+      return { start: null, end: null, ambiguous: true, equalEndpoints: false };
+    }
     return {
-      start: startValue ? { ...startValue, index: range.index } : null,
-      end: endValue ? { ...endValue, index: range.index + range[0].length } : null,
+      start: { ...selected.start, index: range.index },
+      end: { ...selected.end, index: range.index + range[0].length },
+      ambiguous: false,
+      equalEndpoints: false,
     };
   }
 
   const single = /\b(?:at|from|starting(?:\s+at)?)\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/i.exec(text)
     || /\b(\d{1,2})(?::(\d{2}))\s*(am|pm)?\b/i.exec(text)
     || /\b(\d{1,2})\s*(am|pm)\b/i.exec(text);
-  if (!single || single.index === undefined) return { start: null, end: null };
+  if (!single || single.index === undefined) {
+    return { start: null, end: null, ambiguous: false, equalEndpoints: false };
+  }
   const period = single.length === 3 && /^(?:am|pm)$/i.test(single[2] || '') ? single[2] : single[3];
   const minute = single.length === 3 && period === single[2] ? undefined : single[2];
-  const value = clockValue(single[1], minute, period);
-  return { start: value ? { ...value, index: single.index } : null, end: null };
+  const value = clockValue(single[1], minute, period, daypart);
+  return {
+    start: value ? { ...value, index: single.index } : null,
+    end: null,
+    ambiguous: !value && Number(single[1]) >= 1 && Number(single[1]) <= 12,
+    equalEndpoints: false,
+  };
 }
 
-function recurrenceFromText(text: string, startDate: LocalDate): ParsedRecurrence {
+function recurrenceFromText(
+  text: string,
+  startDate: LocalDate,
+  context: ScheduleCommandContext,
+): ParsedRecurrence {
   let recurrence: ScheduleRecurrence = 'none';
   let recurrenceDays: number[] | null = null;
   let explicit = false;
@@ -376,6 +488,31 @@ function recurrenceFromText(text: string, startDate: LocalDate): ParsedRecurrenc
   if (daysDuration) recurrenceEndDate = addLocalDays(startDate, clamp(Number(daysDuration[1]), 1, 365) - 1);
   else if (/\bfor\s+(?:a|one|1)\s+week\b|\bfor\s+the\s+week\b/i.test(text)) {
     recurrenceEndDate = addLocalDays(startDate, 6);
+  } else {
+    const boundary = text.match(/\b(?:through|until|ending(?:\s+on)?)\s+(.+)$/i);
+    if (boundary) {
+      // Resolve relative boundaries from the first occurrence, not from the
+      // current day. For example, a plan beginning next Monday "through
+      // Friday" means that week's Friday.
+      const boundaryNow = localDateTimeToIso(startDate, '12:00:00', context.timeZone);
+      const parsedBoundary = parseNaturalDate(boundary[1], {
+        ...context,
+        now: boundaryNow || context.now,
+        selectedDate: null,
+      });
+      if (parsedBoundary.explicit) {
+        recurrenceEndDate = parsedBoundary.date;
+        const boundaryHasExplicitYear = /\b\d{4}\b|\/\d{2,4}\b/.test(boundary[1]);
+        if (recurrenceEndDate < startDate && !boundaryHasExplicitYear) {
+          const nextYear = Number(recurrenceEndDate.slice(0, 4)) + 1;
+          recurrenceEndDate = localDateFromParts(
+            nextYear,
+            Number(recurrenceEndDate.slice(5, 7)),
+            Number(recurrenceEndDate.slice(8, 10)),
+          );
+        }
+      }
+    }
   }
 
   return { recurrence, recurrenceDays, recurrenceEndDate, explicit };
@@ -397,21 +534,35 @@ function titleCase(value: string): string {
   }).join(' ');
 }
 
+function stripTrailingScheduleDetails(value: string): string {
+  return value
+    .replace(/\s+\b(?:every|each|daily|weekly|weekdays?)\b[\s\S]*$/i, '')
+    .replace(/\s+\b(?:through|until|ending(?:\s+on)?)\b[\s\S]*$/i, '')
+    .replace(/\s+\b(?:day\s+after\s+tomorrow|today|tonight|tomorrow)\b[\s\S]*$/i, '')
+    .replace(/\s+\b(?:(?:next\s+)+|this\s+|on\s+)(?:sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b[\s\S]*$/i, '')
+    .replace(/\s+\b(?:on\s+)?(?:\d{4}-\d{1,2}-\d{1,2}|\d{1,2}\/\d{1,2}(?:\/\d{2,4})?)\b[\s\S]*$/i, '')
+    .replace(new RegExp(`\\s+\\b(?:on\\s+)?(?:${Object.keys(MONTHS).join('|')})\\s+\\d{1,2}(?:st|nd|rd|th)?(?:,?\\s+\\d{4})?\\b[\\s\\S]*$`, 'i'), '')
+    .replace(/\s+\b(?:at|from|starting(?:\s+at)?|between)\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?\b[\s\S]*$/i, '')
+    .trim();
+}
+
 function activityTitle(text: string, duration: ParsedDuration | null): string {
-  const cutoff = duration?.index ?? text.length;
-  const prefix = text.slice(0, cutoff);
   const actionPattern = /\b(?:study(?:\s+for)?|practice|review|read|exercise|train|work\s+on|prepare\s+for|meditate|write|code)\b/gi;
-  const actionMatches = [...prefix.matchAll(actionPattern)];
+  const actionMatches = [...text.matchAll(actionPattern)];
   const actionMatch = actionMatches[actionMatches.length - 1];
-  let value = actionMatch?.index !== undefined ? prefix.slice(actionMatch.index) : prefix;
-  value = value
+  const durationComesAfterAction = actionMatch?.index !== undefined
+    && (duration?.index === undefined || duration.index > actionMatch.index);
+  const cutoff = durationComesAfterAction ? duration?.index ?? text.length : text.length;
+  let value = actionMatch?.index !== undefined
+    ? text.slice(actionMatch.index, cutoff)
+    : text.slice(0, duration?.index ?? text.length);
+  value = stripTrailingScheduleDetails(value
     .replace(/^(?:please\s+)?(?:can\s+you\s+)?(?:add|schedule|create|put|plan|include|fit\s+in)\s+/i, '')
+    .replace(/^(?:me\s+)?(?:a\s+|an\s+)?(?:task|event|block)\s+(?:called\s+|named\s+|to\s+)?/i, '')
     .replace(/^(?:me\s+)?(?:a\s+)?(?:week\s+)?(?:where\s+)?(?:i|it)\s+(?:can\s+|will\s+|has\s+)?/i, '')
-    .replace(/\b(?:today|tomorrow|next\s+)+(?:sunday|monday|tuesday|wednesday|thursday|friday|saturday)?\b.*$/i, '')
-    .replace(/\b(?:every|each|daily|weekly|weekdays?)\b.*$/i, '')
     .replace(/\bfor\s*$/i, '')
     .replace(/[,:-]+$/g, '')
-    .trim();
+    .trim());
 
   const study = value.match(/^study\s+for\s+(.+)$/i) || value.match(/^study\s+(.+)$/i);
   if (study) return `${titleCase(study[1].replace(/^(?:the|my)\s+/i, '').trim())} Study`;
@@ -522,6 +673,72 @@ function explicitOverlapPermission(command: string): boolean {
   return /\b(?:force|anyway|allow\s+(?:the\s+)?overlap|even\s+if\s+(?:it\s+)?overlaps?)\b/i.test(command);
 }
 
+function withoutConversationalCommandPrefix(value: string): string {
+  return value
+    .replace(
+      /^\s*(?:(?:please|actually|just)\s+)*(?:(?:can|could|would|will)\s+(?:you|u)\s+|(?:i(?:'d| would)\s+like|i\s+(?:want|need))(?:\s+(?:you|u))?\s+to\s+|go\s+ahead(?:\s+and)?\s+)?(?:(?:please|actually|just)\s+)*/i,
+      '',
+    )
+    .trim();
+}
+
+function hasExplicitDirectScheduleIntent(value: string): boolean {
+  const actionable = withoutConversationalCommandPrefix(value);
+  return /^(?:add|schedule|create|put|plan|include|fit\s+in|move|reschedule|shift|resize|extend|shorten|repeat|delete|remove|unschedule|clear)\b/i.test(actionable)
+    || /^(?:study(?:\s+for)?|practice|review|read|exercise|train|work\s+on|prepare\s+for|meditate|write|code)\b/i.test(actionable);
+}
+
+/**
+ * Split only when the user starts a second explicit calendar operation. This
+ * deliberately does not split on a bare "and" followed by activity prose, so
+ * titles such as "research and write essay" remain one activity. The original
+ * fragments are preserved so dates and AM/PM markers reach the deterministic
+ * interpreter without an AI rewrite.
+ */
+function splitExplicitDirectScheduleOperations(value: string): string[] | null {
+  const boundary = /(?:[;\n]+|\b(?:and\s+then|then|also|and)\b)\s*(?=(?:(?:please|actually|just)\s+)*(?:(?:can|could|would|will)\s+(?:you|u)\s+)?(?:add|schedule|create|put|plan|include|fit\s+in|move|reschedule|shift|resize|extend|shorten|repeat|delete|remove|unschedule|clear)\b)/gi;
+  const boundaries = [...value.matchAll(boundary)];
+  if (boundaries.length === 0) return null;
+
+  const parts: string[] = [];
+  let start = 0;
+  for (const match of boundaries) {
+    if (match.index === undefined) return null;
+    const part = value.slice(start, match.index).replace(/[;\s]+$/g, '').trim();
+    if (!part) return null;
+    parts.push(part);
+    start = match.index + match[0].length;
+  }
+  const finalPart = value.slice(start).trim();
+  if (!finalPart) return null;
+  parts.push(finalPart);
+
+  // Every fragment must independently authorize a calendar operation. If any
+  // part is ordinary prose, leave the whole message to chat instead.
+  return parts.length > 1 && parts.every(hasExplicitDirectScheduleIntent)
+    ? parts
+    : null;
+}
+
+function hasMultipleDirectScheduleOperations(value: string): boolean {
+  const actionStarts = [
+    ...value.matchAll(/(?:^|[;\n]|\b(?:and\s+then|then|also|and)\b)\s*(?:(?:please|actually|just)\s+)*(?:(?:can|could|would|will)\s+(?:you|u)\s+)?(?:add|schedule|create|put|plan|include|fit\s+in|move|reschedule|shift|resize|extend|shorten|repeat|delete|remove|unschedule|clear)\b/gi),
+  ];
+  if (actionStarts.length > 1) return true;
+  const clockIntents = [
+    ...value.matchAll(/\b(?:at|from|starting(?:\s+at)?)\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?\b/gi),
+  ];
+  if (clockIntents.length > 1) return true;
+  const explicitRanges = [
+    ...value.matchAll(/\b(?:from\s+)?\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s*(?:-|–|—|to|until)\s*\d{1,2}(?::\d{2})?\s*(?:am|pm)\b/gi),
+  ];
+  if (explicitRanges.length > 1) return true;
+  const dateAnchors = [
+    ...value.matchAll(/\b(?:today|tonight|tomorrow|day\s+after\s+tomorrow|(?:next\s+)+(?:sunday|monday|tuesday|wednesday|thursday|friday|saturday)|\d{4}-\d{1,2}-\d{1,2})\b/gi),
+  ];
+  return dateAnchors.length > 1 && /(?:;|\n|\band\b|\bthen\b|\balso\b)/i.test(value);
+}
+
 interface ScheduleGuardResult {
   blockedSummary: string | null;
   assumption: string | null;
@@ -615,17 +832,29 @@ function previewForAdd(command: string, context: ScheduleCommandContext): Schedu
   if (!date.explicit) assumptions.push(`Used ${date.date} because no date was provided.`);
   const durationMatch = parseDuration(command);
   const range = parseTimeRange(command);
+  if (range.equalEndpoints) {
+    return { ...preview, status: 'clarification', summary: 'The start and end time are the same. Choose a later end time, or give me an explicit duration.' };
+  }
+  if (range.ambiguous) {
+    return { ...preview, status: 'clarification', summary: 'Is that AM or PM? Include the meridiem so I can place it at the correct time.' };
+  }
   let durationSeconds = normalizedDuration(durationMatch, assumptions);
   if (!durationSeconds && range.start && range.end) {
     const start = localDateTimeToIso(date.date, `${range.start.time}:00`, context.timeZone);
-    const end = localDateTimeToIso(date.date, `${range.end.time}:00`, context.timeZone);
+    const sameDayEnd = localDateTimeToIso(date.date, `${range.end.time}:00`, context.timeZone);
+    const end = start && sameDayEnd && new Date(sameDayEnd).getTime() <= new Date(start).getTime()
+      ? localDateTimeToIso(addLocalDays(date.date, 1), `${range.end.time}:00`, context.timeZone)
+      : sameDayEnd;
     if (start && end) durationSeconds = (new Date(end).getTime() - new Date(start).getTime()) / 1000;
   }
   if (!durationSeconds) {
     return { ...preview, status: 'clarification', summary: 'How long should this activity take? Try “for 45 minutes” or “from 4 pm to 5 pm”.' };
   }
   if (range.start?.assumption) assumptions.push(range.start.assumption);
-  const recurrence = recurrenceFromText(command, date.date);
+  const recurrence = recurrenceFromText(command, date.date, context);
+  if (recurrence.recurrenceEndDate && recurrence.recurrenceEndDate < date.date) {
+    return { ...preview, status: 'clarification', summary: 'The repeat end date must be on or after the first scheduled date.' };
+  }
   const title = activityTitle(command, durationMatch);
   const existing = resolveTask(command, context);
   if (!existing.task && existing.candidates.length > 1) {
@@ -680,6 +909,7 @@ function previewForMove(command: string, context: ScheduleCommandContext): Sched
   if (!entry) return { ...preview, status: 'clarification', summary: `“${task.title}” has no saved schedule yet. Include a date, time, and duration.` };
   const date = parseNaturalDate(command, context);
   const range = parseTimeRange(command);
+  if (range.ambiguous) return { ...preview, status: 'clarification', summary: 'Is that AM or PM?' };
   const duration = normalizedDuration(parseDuration(command), preview.assumptions);
   let targetDate = date.explicit ? date.date : entry.scheduledDate;
   let targetTime = range.start?.time || localTimeFromIso(entry.startAt, context);
@@ -812,8 +1042,11 @@ function previewForRepeat(command: string, context: ScheduleCommandContext): Sch
   const task = resolved.task;
   const entry = entryForTask(context, task.id);
   const date = parseNaturalDate(command, context);
-  const recurrence = recurrenceFromText(command, date.date);
+  const recurrence = recurrenceFromText(command, date.date, context);
   if (!recurrence.explicit) return { ...preview, status: 'clarification', summary: 'How should it repeat? Try “every day”, “weekdays”, or “every Tuesday”.' };
+  if (recurrence.recurrenceEndDate && recurrence.recurrenceEndDate < date.date) {
+    return { ...preview, status: 'clarification', summary: 'The repeat end date must be on or after the first scheduled date.' };
+  }
   const duration = normalizedDuration(parseDuration(command), preview.assumptions) || entry?.durationSeconds || null;
   const time = parseTimeRange(command).start?.time || localTimeFromIso(entry?.startAt, context);
   const anchorDate = date.explicit ? date.date : entry?.scheduledDate || date.date;
@@ -979,16 +1212,17 @@ export function interpretScheduleCommand(
 ): ScheduleCommandPreview {
   const normalized = command.trim().replace(/\s+/g, ' ');
   if (!normalized) return { ...emptyPreview(command), status: 'clarification', summary: 'Type a schedule command first.' };
-  if (/\b(?:best\s+time|find\s+(?:me\s+)?(?:a\s+)?(?:gap|opening)|free\s+(?:time|slot)|when\s+(?:can|should)\s+i)\b/i.test(normalized)) {
+  const actionable = withoutConversationalCommandPrefix(normalized);
+  if (/\b(?:best\s+time|find\s+(?:me\s+)?(?:a\s+)?(?:gap|opening)|free\s+(?:time|slot)|when\s+(?:can|should)\s+i)\b/i.test(actionable)) {
     return previewForGap(normalized, context);
   }
-  if (/^\s*(?:delete|remove|unschedule|clear)\b/i.test(normalized)) return previewForDelete(normalized, context);
-  if (/^\s*(?:move|reschedule|shift)\b/i.test(normalized)) return previewForMove(normalized, context);
-  if (/^\s*(?:resize|extend|shorten)\b|\bchange\s+(?:the\s+)?duration\b/i.test(normalized)) return previewForResize(normalized, context);
-  if (/^\s*repeat\b|\bmake\b.+\brepeat\b/i.test(normalized)) return previewForRepeat(normalized, context);
-  if (/^\s*(?:add|schedule|create|put|plan|include|fit\s+in)\b/i.test(normalized)
-    || (/\b(?:study|practice|review|read|exercise|train|work\s+on|prepare\s+for|meditate|write|code)\b/i.test(normalized)
-      && Boolean(parseDuration(normalized)))) {
+  if (/^\s*(?:delete|remove|unschedule|clear)\b/i.test(actionable)) return previewForDelete(normalized, context);
+  if (/^\s*(?:move|reschedule|shift)\b/i.test(actionable)) return previewForMove(normalized, context);
+  if (/^\s*(?:resize|extend|shorten)\b|\bchange\s+(?:the\s+)?duration\b/i.test(actionable)) return previewForResize(normalized, context);
+  if (/^\s*repeat\b|\bmake\b.+\brepeat\b/i.test(actionable)) return previewForRepeat(normalized, context);
+  if (/^\s*(?:add|schedule|create|put|plan|include|fit\s+in)\b/i.test(actionable)
+    || (/\b(?:study|practice|review|read|exercise|train|work\s+on|prepare\s+for|meditate|write|code)\b/i.test(actionable)
+      && (Boolean(parseDuration(actionable)) || Boolean(parseTimeRange(actionable).end)))) {
     return previewForAdd(normalized, context);
   }
   return {
@@ -996,6 +1230,34 @@ export function interpretScheduleCommand(
     status: 'clarification',
     summary: 'Try “schedule chemistry tomorrow at 4 pm for 45 minutes”, “move chemistry to Friday at 5”, “repeat chemistry every weekday”, “unschedule chemistry”, or “find a 30 minute gap tomorrow”.',
   };
+}
+
+/**
+ * Recognize schedule operations that Orderly can answer authoritatively without
+ * asking an AI model to reason about dates, clocks, timezones, or collisions.
+ * A null result means the message is ordinary conversation or needs AI
+ * normalization; a non-null result must be rendered from this preview rather
+ * than from model prose.
+ */
+export function interpretDirectScheduleRequest(
+  command: string,
+  context: ScheduleCommandContext,
+): ScheduleCommandPreview | null {
+  const actionable = withoutConversationalCommandPrefix(command);
+  const gapRequest = /\b(?:best\s+time|find\s+(?:me\s+)?(?:a\s+)?(?:gap|opening)|free\s+(?:time|slot)|when\s+(?:can|should)\s+i)\b/i.test(actionable);
+  // Only imperative requests may bypass the model and become mutations.
+  // Questions such as "Can I study 4–5?" and "Should I schedule this?"
+  // describe possible times; they do not authorize a calendar write.
+  if (!gapRequest && !hasExplicitDirectScheduleIntent(command)) return null;
+  const explicitOperations = splitExplicitDirectScheduleOperations(command);
+  if (explicitOperations) {
+    // interpretScheduleCommands is all-or-nothing: an ambiguous, incomplete,
+    // invalid, or colliding fragment returns no actions for the entire bundle.
+    return interpretScheduleCommands(explicitOperations, context);
+  }
+  if (hasMultipleDirectScheduleOperations(command)) return null;
+  const preview = interpretScheduleCommand(command, context);
+  return preview.kind === null ? null : preview;
 }
 
 const MAX_COMMAND_BUNDLE_SIZE = 8;
