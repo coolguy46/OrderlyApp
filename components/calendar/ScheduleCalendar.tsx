@@ -355,13 +355,6 @@ export function ScheduleCalendar() {
       if (persistCommitmentOccurrence(block, nextStart, nextEnd)) toast.success(`${block.title} moved`);
       return;
     }
-    const deadline = occurrenceDeadline(occurrence, timeZone);
-    if (deadline && nextEnd.getTime() > new Date(deadline).getTime()) {
-      toast.error('That would end after the task deadline', {
-        description: `“${occurrence.title}” must be finished by ${format(new Date(deadline), 'MMM d, h:mm a')}.`,
-      });
-      return;
-    }
     const conflict = conflictingBlock(timedBlocks, block.id, nextStart, nextEnd);
     if (conflict) {
       toast.error('That time is already occupied', {
@@ -371,6 +364,12 @@ export function ScheduleCalendar() {
     }
     const nextDate = localDateFromIso(nextStart.toISOString(), timeZone);
     if (!nextDate) return;
+    const deadline = occurrenceDeadline(occurrence, timeZone);
+    if (deadline && nextEnd.getTime() > new Date(deadline).getTime()) {
+      toast.warning('Scheduled after the task deadline', {
+        description: `“${occurrence.title}” remains due ${format(new Date(deadline), 'MMM d, h:mm a')}.`,
+      });
+    }
     const entry = entriesByTaskId.get(occurrence.taskId);
     if (!entry || occurrence.recurrence === 'none') {
       upsertTaskSchedule(userId, occurrence.taskId, {
@@ -404,17 +403,18 @@ export function ScheduleCalendar() {
       if (persistCommitmentOccurrence(block, nextStart, nextEnd)) toast.success(`${block.title} updated`);
       return;
     }
-    const deadline = occurrenceDeadline(occurrence, timeZone);
-    if (deadline && nextEnd.getTime() > new Date(deadline).getTime()) {
-      toast.error('That duration would run past the deadline');
-      return;
-    }
     const conflict = conflictingBlock(timedBlocks, block.id, nextStart, nextEnd);
     if (conflict) {
       toast.error('That duration overlaps another item', {
         description: `Shorten it so it does not overlap “${conflict.title}”.`,
       });
       return;
+    }
+    const deadline = occurrenceDeadline(occurrence, timeZone);
+    if (deadline && nextEnd.getTime() > new Date(deadline).getTime()) {
+      toast.warning('This task now runs past its deadline', {
+        description: `The due date remains ${format(new Date(deadline), 'MMM d, h:mm a')}.`,
+      });
     }
     const durationSeconds = Math.max(60, differenceInSeconds(nextEnd, nextStart));
     const entry = entriesByTaskId.get(occurrence.taskId);
@@ -441,13 +441,6 @@ export function ScheduleCalendar() {
     if (!userId) return;
     const occurrence = occurrenceById.get(item.id);
     if (!occurrence) return;
-    const deadline = occurrenceDeadline(occurrence, timeZone);
-    if (deadline && nextEnd.getTime() > new Date(deadline).getTime()) {
-      toast.error('That would end after the task deadline', {
-        description: `“${occurrence.title}” must be finished by ${format(new Date(deadline), 'MMM d, h:mm a')}.`,
-      });
-      return;
-    }
     const conflict = conflictingBlock(timedBlocks, item.id, nextStart, nextEnd);
     if (conflict) {
       toast.error('That time is already occupied', {
@@ -457,6 +450,12 @@ export function ScheduleCalendar() {
     }
     const nextDate = localDateFromIso(nextStart.toISOString(), timeZone);
     if (!nextDate) return;
+    const deadline = occurrenceDeadline(occurrence, timeZone);
+    if (deadline && nextEnd.getTime() > new Date(deadline).getTime()) {
+      toast.warning('Scheduled after the task deadline', {
+        description: `“${occurrence.title}” remains due ${format(new Date(deadline), 'MMM d, h:mm a')}.`,
+      });
+    }
     const entry = entriesByTaskId.get(occurrence.taskId);
     const durationSeconds = Math.max(60, differenceInSeconds(nextEnd, nextStart));
     if (occurrence.recurrence !== 'none') {

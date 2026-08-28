@@ -3,13 +3,10 @@
 import { Fragment, type ReactNode, type RefObject } from 'react';
 import {
   Bot,
-  Check,
-  RotateCcw,
   Send,
   Sparkles,
   X,
 } from 'lucide-react';
-import type { ScheduleCommandPreview } from '@/lib/schedule/commands';
 import { Button } from '@/components/ui/Button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Textarea } from '@/components/ui/textarea';
@@ -34,40 +31,13 @@ interface AssistantChatProps {
   onStop: () => void;
   onNewChat: () => void;
   isThinking: boolean;
-  preview: ScheduleCommandPreview | null;
-  previewMessageId: string | null;
-  applying: boolean;
-  onApply: () => void;
-  onDismissPreview: () => void;
-  onSelectCandidate: (taskId: string) => void;
   examples: readonly string[];
   onExampleClick: (example: string) => void;
   usage: AssistantUsage | null;
   showQuota: boolean;
   quotaExhausted: boolean;
-  timeZone: string;
   inputRef: RefObject<HTMLTextAreaElement | null>;
   endRef: RefObject<HTMLDivElement | null>;
-}
-
-function formatDuration(seconds: number | null | undefined): string {
-  if (!seconds) return 'No duration';
-  const minutes = Math.round(seconds / 60);
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  const remainder = minutes % 60;
-  return remainder ? `${hours}h ${remainder}m` : `${hours}h`;
-}
-
-function timeLabel(value: string | null, timeZone: string): string {
-  if (!value) return 'Untimed';
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return 'Untimed';
-  return new Intl.DateTimeFormat('en-US', {
-    timeZone,
-    hour: 'numeric',
-    minute: '2-digit',
-  }).format(parsed);
 }
 
 type AssistantMessageBlock =
@@ -190,103 +160,6 @@ function AssistantMessageContent({ content }: { content: string }) {
   );
 }
 
-function PreviewCard({
-  preview,
-  applying,
-  timeZone,
-  onApply,
-  onDismiss,
-  onSelectCandidate,
-}: {
-  preview: ScheduleCommandPreview;
-  applying: boolean;
-  timeZone: string;
-  onApply: () => void;
-  onDismiss: () => void;
-  onSelectCandidate: (taskId: string) => void;
-}) {
-  return (
-    <div
-      aria-live="polite"
-      className={cn(
-        'mt-2 max-w-2xl rounded-2xl border p-4 shadow-sm',
-        preview.status === 'ready'
-          ? 'border-primary/35 bg-primary/[0.06]'
-          : 'border-amber-500/30 bg-amber-500/[0.06]',
-      )}
-    >
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-            Proposed schedule change
-          </p>
-          <p className="mt-1 text-sm font-medium leading-relaxed">{preview.summary}</p>
-        </div>
-        <Button type="button" variant="ghost" size="icon-sm" onClick={onDismiss} aria-label="Dismiss preview">
-          <X className="h-4 w-4" />
-        </Button>
-      </div>
-
-      {preview.assumptions.length > 0 && (
-        <ul className="mt-3 space-y-1 text-xs leading-relaxed text-muted-foreground">
-          {preview.assumptions.map(assumption => <li key={assumption}>• {assumption}</li>)}
-        </ul>
-      )}
-
-      {preview.candidates.length > 0 && (
-        <div className="mt-3 flex flex-wrap gap-2">
-          {preview.candidates.map(candidate => (
-            <Button
-              key={candidate.taskId}
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => onSelectCandidate(candidate.taskId)}
-            >
-              {candidate.title}
-            </Button>
-          ))}
-        </div>
-      )}
-
-      {preview.gaps.length > 0 && (
-        <div className="mt-3 flex flex-wrap gap-2 text-xs">
-          {preview.gaps.map(gap => (
-            <span key={gap.startAt} className="rounded-lg border border-border/60 bg-background/60 px-2.5 py-1.5">
-              {gap.date} · {gap.label}
-            </span>
-          ))}
-        </div>
-      )}
-
-      {preview.occurrences.length > 0 && (
-        <div className="mt-3 grid max-h-44 gap-2 overflow-y-auto sm:grid-cols-2 lg:grid-cols-3">
-          {preview.occurrences.map((occurrence, index) => (
-            <div key={`${occurrence.date}-${index}`} className="rounded-xl border border-border/50 bg-background/60 p-2.5 text-xs">
-              <p className="truncate font-medium">{occurrence.title}</p>
-              <p className="mt-1 text-muted-foreground">
-                {occurrence.date} · {timeLabel(occurrence.startAt, timeZone)} · {formatDuration(occurrence.durationSeconds)}
-              </p>
-            </div>
-          ))}
-        </div>
-      )}
-
-      <div className="mt-4 flex flex-wrap justify-end gap-2">
-        <Button type="button" variant="ghost" size="sm" onClick={onDismiss}>
-          Keep chatting
-        </Button>
-        {preview.status === 'ready' && preview.actions.length > 0 && (
-          <Button type="button" size="sm" onClick={onApply} disabled={applying}>
-            {applying ? <RotateCcw className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-            Apply changes
-          </Button>
-        )}
-      </div>
-    </div>
-  );
-}
-
 export function AssistantChat({
   messages,
   command,
@@ -295,15 +168,8 @@ export function AssistantChat({
   onStop,
   onNewChat,
   isThinking,
-  preview,
-  previewMessageId,
-  applying,
-  onApply,
-  onDismissPreview,
-  onSelectCandidate,
   examples,
   onExampleClick,
-  timeZone,
   inputRef,
   endRef,
 }: AssistantChatProps) {
@@ -369,16 +235,6 @@ export function AssistantChat({
                       ? <AssistantMessageContent content={message.content} />
                       : <span className="whitespace-pre-wrap">{message.content}</span>}
                   </div>
-                  {preview && previewMessageId === message.id && (
-                    <PreviewCard
-                      preview={preview}
-                      applying={applying}
-                      timeZone={timeZone}
-                      onApply={onApply}
-                      onDismiss={onDismissPreview}
-                      onSelectCandidate={onSelectCandidate}
-                    />
-                  )}
                 </div>
               </div>
             ))}
@@ -437,7 +293,7 @@ export function AssistantChat({
             )}
           </div>
           <p className="mt-2 text-center text-[11px] text-muted-foreground">
-            Orderly can make mistakes. Schedule changes always need your approval.
+            Orderly can make mistakes. Calendar drafts are saved only after you confirm them.
           </p>
         </div>
       </div>

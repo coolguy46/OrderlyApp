@@ -41,7 +41,7 @@ test('account changes isolate chat, quota, and undo snapshots immediately', asyn
   assert.match(source, /setUndoState\(null\);\s+setUsage\(null\)/);
   assert.match(source, /const chatReady = chatOwnerUserId === userId/);
   assert.match(source, /messages=\{activeMessages\}/);
-  assert.match(source, /preview=\{activePreview\}/);
+  assert.match(source, /setPreview\(null\)/);
   assert.match(source, /usage=\{activeUsage\}/);
 });
 
@@ -71,7 +71,7 @@ test('Assistant replies render safe paragraphs, line breaks, lists, and bold tex
   assert.doesNotMatch(source, /dangerouslySetInnerHTML|innerHTML\s*=/);
 });
 
-test('Assistant requires a fresh deterministic preview before applying', async () => {
+test('Assistant stages changes on the calendar and revalidates before saving', async () => {
   const source = await readFile(plannerUrl, 'utf8');
   const applySection = source.slice(
     source.indexOf('const applyPreview'),
@@ -80,7 +80,12 @@ test('Assistant requires a fresh deterministic preview before applying', async (
 
   assert.match(applySection, /const freshPreview = interpretScheduleCommand\(preview\.command/);
   assert.match(applySection, /JSON\.stringify\(freshPreview\.actions\) !== JSON\.stringify\(preview\.actions\)/);
-  assert.match(applySection, /Please review it once more/);
+  assert.match(applySection, /refreshed the draft on the calendar/);
+  assert.match(source, /function scheduleDraftBlocks/);
+  assert.match(source, /Assistant draft on calendar/);
+  assert.match(source, /Save changes/);
+  assert.match(source, /Discard/);
+  assert.doesNotMatch(source, /preview=\{activePreview\}/);
 });
 
 test('chat UI keeps the composer visible and calendar controls secondary', async () => {
@@ -92,7 +97,8 @@ test('chat UI keeps the composer visible and calendar controls secondary', async
   assert.match(chatSource, /sticky bottom-0/);
   assert.match(chatSource, /New chat/);
   assert.match(chatSource, /Stop response/);
-  assert.match(chatSource, /Schedule changes always need your approval/);
+  assert.match(chatSource, /Calendar drafts are saved only after you confirm them/);
+  assert.doesNotMatch(chatSource, /Proposed schedule change/);
   assert.match(plannerSource, /aria-expanded=\{calendarOpen\}/);
   assert.match(plannerSource, /setCalendarExpanded/);
   assert.match(plannerSource, /taskDetailsOpen &&/);

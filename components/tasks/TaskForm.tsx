@@ -28,6 +28,7 @@ import { calculateSuggestedPriority } from '@/lib/utils';
 import { cn } from '@/lib/utils';
 import { useScheduleStore } from '@/lib/schedule/store';
 import { usePlannerStore } from '@/lib/planner/store';
+import { toast } from 'sonner';
 import {
   DEFAULT_SCHEDULE_DURATION_SECONDS,
   formatDurationInput,
@@ -211,17 +212,11 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
       return;
     }
     const endAt = scheduledEndAt(startAt, durationSeconds);
-    if (endAt && deadlineAt && new Date(endAt).getTime() > new Date(deadlineAt).getTime()) {
-      const formattedDeadline = new Intl.DateTimeFormat('en-US', {
-        timeZone,
-        month: 'short',
-        day: 'numeric',
-        hour: 'numeric',
-        minute: '2-digit',
-      }).format(new Date(deadlineAt));
-      setScheduleError(`This block ends after the task deadline (${formattedDeadline}). Choose an earlier time or shorter duration.`);
-      return;
-    }
+    const schedulesAfterDeadline = Boolean(
+      endAt
+      && deadlineAt
+      && new Date(endAt).getTime() > new Date(deadlineAt).getTime(),
+    );
     setScheduleError('');
 
     try {
@@ -264,6 +259,18 @@ export function TaskForm({ isOpen, onClose, task }: TaskFormProps) {
         } else {
           removeTaskSchedule(user.id, savedTask.id);
         }
+      }
+      if (schedulesAfterDeadline && deadlineAt) {
+        const formattedDeadline = new Intl.DateTimeFormat('en-US', {
+          timeZone,
+          month: 'short',
+          day: 'numeric',
+          hour: 'numeric',
+          minute: '2-digit',
+        }).format(new Date(deadlineAt));
+        toast.warning('Scheduled after the task deadline', {
+          description: `The task remains due ${formattedDeadline}.`,
+        });
       }
     } catch (error) {
       console.error('Task submit error:', error);

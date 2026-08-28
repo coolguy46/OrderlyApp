@@ -823,10 +823,9 @@ function buildWorkItems(
         entityKind: 'task',
         entityId: task.id,
         title: task.title,
-        message: 'The task has an invalid deadline and was not scheduled.',
+        message: 'The task has an invalid deadline. Orderly ignored it and kept the task schedulable.',
         deadlineAt: task.dueAt || null,
       });
-      continue;
     }
     if (Number.isNaN(parsedReleaseAt)) {
       warnings.push({
@@ -861,7 +860,9 @@ function buildWorkItems(
       priority: task.priority,
       focused: matchesFocusedSubject(focusSubjects, task.courseName, task.title),
       releaseAt: parsedReleaseAt ?? Number.NEGATIVE_INFINITY,
-      deadline: parsedDeadline ?? horizonEnd,
+      deadline: parsedDeadline === null || Number.isNaN(parsedDeadline)
+        ? horizonEnd
+        : parsedDeadline,
       estimatedMinutes: estimate.finalMinutes,
     });
   }
@@ -923,7 +924,7 @@ function localDateForTimestamp(timestamp: number, timeZone: string): string {
 function findEarliestSlot(
   availability: readonly AvailabilityInterval[],
   occupied: readonly Interval[],
-  deadline: number,
+  placementEnd: number,
   releaseAt: number,
   requestedMinutes: number,
   dailyScheduledMinutes: ReadonlyMap<string, number>,
@@ -940,7 +941,7 @@ function findEarliestSlot(
     const maxMinutes = Math.min(requestedMinutes, dailyRemaining, settings.maxBlockMinutes);
     if (maxMinutes < settings.slotMinutes) continue;
 
-    const limit = Math.min(window.end, deadline);
+    const limit = Math.min(window.end, placementEnd);
     let cursor = ceilToSlot(Math.max(window.start, releaseAt), settings.slotMinutes);
     while (cursor + slotMs <= limit) {
       const containing = sortedOccupied.find(interval => overlaps(
@@ -1037,28 +1038,27 @@ export function generatePlannerPlan(rawInput: PlannerGenerationInput): PlannerPl
 
   for (const item of work.workItems) {
     let remainingMinutes = item.estimatedMinutes;
-    if (item.deadline <= horizonStart) {
-      totalUnscheduledMinutes += remainingMinutes;
+    const deadlineWasPassed = item.deadline <= horizonStart;
+    if (deadlineWasPassed) {
       warnings.push({
         id: `deadline-passed-${item.key}`,
         code: 'deadline_passed',
         entityKind: item.kind === 'exam_prep' ? 'exam' : 'task',
         entityId: item.sourceId,
         title: item.title,
-        message: 'The exact deadline has already passed, so Orderly did not place work after it.',
-        unscheduledMinutes: remainingMinutes,
+        message: 'The exact deadline has already passed. Orderly still considers this work schedulable.',
         deadlineAt: new Date(item.deadline).toISOString(),
       });
-      continue;
     }
 
     let segmentIndex = 0;
+    let scheduledAfterDeadline = false;
     while (remainingMinutes > 0) {
       const requestedMinutes = Math.min(remainingMinutes, settings.maxBlockMinutes);
       const slot = findEarliestSlot(
         calendar.availability,
         occupied,
-        item.deadline,
+        horizonEnd,
         item.releaseAt,
         requestedMinutes,
         dailyScheduledMinutes,
@@ -1091,6 +1091,7 @@ export function generatePlannerPlan(rawInput: PlannerGenerationInput): PlannerPl
         locked: false,
         status: 'planned',
       });
+      if (slot.end > item.deadline) scheduledAfterDeadline = true;
       dailyScheduledMinutes.set(localDate, (dailyScheduledMinutes.get(localDate) || 0) + durationMinutes);
       remainingMinutes -= durationMinutes;
       segmentIndex += 1;
@@ -1102,6 +1103,18 @@ export function generatePlannerPlan(rawInput: PlannerGenerationInput): PlannerPl
       });
     }
 
+    if (scheduledAfterDeadline && !deadlineWasPassed) {
+      warnings.push({
+        id: `scheduled-after-deadline-${item.key}`,
+        code: 'scheduled_after_deadline',
+        entityKind: item.kind === 'exam_prep' ? 'exam' : 'task',
+        entityId: item.sourceId,
+        title: item.title,
+        message: 'Some work is scheduled after the exact deadline. The deadline remains unchanged and is shown for reference.',
+        deadlineAt: new Date(item.deadline).toISOString(),
+      });
+    }
+
     if (remainingMinutes > 0) {
       totalUnscheduledMinutes += remainingMinutes;
       warnings.push({
@@ -1110,7 +1123,7 @@ export function generatePlannerPlan(rawInput: PlannerGenerationInput): PlannerPl
         entityKind: item.kind === 'exam_prep' ? 'exam' : 'task',
         entityId: item.sourceId,
         title: item.title,
-        message: `Orderly could not place ${remainingMinutes} minute${remainingMinutes === 1 ? '' : 's'} before the exact deadline within this plan.`,
+        message: `Orderly could not place ${remainingMinutes} minute${remainingMinutes === 1 ? '' : 's'} within this plan's available time.`,
         unscheduledMinutes: remainingMinutes,
         deadlineAt: new Date(item.deadline).toISOString(),
       });

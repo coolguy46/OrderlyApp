@@ -109,11 +109,36 @@ CREATE TABLE IF NOT EXISTS planner_blocks (
   CONSTRAINT planner_blocks_owned_plan_fk
     FOREIGN KEY (plan_id, user_id) REFERENCES planner_plans(id, user_id) ON DELETE CASCADE,
   CHECK (end_at > start_at),
-  CHECK (end_at <= deadline_at),
   CHECK (end_at - start_at <= INTERVAL '90 minutes'),
   CHECK (mod(extract(epoch FROM start_at)::BIGINT, 900) = 0),
   CHECK (mod(extract(epoch FROM end_at)::BIGINT, 900) = 0)
 );
+
+-- Older installs treated the assignment deadline as a hard database boundary.
+-- A deadline is now advisory: overdue work remains schedulable and the app
+-- surfaces a warning instead. Discover the legacy check by its definition so
+-- this stays safe across PostgreSQL-generated or manually renamed constraints.
+DO $$
+DECLARE
+  constraint_row RECORD;
+BEGIN
+  FOR constraint_row IN
+    SELECT constraint_name.conname
+      FROM pg_constraint AS constraint_name
+     WHERE constraint_name.conrelid = 'public.planner_blocks'::regclass
+       AND constraint_name.contype = 'c'
+       AND (
+         regexp_replace(lower(pg_get_constraintdef(constraint_name.oid)), '\s', '', 'g') LIKE '%end_at<=deadline_at%'
+         OR regexp_replace(lower(pg_get_constraintdef(constraint_name.oid)), '\s', '', 'g') LIKE '%deadline_at>=end_at%'
+       )
+  LOOP
+    EXECUTE format(
+      'ALTER TABLE public.planner_blocks DROP CONSTRAINT %I',
+      constraint_row.conname
+    );
+  END LOOP;
+END;
+$$;
 
 CREATE TABLE IF NOT EXISTS planner_feedback (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

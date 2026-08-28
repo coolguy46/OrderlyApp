@@ -222,6 +222,7 @@ export interface PlannerBlock {
 export type PlannerWarningCode =
   | 'invalid_deadline'
   | 'deadline_passed'
+  | 'scheduled_after_deadline'
   | 'insufficient_capacity'
   | 'no_availability'
   | 'invalid_commitment';

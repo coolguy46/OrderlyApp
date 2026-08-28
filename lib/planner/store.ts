@@ -148,10 +148,9 @@ function intervalsOverlap(leftStart: number, leftEnd: number, rightStart: number
 function validateBlock(plan: PlannerPlan, candidate: PlannerBlock, ignoredBlockId: string): string | null {
   const start = new Date(candidate.startAt).getTime();
   const end = new Date(candidate.endAt).getTime();
-  const deadline = new Date(candidate.deadlineAt).getTime();
   const horizonStart = new Date(plan.horizonStart).getTime();
   const horizonEnd = new Date(plan.horizonEnd).getTime();
-  if (![start, end, deadline, horizonStart, horizonEnd].every(Number.isFinite)) return 'The block contains an invalid date.';
+  if (![start, end, horizonStart, horizonEnd].every(Number.isFinite)) return 'The block contains an invalid date.';
 
   const durationMinutes = (end - start) / MINUTE_MS;
   const slotMs = PLANNER_SLOT_MINUTES * MINUTE_MS;
@@ -161,7 +160,6 @@ function validateBlock(plan: PlannerPlan, candidate: PlannerBlock, ignoredBlockI
   }
   if (durationMinutes > plan.settings.maxBlockMinutes) return `Blocks cannot exceed ${plan.settings.maxBlockMinutes} minutes.`;
   if (start < horizonStart || end > horizonEnd) return 'The block must stay inside this plan week.';
-  if (end > deadline) return 'The block cannot end after the exact task or exam deadline.';
   if (localDateAt(start, plan.settings.timeZone) !== localDateAt(end - 1, plan.settings.timeZone)) {
     return 'A block cannot cross into another day.';
   }

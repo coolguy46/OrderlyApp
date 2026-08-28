@@ -34,7 +34,7 @@ import {
   isSameDay,
   startOfDay,
 } from 'date-fns';
-import { Clock3, Expand, GripVertical, ListTodo, LockKeyhole } from 'lucide-react';
+import { Clock3, Expand, GripVertical, ListTodo, LockKeyhole, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import {
   UntimedTaskShelf,
@@ -171,6 +171,7 @@ function isFixedBlock(block: PlannerBlockView): boolean {
   return Boolean(
     block.fixed ||
       block.locked ||
+      block.draft ||
       block.kind === 'school',
   );
 }
@@ -257,6 +258,7 @@ function PositionedBlock({
         'group absolute left-1 right-1 overflow-hidden rounded-md border border-l-[3px] px-1.5 py-1 text-left shadow-sm outline-none transition-[box-shadow,opacity] focus-visible:ring-2 focus-visible:ring-primary',
         draggable && 'cursor-grab touch-none active:cursor-grabbing',
         fixed && 'border-dashed bg-muted/70',
+        block.draft && 'border-primary/80 bg-primary/15 shadow-lg ring-1 ring-primary/35',
         block.completed && 'opacity-55',
         isDragging && 'opacity-25',
         active && 'shadow-xl ring-1 ring-primary/50',
@@ -264,7 +266,9 @@ function PositionedBlock({
       )}
     >
       <div className="flex min-w-0 items-start gap-1">
-        {fixed ? (
+        {block.draft ? (
+          <Sparkles className="mt-0.5 h-3 w-3 shrink-0 text-primary" />
+        ) : fixed ? (
           <LockKeyhole className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground" />
         ) : editable ? (
           <GripVertical className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground/70" />
@@ -285,7 +289,7 @@ function PositionedBlock({
           )}
           {roomy && (
             <p className="mt-0.5 truncate text-[9px] leading-tight text-muted-foreground/80">
-              {block.subjectName || block.reason || minutesLabel(duration)}
+              {block.draft ? `Draft · ${minutesLabel(duration)}` : block.subjectName || block.reason || minutesLabel(duration)}
             </p>
           )}
         </div>

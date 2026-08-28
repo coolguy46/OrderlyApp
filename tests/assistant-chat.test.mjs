@@ -177,27 +177,27 @@ test('Canvas HTML and control characters are removed from provider context', () 
   assert.equal(context.tasks[0].description, 'Read chapter 4');
 });
 
-test('chat parser accepts replies and optional preview commands but rejects model force overrides', () => {
+test('chat parser accepts replies and optional schedule commands but rejects model force overrides', () => {
   assert.deepEqual(
     parsePlannerChatAIJson('{"reply":"Thursday is your busiest day.","normalizedCommand":null}'),
     { reply: 'Thursday is your busiest day.', normalizedCommand: null },
   );
   assert.deepEqual(
-    parsePlannerChatAIJson('{"reply":"I prepared a preview.","normalizedCommand":"Schedule workout today at 5 pm for 1 hour"}'),
+    parsePlannerChatAIJson('{"reply":"I prepared a calendar draft.","normalizedCommand":"Schedule workout today at 5 pm for 1 hour"}'),
     {
-      reply: 'I prepared a preview.',
+      reply: 'I prepared a calendar draft.',
       normalizedCommand: 'Schedule workout today at 5 pm for 1 hour',
     },
   );
   assert.deepEqual(
-    parsePlannerChatAIJson('{"reply":"I prepared a preview.","normalizedCommand":"Schedule Force and Motion tomorrow at 5 pm for 1 hour"}'),
+    parsePlannerChatAIJson('{"reply":"I prepared a calendar draft.","normalizedCommand":"Schedule Force and Motion tomorrow at 5 pm for 1 hour"}'),
     {
-      reply: 'I prepared a preview.',
+      reply: 'I prepared a calendar draft.',
       normalizedCommand: 'Schedule Force and Motion tomorrow at 5 pm for 1 hour',
     },
   );
   assert.deepEqual(
-    parsePlannerChatAIJson('{"reply":"I prepared a preview.","normalizedCommand":"Move chemistry to Friday at 5 pm force"}'),
+    parsePlannerChatAIJson('{"reply":"I prepared a calendar draft.","normalizedCommand":"Move chemistry to Friday at 5 pm force"}'),
     {
       reply: 'I cannot bypass Orderly’s schedule safeguards. Choose a different time or edit the schedule manually.',
       normalizedCommand: null,

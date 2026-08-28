@@ -31,6 +31,8 @@ export interface PlannerBlockView {
   occurrenceDate?: string | null;
   fixed?: boolean;
   locked?: boolean;
+  /** Unsaved Assistant change rendered directly on the calendar. */
+  draft?: boolean;
   completed?: boolean;
 }
 

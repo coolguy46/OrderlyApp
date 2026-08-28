@@ -191,6 +191,11 @@ function dateCarrierInTimeZone(timeZone: string, instant = new Date()): Date {
   return new Date(year, month - 1, day, 12);
 }
 
+function localDateCarrier(value: LocalDate): Date {
+  const [year, month, day] = value.split('-').map(Number);
+  return new Date(year, month - 1, day, 12);
+}
+
 function formatDuration(seconds: number | null | undefined): string {
   if (!seconds) return 'No duration';
   const minutes = Math.round(seconds / 60);
@@ -337,6 +342,49 @@ function occurrenceBlocks(occurrences: readonly ScheduleOccurrence[]): PlannerBl
   });
 }
 
+function scheduleDraftBlocks(
+  preview: ScheduleCommandPreview | null,
+  tasks: readonly Task[],
+  subjects: ReturnType<typeof useAppStore.getState>['subjects'],
+): PlannerBlockView[] {
+  if (!preview || preview.status !== 'ready') return [];
+  return preview.occurrences.flatMap((occurrence, index) => {
+    if (!occurrence.startAt || !occurrence.durationSeconds) return [];
+    const start = new Date(occurrence.startAt);
+    if (Number.isNaN(start.getTime())) return [];
+    const task = occurrence.taskId ? tasks.find(candidate => candidate.id === occurrence.taskId) : null;
+    const subject = task?.subject_id ? subjects.find(candidate => candidate.id === task.subject_id) : null;
+    return [{
+      id: `assistant-draft-${preview.id}-${index}`,
+      title: occurrence.title,
+      description: task?.description || null,
+      startAt: occurrence.startAt,
+      endAt: new Date(start.getTime() + occurrence.durationSeconds * 1_000).toISOString(),
+      subjectName: subject?.name || task?.course_name || null,
+      subjectColor: subject?.color || '#8b5cf6',
+      color: '#8b5cf6',
+      source: 'Assistant draft',
+      kind: 'task' as const,
+      taskId: occurrence.taskId,
+      fixed: true,
+      locked: true,
+      draft: true,
+      reason: 'Unsaved Assistant change',
+    }];
+  });
+}
+
+function previewReply(preview: ScheduleCommandPreview): string {
+  const details: string[] = [preview.summary];
+  if (preview.candidates.length > 1) {
+    details.push(`Which task did you mean?\n${preview.candidates.map(candidate => `- ${candidate.title}`).join('\n')}`);
+  }
+  if (preview.assumptions.length > 0) {
+    details.push(preview.assumptions.map(assumption => `- ${assumption}`).join('\n'));
+  }
+  return details.join('\n\n');
+}
+
 function conflictingBlock(
   blocks: readonly PlannerBlockView[],
   movingBlockId: string,
@@ -419,7 +467,6 @@ export function Planner() {
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [chatOwnerUserId, setChatOwnerUserId] = useState<string | null>(null);
   const [isThinking, setIsThinking] = useState(false);
-  const [previewMessageId, setPreviewMessageId] = useState<string | null>(null);
   const [usage, setUsage] = useState<AssistantChatResponse['usage']>(null);
   const [calendarOpen, setCalendarOpen] = useState(true);
   const [calendarExpanded, setCalendarExpanded] = useState(false);
@@ -463,7 +510,6 @@ export function Planner() {
     setUsage(null);
     setIsThinking(false);
     setPreview(null);
-    setPreviewMessageId(null);
     setSelectedTaskId(null);
     setCommand('');
     setMessages(restored);
@@ -504,7 +550,7 @@ export function Planner() {
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-  }, [isThinking, messages, preview, previewMessageId]);
+  }, [isThinking, messages, preview]);
 
   const entries = useMemo(
     () => selectScheduleEntriesForUser(entriesByUser, userId),
@@ -558,10 +604,21 @@ export function Planner() {
     () => commitmentRenderData(commitments, commandStartDate, commandEndDate, timeZone),
     [commandEndDate, commandStartDate, commitments, timeZone],
   );
-  const blocks = useMemo(
-    () => [...visibleCommitments.blocks, ...visibleEvents.blocks, ...occurrenceBlocks(occurrences.timed)],
-    [occurrences.timed, visibleCommitments.blocks, visibleEvents.blocks],
+  const previewTaskIds = useMemo(() => new Set(
+    preview?.actions.flatMap(action => action.type === 'schedule_batch'
+      ? action.operations.map(operation => operation.taskId)
+      : []) || [],
+  ), [preview]);
+  const previewBlocks = useMemo(
+    () => scheduleDraftBlocks(preview, tasks, subjects),
+    [preview, subjects, tasks],
   );
+  const blocks = useMemo(() => [
+    ...visibleCommitments.blocks,
+    ...visibleEvents.blocks,
+    ...occurrenceBlocks(occurrences.timed).filter(block => !block.taskId || !previewTaskIds.has(block.taskId)),
+    ...previewBlocks,
+  ], [occurrences.timed, previewBlocks, previewTaskIds, visibleCommitments.blocks, visibleEvents.blocks]);
   const commitmentById = useMemo(() => new Map([
     ...commitments,
     ...storedEventsToCommitments(storedEvents, timeZone),
@@ -640,7 +697,6 @@ export function Planner() {
     setMessages(previous => [...previous, userMessage].slice(-CHAT_DISPLAY_LIMIT));
     setCommand('');
     setPreview(null);
-    setPreviewMessageId(null);
     setIsThinking(true);
 
     chatAbortRef.current?.abort();
@@ -723,14 +779,10 @@ export function Planner() {
         throw new Error(errorReply);
       }
 
-      const assistantMessageId = `assistant-${Date.now()}`;
-      setMessages(previous => [...previous, {
-        id: assistantMessageId,
-        role: 'assistant' as const,
-        content: payload.reply.trim() || 'Here is what I found.',
-      }].slice(-CHAT_DISPLAY_LIMIT));
       setUsage(payload.usage);
 
+      const assistantMessageId = `assistant-${Date.now()}`;
+      let assistantReply = payload.reply.trim() || 'Here is what I found.';
       if (payload.normalizedCommand) {
         const nextPreview = interpretScheduleCommand(payload.normalizedCommand, {
           ...context,
@@ -738,8 +790,24 @@ export function Planner() {
           selectedTaskId: taskId,
         });
         setPreview(nextPreview);
-        setPreviewMessageId(assistantMessageId);
+        if (nextPreview.status === 'ready' && nextPreview.actions.length > 0) {
+          assistantReply = `I placed this change on the calendar as a draft.\n\n${nextPreview.summary}\n\nSelect **Save changes** above the calendar to confirm it.`;
+          const firstOccurrence = nextPreview.occurrences[0];
+          if (firstOccurrence) {
+            const nextDate = localDateCarrier(firstOccurrence.date);
+            setSelectedDate(nextDate);
+            setWeekStart(startOfWeek(nextDate, { weekStartsOn: 1 }));
+          }
+          setCalendarOpen(true);
+        } else {
+          assistantReply = previewReply(nextPreview);
+        }
       }
+      setMessages(previous => [...previous, {
+        id: assistantMessageId,
+        role: 'assistant' as const,
+        content: assistantReply,
+      }].slice(-CHAT_DISPLAY_LIMIT));
     } catch (error) {
       if (requestId !== chatRequestIdRef.current) return;
       if (controller.signal.aborted && !timedOut) return;
@@ -774,15 +842,13 @@ export function Planner() {
       freshPreview.status !== 'ready'
       || JSON.stringify(freshPreview.actions) !== JSON.stringify(preview.actions)
     ) {
-      const recheckMessageId = `assistant-recheck-${Date.now()}`;
       setPreview(freshPreview);
-      setPreviewMessageId(recheckMessageId);
       setMessages(previous => [...previous, {
-        id: recheckMessageId,
+        id: `assistant-recheck-${Date.now()}`,
         role: 'assistant' as const,
-        content: 'Your schedule changed while we were chatting, so I refreshed the proposal. Please review it once more.',
+        content: 'Your schedule changed while we were chatting, so I refreshed the draft on the calendar. Check it and save again.',
       }].slice(-CHAT_DISPLAY_LIMIT));
-      toast.info('Proposal refreshed');
+      toast.info('Calendar draft refreshed');
       return;
     }
     const before = cloneEntries(entries);
@@ -822,7 +888,6 @@ export function Planner() {
       }].slice(-CHAT_DISPLAY_LIMIT));
       toast.success('Schedule updated');
       setPreview(null);
-      setPreviewMessageId(null);
       setCommand('');
       setSelectedTaskId(null);
     } catch (error) {
@@ -894,13 +959,14 @@ export function Planner() {
       return;
     }
     const task = occurrence.task;
-    const deadline = occurrenceDeadline(occurrence, timeZone);
-    if (deadline && nextEnd.getTime() > new Date(deadline).getTime()) {
-      toast.error(`That would put “${task.title}” after its deadline.`);
-      return;
-    }
     const nextDate = localDateFromIso(nextStart.toISOString(), timeZone);
     if (!nextDate) return;
+    const deadline = occurrenceDeadline(occurrence, timeZone);
+    if (deadline && nextEnd.getTime() > new Date(deadline).getTime()) {
+      toast.warning(`“${task.title}” is scheduled after its deadline.`, {
+        description: 'The due date stays unchanged.',
+      });
+    }
     const entry = entries.find(item => item.taskId === task.id);
     setUndoState({ userId, entries: cloneEntries(entries), createdTaskIds: [], label: `Move “${task.title}”` });
     if (!entry || occurrence.recurrence === 'none') {
@@ -930,8 +996,9 @@ export function Planner() {
     const task = occurrence.task;
     const deadline = occurrenceDeadline(occurrence, timeZone);
     if (deadline && nextEnd.getTime() > new Date(deadline).getTime()) {
-      toast.error(`That duration would run past “${task.title}”’s deadline.`);
-      return;
+      toast.warning(`“${task.title}” now runs past its deadline.`, {
+        description: 'The due date stays unchanged.',
+      });
     }
     const durationSeconds = Math.max(15 * 60, Math.round((nextEnd.getTime() - nextStart.getTime()) / 1000));
     const entry = entries.find(item => item.taskId === task.id);
@@ -954,11 +1021,6 @@ export function Planner() {
     if (!userId) return;
     const occurrence = occurrenceById.get(item.id);
     if (!occurrence) return;
-    const deadline = occurrenceDeadline(occurrence, timeZone);
-    if (deadline && nextEnd.getTime() > new Date(deadline).getTime()) {
-      toast.error(`That would put “${occurrence.title}” after its deadline.`);
-      return;
-    }
     const conflict = conflictingBlock(blocks, item.id, nextStart, nextEnd);
     if (conflict) {
       toast.error(`That time overlaps “${conflict.title}”. Choose a free slot.`);
@@ -966,6 +1028,12 @@ export function Planner() {
     }
     const nextDate = localDateFromIso(nextStart.toISOString(), timeZone);
     if (!nextDate) return;
+    const deadline = occurrenceDeadline(occurrence, timeZone);
+    if (deadline && nextEnd.getTime() > new Date(deadline).getTime()) {
+      toast.warning(`“${occurrence.title}” is scheduled after its deadline.`, {
+        description: 'The due date stays unchanged.',
+      });
+    }
     const entry = entries.find(candidate => candidate.taskId === occurrence.taskId);
     const durationSeconds = Math.max(15 * 60, Math.round((nextEnd.getTime() - nextStart.getTime()) / 1000));
     setUndoState({ userId, entries: cloneEntries(entries), createdTaskIds: [], label: `Schedule “${occurrence.title}”` });
@@ -1043,7 +1111,6 @@ export function Planner() {
     setMessages([]);
     setCommand('');
     setPreview(null);
-    setPreviewMessageId(null);
     setSelectedTaskId(null);
     window.requestAnimationFrame(() => commandInputRef.current?.focus());
   }, [stopThinking, userId]);
@@ -1051,8 +1118,6 @@ export function Planner() {
   const chatReady = chatOwnerUserId === userId;
   const activeMessages = chatReady ? messages : [];
   const activeCommand = chatReady ? command : '';
-  const activePreview = chatReady ? preview : null;
-  const activePreviewMessageId = chatReady ? previewMessageId : null;
   const activeUsage = chatReady ? usage : null;
   const activeIsThinking = chatReady && isThinking;
   const quotaExhausted = Boolean(activeUsage && (activeUsage.remainingDaily <= 0 || activeUsage.remainingMonthly <= 0));
@@ -1081,7 +1146,7 @@ export function Planner() {
           </span>
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Assistant</h1>
-            <p className="text-sm text-muted-foreground">Talk through your week, then approve any schedule changes.</p>
+            <p className="text-sm text-muted-foreground">Draft changes directly on your calendar, then save them.</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -1113,29 +1178,11 @@ export function Planner() {
         onStop={stopThinking}
         onNewChat={startNewChat}
         isThinking={activeIsThinking}
-        preview={activePreview}
-        previewMessageId={activePreviewMessageId}
-        applying={chatReady && applying}
-        onApply={() => void applyPreview()}
-        onDismissPreview={() => {
-          setPreview(null);
-          setPreviewMessageId(null);
-        }}
-        onSelectCandidate={taskId => {
-          if (!chatReady || !preview) return;
-          setSelectedTaskId(taskId);
-          setPreview(interpretScheduleCommand(preview.command, {
-            ...context,
-            now: new Date().toISOString(),
-            selectedTaskId: taskId,
-          }));
-        }}
         examples={EXAMPLES}
         onExampleClick={example => void submitCommand(example, null)}
         usage={activeUsage}
         showQuota={showQuota}
         quotaExhausted={quotaExhausted}
-        timeZone={timeZone}
         inputRef={commandInputRef}
         endRef={chatEndRef}
       />
@@ -1208,6 +1255,25 @@ export function Planner() {
               </div>
             </CardHeader>
             <CardContent className="px-4 pb-4">
+              {preview?.status === 'ready' && preview.actions.length > 0 && (
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-primary/40 bg-primary/[0.07] p-3" aria-live="polite">
+                  <div className="flex min-w-0 items-start gap-2">
+                    <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold">Assistant draft on calendar</p>
+                      <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{preview.summary}</p>
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <Button type="button" variant="ghost" size="sm" onClick={() => setPreview(null)} disabled={applying}>
+                      Discard
+                    </Button>
+                    <Button type="button" size="sm" onClick={() => void applyPreview()} disabled={applying}>
+                      {applying ? 'Saving…' : 'Save changes'}
+                    </Button>
+                  </div>
+                </div>
+              )}
               <WeekTimeGrid
                 weekStart={weekStart}
                 blocks={blocks}

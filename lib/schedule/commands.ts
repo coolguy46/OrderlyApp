@@ -525,10 +525,9 @@ interface ScheduleGuardResult {
 }
 
 /**
- * Enforce hard deadline and collision invariants on a proposed schedule. New
- * activities have no deadline, while Canvas/manual tasks retain their exact
- * due instant. Untimed work is checked by local date; timed work must finish
- * on or before the deadline.
+ * Check a proposed schedule for collisions and surface deadline misses as
+ * information. A due date describes when work was expected, but it never
+ * makes the work impossible to schedule after that instant.
  */
 function guardSchedulePlacement(
   command: string,
@@ -538,6 +537,7 @@ function guardSchedulePlacement(
   schedule: ScheduleEntryInput,
 ): ScheduleGuardResult {
   const proposed = occurrencePreviews(title, task?.id || null, schedule, context);
+  let deadlineAssumption: string | null = null;
   if (task) {
     const deadline = plannerTaskDeadline(task, context.timeZone);
     if (deadline) {
@@ -561,10 +561,7 @@ function guardSchedulePlacement(
         return new Date(item.startAt).getTime() + duration > deadlineMs;
       });
       if (missesDeadline) {
-        return {
-          blockedSummary: `I cannot schedule “${task.title}” there because some or all of the work would finish after its exact deadline. Choose an earlier date or time.`,
-          assumption: null,
-        };
+        deadlineAssumption = `This schedule extends past “${task.title}”’s deadline; the due date stays unchanged.`;
       }
     }
   }
@@ -597,9 +594,12 @@ function guardSchedulePlacement(
   }
   return {
     blockedSummary: null,
-    assumption: uniqueConflicts.length > 0
-      ? `Allowed an overlap with ${uniqueConflicts.slice(0, 2).join(' and ')} because you explicitly said “force”.`
-      : null,
+    assumption: [
+      deadlineAssumption,
+      uniqueConflicts.length > 0
+        ? `Allowed an overlap with ${uniqueConflicts.slice(0, 2).join(' and ')} because you explicitly said “force”.`
+        : null,
+    ].filter(Boolean).join(' ') || null,
   };
 }
 
