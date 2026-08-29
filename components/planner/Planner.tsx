@@ -28,6 +28,7 @@ import {
   type StoredCalendarEvent,
   writeStoredCalendarEvents,
 } from '@/lib/planner/adapters';
+import { useStoredCalendarEvents } from '@/lib/planner/use-stored-calendar-events';
 import {
   buildCommitmentOccurrences,
   withCommitmentOccurrenceOverride,
@@ -35,9 +36,29 @@ import {
 import { usePlannerStore } from '@/lib/planner/store';
 import { getDefaultPlannerSettings, type PlannerSettings, type RecurringCommitmentInput } from '@/lib/planner/types';
 import {
+  buildAssistantTaskPlan,
+  type AssistantTaskPlanRequest,
+} from '@/lib/planner/assistant-planner';
+import {
+  inferPlannerChatPlanRequest,
+  plannerChatNormalizedCommandsPreserveIntent,
+  plannerChatPlanRequestPreservesIntent,
+  sanitizePlannerChatPlanRequest,
+  type PlannerCommandAIContext,
+  type PlannerChatPlanRequest,
+} from '@/lib/planner/deepseek-command';
+import {
+  resolveAssistantTaskQuery,
+} from '@/lib/planner/assistant-task-query';
+import {
+  deleteCreatedTasks,
+  plannerMutationIsCurrent,
+} from '@/lib/planner/assistant-mutation';
+import {
   interpretDirectScheduleRequest,
   interpretScheduleCommand,
   interpretScheduleCommands,
+  scheduleEventActionToCommitment,
   type ScheduleCommandBusyInterval,
   type ScheduleCommandContext,
   type ScheduleCommandPreview,
@@ -57,6 +78,7 @@ import {
   taskDeadlineDate,
 } from '@/lib/schedule/selectors';
 import { useScheduleStore } from '@/lib/schedule/store';
+import { restoreScheduleSnapshotPreservingChanges } from '@/lib/schedule/undo';
 import type { LocalDate, ScheduleEntry, ScheduleOccurrence } from '@/lib/schedule/types';
 import type { Task } from '@/lib/supabase/types';
 import { Button } from '@/components/ui/Button';
@@ -75,6 +97,7 @@ interface ConversationMessage {
 interface AssistantChatResponse {
   reply: string;
   normalizedCommands: string[];
+  planRequest: PlannerChatPlanRequest | null;
   usage: {
     remainingDaily: number;
     remainingMonthly: number;
@@ -85,13 +108,52 @@ interface AssistantChatResponse {
 interface UndoState {
   userId: string;
   entries: ScheduleEntry[];
+  appliedEntries?: ScheduleEntry[];
   createdTaskIds: string[];
+  createdCommitmentIds?: string[];
+  commitmentSnapshots?: RecurringCommitmentInput[];
+  storedEventSnapshots?: StoredCalendarEvent[];
   label: string;
+  recoveryOnly?: boolean;
 }
 
 interface CalendarRenderData {
   blocks: PlannerBlockView[];
   busy: ScheduleCommandBusyInterval[];
+}
+
+function cloneCommitment(commitment: RecurringCommitmentInput): RecurringCommitmentInput {
+  return {
+    ...commitment,
+    daysOfWeek: [...commitment.daysOfWeek],
+    occurrenceOverrides: commitment.occurrenceOverrides
+      ? Object.fromEntries(Object.entries(commitment.occurrenceOverrides).map(([date, override]) => [
+          date,
+          { ...override },
+        ]))
+      : undefined,
+  };
+}
+
+function cloneStoredEvent(event: StoredCalendarEvent): StoredCalendarEvent {
+  return {
+    ...event,
+    occurrenceOverrides: event.occurrenceOverrides
+      ? Object.fromEntries(Object.entries(event.occurrenceOverrides).map(([date, override]) => [
+          date,
+          { ...override },
+        ]))
+      : undefined,
+  };
+}
+
+function restoreStoredEventSnapshots(
+  current: readonly StoredCalendarEvent[],
+  snapshots: readonly StoredCalendarEvent[],
+): StoredCalendarEvent[] {
+  const restored = new Map(current.map(event => [event.id, cloneStoredEvent(event)]));
+  for (const snapshot of snapshots) restored.set(snapshot.id, cloneStoredEvent(snapshot));
+  return [...restored.values()];
 }
 
 const EXAMPLES = [
@@ -110,10 +172,20 @@ const LEGACY_CHAT_STORAGE_PREFIX = 'orderly:assistant-chat:v1:';
 const DRAFT_STORAGE_PREFIX = 'orderly:assistant-calendar-draft:v2:';
 const LEGACY_DRAFT_STORAGE_PREFIX = 'orderly:assistant-calendar-draft:v1:';
 
-interface StoredAssistantDraft {
-  commands: string[];
-  validatedLocalDate: LocalDate;
-}
+type StoredAssistantDraft =
+  | {
+      kind: 'commands';
+      commands: string[];
+      validatedLocalDate: LocalDate;
+      plannedAt: string;
+      anchorDate: LocalDate;
+    }
+  | {
+      kind: 'task_plan';
+      request: AssistantTaskPlanRequest;
+      validatedLocalDate: LocalDate;
+      plannedAt: string;
+    };
 
 function assistantChatStorageKey(userId: string): string {
   return `${CHAT_STORAGE_PREFIX}${userId}`;
@@ -127,18 +199,40 @@ function readStoredAssistantDraft(userId: string): StoredAssistantDraft | null {
   try {
     const parsed: unknown = JSON.parse(window.sessionStorage.getItem(assistantDraftStorageKey(userId)) || 'null');
     if (!parsed || typeof parsed !== 'object') return null;
-    const candidate = parsed as Partial<StoredAssistantDraft>;
-    if (
-      !Array.isArray(candidate.commands)
-      || candidate.commands.length === 0
-      || candidate.commands.length > 8
-      || !candidate.commands.every(command => typeof command === 'string' && command.trim().length > 0)
-      || !isLocalDate(candidate.validatedLocalDate)
-    ) return null;
-    return {
-      commands: candidate.commands.map(command => command.trim()),
-      validatedLocalDate: candidate.validatedLocalDate,
-    };
+    const candidate = parsed as Record<string, unknown>;
+    if (typeof candidate.validatedLocalDate !== 'string' || !isLocalDate(candidate.validatedLocalDate)) return null;
+    const plannedAt = typeof candidate.plannedAt === 'string'
+      && Number.isFinite(new Date(candidate.plannedAt).getTime())
+      ? new Date(candidate.plannedAt).toISOString()
+      : new Date().toISOString();
+    const commands = Array.isArray(candidate.commands)
+      && candidate.commands.length > 0
+      && candidate.commands.length <= 8
+      && candidate.commands.every(command => typeof command === 'string' && command.trim().length > 0)
+      ? candidate.commands.map(command => (command as string).trim())
+      : null;
+    if ((candidate.kind === 'commands' || candidate.kind === undefined) && commands) {
+      const anchorDate = typeof candidate.anchorDate === 'string' && isLocalDate(candidate.anchorDate)
+        ? candidate.anchorDate
+        : candidate.validatedLocalDate;
+      return {
+        kind: 'commands',
+        commands,
+        validatedLocalDate: candidate.validatedLocalDate,
+        plannedAt,
+        anchorDate,
+      };
+    }
+    const request = sanitizePlannerChatPlanRequest(candidate.request);
+    if (candidate.kind === 'task_plan' && request) {
+      return {
+        kind: 'task_plan',
+        request,
+        validatedLocalDate: candidate.validatedLocalDate,
+        plannedAt,
+      };
+    }
+    return null;
   } catch {
     return null;
   }
@@ -215,6 +309,7 @@ function isAssistantChatResponse(value: unknown): value is AssistantChatResponse
     && Array.isArray(candidate.normalizedCommands)
     && candidate.normalizedCommands.length <= 8
     && candidate.normalizedCommands.every(command => typeof command === 'string' && command.trim().length > 0)
+    && (candidate.planRequest === null || sanitizePlannerChatPlanRequest(candidate.planRequest) !== null)
     && (candidate.usage === null || (
       typeof candidate.usage === 'object'
       && candidate.usage !== null
@@ -269,6 +364,13 @@ function cloneEntries(entries: readonly ScheduleEntry[]): ScheduleEntry[] {
       { ...override },
     ])),
   }));
+}
+
+function currentScheduleEntries(userId: string): ScheduleEntry[] {
+  return cloneEntries(selectScheduleEntriesForUser(
+    useScheduleStore.getState().entriesByUser,
+    userId,
+  ));
 }
 
 function calendarRenderData(
@@ -429,6 +531,43 @@ function previewReply(preview: ScheduleCommandPreview): string {
   return details.join('\n\n');
 }
 
+function scheduledPlacementStarts(preview: ScheduleCommandPreview): string[] {
+  return preview.actions.flatMap(action => {
+    if (action.type === 'create_task' || action.type === 'create_event') {
+      return action.schedule.startAt ? [action.schedule.startAt] : [];
+    }
+    return action.operations.flatMap(operation => {
+      if (operation.type === 'upsert') return operation.input.startAt ? [operation.input.startAt] : [];
+      if (operation.type === 'override') return operation.override.startAt ? [operation.override.startAt] : [];
+      return [];
+    });
+  });
+}
+
+function previewContainsPastPlacement(preview: ScheduleCommandPreview, now: string): boolean {
+  if (preview.kind === 'resize' || preview.kind === 'repeat' || preview.kind === 'delete') return false;
+  const nowTime = new Date(now).getTime();
+  if (!Number.isFinite(nowTime)) return true;
+  return scheduledPlacementStarts(preview).some(startAt => {
+    const startTime = new Date(startAt).getTime();
+    return !Number.isFinite(startTime) || startTime < nowTime;
+  });
+}
+
+function withoutPastPlacements(
+  preview: ScheduleCommandPreview,
+  now: string,
+): ScheduleCommandPreview {
+  if (!previewContainsPastPlacement(preview, now)) return preview;
+  return {
+    ...preview,
+    status: 'clarification',
+    summary: 'One or more times in that draft have already passed, so I did not apply it. Ask me again and I will place the work in current free time.',
+    actions: [],
+    occurrences: [],
+  };
+}
+
 function conflictingBlock(
   blocks: readonly PlannerBlockView[],
   movingBlockId: string,
@@ -477,9 +616,19 @@ function occurrenceScheduleInput(entry: ScheduleEntry | undefined, occurrence: S
 }
 
 export function Planner() {
-  const { user, tasks, subjects, exams, addTask, deleteTask, dataLoaded } = useAppStore();
+  const {
+    user,
+    tasks,
+    subjects,
+    exams,
+    addTask,
+    deleteTask,
+    finalizeTaskCreations,
+    dataLoaded,
+  } = useAppStore();
   const plannerUsers = usePlannerStore(state => state.users);
   const upsertCommitment = usePlannerStore(state => state.upsertCommitment);
+  const removeCommitment = usePlannerStore(state => state.removeCommitment);
   const entriesByUser = useScheduleStore(state => state.entriesByUser);
   const applyScheduleBatch = useScheduleStore(state => state.applyScheduleBatch);
   const replaceUserSchedules = useScheduleStore(state => state.replaceUserSchedules);
@@ -502,9 +651,12 @@ export function Planner() {
   );
   const [weekStart, setWeekStart] = useState(() => startOfWeek(dateCarrierInTimeZone(timeZone), { weekStartsOn: 1 }));
   const [selectedDate, setSelectedDate] = useState(() => dateCarrierInTimeZone(timeZone));
-  const [storedEvents, setStoredEvents] = useState<StoredCalendarEvent[]>([]);
+  const { events: storedEvents, setEvents: setStoredEvents } = useStoredCalendarEvents(userId);
   const [command, setCommand] = useState('');
   const [preview, setPreview] = useState<ScheduleCommandPreview | null>(null);
+  const [previewPlanRequest, setPreviewPlanRequest] = useState<AssistantTaskPlanRequest | null>(null);
+  const [previewPlanNow, setPreviewPlanNow] = useState<string | null>(null);
+  const [previewAnchorDate, setPreviewAnchorDate] = useState<LocalDate | null>(null);
   const [previewValidatedLocalDate, setPreviewValidatedLocalDate] = useState<LocalDate | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [applying, setApplying] = useState(false);
@@ -520,19 +672,31 @@ export function Planner() {
   const chatEndRef = useRef<HTMLDivElement>(null);
   const chatAbortRef = useRef<AbortController | null>(null);
   const chatRequestIdRef = useRef(0);
+  const mutationGenerationRef = useRef(0);
+  const activeUndoRef = useRef<UndoState | null>(null);
+  const inFlightUndoRef = useRef<UndoState | null>(null);
+  const activeUserIdRef = useRef<string | null>(userId);
   const chatHydratedUserRef = useRef<string | null>(null);
   const draftHydratedUserRef = useRef<string | null>(null);
+  activeUserIdRef.current = userId;
 
-  useEffect(() => {
-    const refresh = () => setStoredEvents(readStoredCalendarEvents());
-    refresh();
-    window.addEventListener('storage', refresh);
-    window.addEventListener('orderly-calendar-events-changed', refresh);
-    return () => {
-      window.removeEventListener('storage', refresh);
-      window.removeEventListener('orderly-calendar-events-changed', refresh);
+  const installUndoState = useCallback((next: UndoState) => {
+    const previous = activeUndoRef.current;
+    if (previous && previous !== inFlightUndoRef.current) {
+      // A single-level Undo must never retain deletion authority after a newer
+      // calendar change replaces it.
+      finalizeTaskCreations(previous.createdTaskIds);
+    }
+    const installed = {
+      ...next,
+      appliedEntries: next.appliedEntries || cloneEntries(selectScheduleEntriesForUser(
+        useScheduleStore.getState().entriesByUser,
+        next.userId,
+      )),
     };
-  }, []);
+    activeUndoRef.current = installed;
+    setUndoState(installed);
+  }, [finalizeTaskCreations]);
 
   useEffect(() => {
     const today = dateCarrierInTimeZone(timeZone);
@@ -542,28 +706,45 @@ export function Planner() {
 
   useEffect(() => () => {
     chatRequestIdRef.current += 1;
+    mutationGenerationRef.current += 1;
+    activeUserIdRef.current = null;
     chatAbortRef.current?.abort();
-  }, []);
+    const previousUndo = activeUndoRef.current;
+    if (previousUndo && previousUndo !== inFlightUndoRef.current) {
+      finalizeTaskCreations(previousUndo.createdTaskIds);
+    }
+    activeUndoRef.current = null;
+  }, [finalizeTaskCreations]);
 
   useEffect(() => {
     chatRequestIdRef.current += 1;
+    mutationGenerationRef.current += 1;
     chatAbortRef.current?.abort();
     chatAbortRef.current = null;
     chatHydratedUserRef.current = null;
     draftHydratedUserRef.current = null;
     if (userId) clearLegacyAssistantChatStorage(userId);
     const restored = userId ? readStoredAssistantMessages(userId) : [];
+    const previousUndo = activeUndoRef.current;
+    if (previousUndo && previousUndo !== inFlightUndoRef.current) {
+      finalizeTaskCreations(previousUndo.createdTaskIds);
+    }
+    activeUndoRef.current = null;
     setUndoState(null);
     setUsage(null);
     setIsThinking(false);
+    setApplying(false);
     setPreview(null);
+    setPreviewPlanRequest(null);
+    setPreviewPlanNow(null);
+    setPreviewAnchorDate(null);
     setPreviewValidatedLocalDate(null);
     setSelectedTaskId(null);
     setCommand('');
     setMessages(restored);
     setChatOwnerUserId(userId);
     chatHydratedUserRef.current = userId;
-  }, [userId]);
+  }, [finalizeTaskCreations, userId]);
 
   useEffect(() => {
     if (!userId || chatOwnerUserId !== userId || chatHydratedUserRef.current !== userId) return;
@@ -698,6 +879,22 @@ export function Planner() {
     availableEndTime: plannerSettings.bedtime,
   }), [commandCommitments.busy, commandEvents.busy, commandOccurrences.timed, commandOccurrences.untimed, entries, pendingTasks, plannerSettings.bedtime, plannerSettings.weekendAvailableStart, selectedDate, selectedTaskId, timeZone]);
 
+  // Keep the provider payload intentionally small, but make truncation
+  // relevance-aware so selected, overdue, and imminent work cannot be hidden
+  // behind older low-priority rows. The deterministic planner below still
+  // receives the complete local task collection.
+  const assistantContextTasks = useMemo(() => [...pendingTasks].sort((left, right) => {
+    if (left.id === selectedTaskId) return -1;
+    if (right.id === selectedTaskId) return 1;
+    const leftDeadline = plannerTaskDeadline(left, timeZone);
+    const rightDeadline = plannerTaskDeadline(right, timeZone);
+    const leftTime = leftDeadline ? new Date(leftDeadline).getTime() : Number.POSITIVE_INFINITY;
+    const rightTime = rightDeadline ? new Date(rightDeadline).getTime() : Number.POSITIVE_INFINITY;
+    return leftTime - rightTime
+      || left.title.localeCompare(right.title)
+      || left.id.localeCompare(right.id);
+  }), [pendingTasks, selectedTaskId, timeZone]);
+
   useEffect(() => {
     if (!userId || !dataLoaded || chatOwnerUserId !== userId || draftHydratedUserRef.current === userId) return;
     draftHydratedUserRef.current = userId;
@@ -717,12 +914,29 @@ export function Planner() {
       }
       return;
     }
-    const restored = interpretScheduleCommands(storedDraft.commands, {
-      ...context,
-      now: new Date().toISOString(),
-    });
+    const restored = storedDraft.kind === 'task_plan'
+      ? buildAssistantTaskPlan({
+          request: storedDraft.request,
+          now: storedDraft.plannedAt,
+          timeZone,
+          tasks,
+          entries,
+          occurrences: context.occurrences,
+          busy: context.busy,
+          settings: plannerSettings,
+          estimateCache: plannerRecord?.estimateCache || {},
+          feedbackMultipliers: plannerRecord?.feedbackMultipliers || {},
+        })
+      : interpretScheduleCommands(storedDraft.commands, {
+          ...context,
+          now: storedDraft.plannedAt,
+          selectedDate: storedDraft.anchorDate,
+        });
     if (restored.status === 'ready' && restored.actions.length > 0) {
       setPreview(restored);
+      setPreviewPlanRequest(storedDraft.kind === 'task_plan' ? storedDraft.request : null);
+      setPreviewPlanNow(storedDraft.plannedAt);
+      setPreviewAnchorDate(storedDraft.kind === 'commands' ? storedDraft.anchorDate : null);
       setPreviewValidatedLocalDate(storedDraft.validatedLocalDate);
       setCalendarOpen(true);
       return;
@@ -732,18 +946,35 @@ export function Planner() {
     } catch {
       // An invalid stored draft can be ignored when storage is unavailable.
     }
-  }, [chatOwnerUserId, context, dataLoaded, timeZone, userId]);
+  }, [chatOwnerUserId, context, dataLoaded, entries, plannerRecord?.estimateCache, plannerRecord?.feedbackMultipliers, plannerSettings, tasks, timeZone, userId]);
 
   useEffect(() => {
     if (!userId || draftHydratedUserRef.current !== userId) return;
     try {
-      if (preview?.status === 'ready' && preview.commands.length > 0 && previewValidatedLocalDate) {
+      if (preview?.status === 'ready' && previewValidatedLocalDate && previewPlanNow) {
+        const storedDraft: StoredAssistantDraft | null = previewPlanRequest
+          ? {
+              kind: 'task_plan',
+              request: previewPlanRequest,
+              validatedLocalDate: previewValidatedLocalDate,
+              plannedAt: previewPlanNow,
+            }
+          : preview.commands.length > 0
+            ? {
+                kind: 'commands',
+                commands: preview.commands.slice(0, 8),
+                validatedLocalDate: previewValidatedLocalDate,
+                plannedAt: previewPlanNow,
+                anchorDate: previewAnchorDate || previewValidatedLocalDate,
+              }
+            : null;
+        if (!storedDraft) {
+          window.sessionStorage.removeItem(assistantDraftStorageKey(userId));
+          return;
+        }
         window.sessionStorage.setItem(
           assistantDraftStorageKey(userId),
-          JSON.stringify({
-            commands: preview.commands.slice(0, 8),
-            validatedLocalDate: previewValidatedLocalDate,
-          } satisfies StoredAssistantDraft),
+          JSON.stringify(storedDraft),
         );
       } else {
         window.sessionStorage.removeItem(assistantDraftStorageKey(userId));
@@ -751,7 +982,7 @@ export function Planner() {
     } catch {
       // The active in-memory draft remains usable when storage is unavailable.
     }
-  }, [preview, previewValidatedLocalDate, userId]);
+  }, [preview, previewAnchorDate, previewPlanNow, previewPlanRequest, previewValidatedLocalDate, userId]);
 
   const selectedDayOccurrences = useMemo(
     () => [...occurrences.timed, ...occurrences.untimed]
@@ -787,8 +1018,14 @@ export function Planner() {
     setIsThinking(false);
   }, []);
 
-  const presentCommandPreview = useCallback((nextPreview: ScheduleCommandPreview): string => {
+  const presentCommandPreview = useCallback((
+    nextPreview: ScheduleCommandPreview,
+    plannedAt = new Date().toISOString(),
+  ): string => {
     if (nextPreview.status === 'ready' && nextPreview.actions.length > 0) {
+      setPreviewPlanRequest(null);
+      setPreviewPlanNow(plannedAt);
+      setPreviewAnchorDate(nextPreview.occurrences[0]?.date || localDate(selectedDate));
       setPreview(nextPreview);
       setPreviewValidatedLocalDate(localDate(dateCarrierInTimeZone(timeZone)));
       const firstOccurrence = nextPreview.occurrences[0];
@@ -805,6 +1042,36 @@ export function Planner() {
     // Only a new, fully validated mutation replaces the active draft; users
     // can explicitly discard it with the calendar control.
     return previewReply(nextPreview);
+  }, [selectedDate, timeZone]);
+
+  const presentTaskPlanPreview = useCallback((
+    request: AssistantTaskPlanRequest,
+    nextPreview: ScheduleCommandPreview,
+    plannedAt: string,
+  ): string => {
+    if (nextPreview.status !== 'ready' || nextPreview.actions.length === 0) {
+      // A failed follow-up must not erase a different draft the user has not
+      // saved yet. The existing draft remains visible until it is replaced by
+      // a fully validated plan or explicitly discarded.
+      return previewReply(nextPreview);
+    }
+    setPreviewPlanRequest(request);
+    setPreviewPlanNow(plannedAt);
+    setPreviewAnchorDate(null);
+    setPreview(nextPreview);
+    setPreviewValidatedLocalDate(localDate(dateCarrierInTimeZone(timeZone)));
+    const firstOccurrence = nextPreview.occurrences[0];
+    if (firstOccurrence) {
+      const nextDate = localDateCarrier(firstOccurrence.date);
+      setSelectedDate(nextDate);
+      setWeekStart(startOfWeek(nextDate, { weekStartsOn: 1 }));
+    }
+    setCalendarOpen(true);
+    return [
+      nextPreview.summary,
+      ...nextPreview.assumptions,
+      'I placed this plan on your calendar as one draft. Select **Save changes** to apply it.',
+    ].filter(Boolean).join('\n\n');
   }, [timeZone]);
 
   const submitCommand = useCallback(async (value = command, taskId = selectedTaskId) => {
@@ -830,9 +1097,113 @@ export function Planner() {
       now: new Date().toISOString(),
       selectedTaskId: taskId,
     };
+
+    const factualResult = resolveAssistantTaskQuery({
+      message: normalized,
+      now: commandContext.now,
+      timeZone,
+      tasks,
+    });
+    if (factualResult) {
+      setMessages(previous => [...previous, {
+        id: `assistant-${Date.now()}`,
+        role: 'assistant' as const,
+        content: factualResult.reply,
+      }].slice(-CHAT_DISPLAY_LIMIT));
+      return;
+    }
+
+    // Resolve "schedule them/those" from the immediately preceding factual
+    // task answer using stable local task IDs. This cannot revive an older
+    // request because both the last assistant reply and its preceding user
+    // question must match the freshly derived local result.
+    const lastAssistantMessage = messages.at(-1);
+    const priorUserMessage = [...messages].reverse().find(message => message.role === 'user');
+    const priorTaskResult = priorUserMessage
+      ? resolveAssistantTaskQuery({
+          message: priorUserMessage.content,
+          now: commandContext.now,
+          timeZone,
+          tasks,
+        })
+      : null;
+    const schedulesReferencedTasks = /\b(?:fit|move|plan|rebalance|replan|reschedule|schedule|spread)\b[\s\S]*\b(?:them|those|these)\b/i.test(normalized);
+    if (
+      schedulesReferencedTasks
+      && priorTaskResult
+      && priorTaskResult.taskIds.length > 0
+      && lastAssistantMessage?.role === 'assistant'
+      && lastAssistantMessage.content === priorTaskResult.reply
+    ) {
+      const referencedRequest: AssistantTaskPlanRequest = {
+        taskScope: 'task_ids',
+        taskIds: priorTaskResult.taskIds,
+        startDate: null,
+        horizonDays: 7,
+        todayLoad: /\b(?:skip|avoid) today\b|\bnot today\b/i.test(normalized)
+          ? 'skip'
+          : /\b(?:busy today|keep today light|do not overload today|don't overload today)\b/i.test(normalized)
+            ? 'light'
+            : 'normal',
+        includeAlreadyScheduled: /\b(?:rebalance|replan|reschedule|move)\b/i.test(normalized),
+      };
+      const referencedPreview = buildAssistantTaskPlan({
+        request: referencedRequest,
+        now: commandContext.now,
+        timeZone,
+        tasks,
+        entries,
+        occurrences: context.occurrences,
+        busy: context.busy,
+        settings: plannerSettings,
+        estimateCache: plannerRecord?.estimateCache || {},
+        feedbackMultipliers: plannerRecord?.feedbackMultipliers || {},
+      });
+      const assistantReply = presentTaskPlanPreview(
+        referencedRequest,
+        referencedPreview,
+        commandContext.now,
+      );
+      setMessages(previous => [...previous, {
+        id: `assistant-${Date.now()}`,
+        role: 'assistant' as const,
+        content: assistantReply,
+      }].slice(-CHAT_DISPLAY_LIMIT));
+      return;
+    }
+
+    // Broad requests are interpreted locally before the exact-command parser.
+    // That distinction is essential: "schedule my overdue work" intentionally
+    // leaves task choice, duration estimates, and clock placement to Orderly's
+    // deterministic planner instead of being rejected as one incomplete task.
+    const localPlanRequest = inferPlannerChatPlanRequest(
+      conversation.map(message => ({ role: message.role, content: message.content })),
+    );
+    if (localPlanRequest) {
+      const nextPreview = buildAssistantTaskPlan({
+        request: localPlanRequest,
+        now: commandContext.now,
+        timeZone,
+        tasks,
+        entries,
+        occurrences: context.occurrences,
+        busy: context.busy,
+        settings: plannerSettings,
+        estimateCache: plannerRecord?.estimateCache || {},
+        feedbackMultipliers: plannerRecord?.feedbackMultipliers || {},
+      });
+      const assistantReply = presentTaskPlanPreview(localPlanRequest, nextPreview, commandContext.now);
+      setMessages(previous => [...previous, {
+        id: `assistant-${Date.now()}`,
+        role: 'assistant' as const,
+        content: assistantReply,
+      }].slice(-CHAT_DISPLAY_LIMIT));
+      return;
+    }
+
     const directPreview = interpretDirectScheduleRequest(normalized, commandContext);
     if (directPreview) {
-      const assistantReply = presentCommandPreview(directPreview);
+      const assistantReply = presentCommandPreview(directPreview, commandContext.now);
       setMessages(previous => [...previous, {
         id: `assistant-${Date.now()}`,
         role: 'assistant' as const,
@@ -855,6 +1226,48 @@ export function Planner() {
     }, CHAT_TIMEOUT_MS);
 
     try {
+      const queryTerms = normalized.toLocaleLowerCase().match(/[a-z0-9]{3,}/g) || [];
+      const providerTasks = [...assistantContextTasks].sort((left, right) => {
+        const leftText = `${left.title} ${left.course_name || ''}`.toLocaleLowerCase();
+        const rightText = `${right.title} ${right.course_name || ''}`.toLocaleLowerCase();
+        const leftMatches = queryTerms.reduce((count, term) => count + (leftText.includes(term) ? 1 : 0), 0);
+        const rightMatches = queryTerms.reduce((count, term) => count + (rightText.includes(term) ? 1 : 0), 0);
+        return rightMatches - leftMatches;
+      });
+      const commandNow = new Date(commandContext.now).getTime();
+      const scheduledTaskIds = new Set(entries
+        .filter(entry => Boolean(entry.scheduledDate && entry.startAt))
+        .map(entry => entry.taskId));
+      const taskSummary = {
+        pendingTotal: pendingTasks.length,
+        overdueTotal: pendingTasks.filter(task => {
+          const deadline = plannerTaskDeadline(task, timeZone);
+          return deadline !== null && new Date(deadline).getTime() < commandNow;
+        }).length,
+        scheduledTotal: pendingTasks.filter(task => scheduledTaskIds.has(task.id)).length,
+        includedTotal: Math.min(30, providerTasks.length),
+      };
+      // Keep a separate, browser-only context for the second intent check.
+      // It is deliberately not included in the request body below.
+      const browserIntentContext: PlannerCommandAIContext = {
+        now: commandContext.now,
+        timeZone,
+        selectedTaskId: taskId,
+        selectedDate: localDate(selectedDate),
+        availableStartTime: plannerSettings.weekendAvailableStart,
+        availableEndTime: plannerSettings.bedtime,
+        tasks: providerTasks.slice(0, 30).map(task => ({
+          id: task.id,
+          title: cleanAssistantText(task.title, 180),
+          description: null,
+          dueDate: task.due_date,
+          dueTime: task.due_time,
+        })),
+        taskSummary,
+        exams: [],
+        occurrences: [],
+        busy: [],
+      };
       const response = await fetch('/api/planner/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -869,13 +1282,14 @@ export function Planner() {
             selectedDate: localDate(selectedDate),
             availableStartTime: plannerSettings.weekendAvailableStart,
             availableEndTime: plannerSettings.bedtime,
-            tasks: pendingTasks.slice(0, 30).map(task => ({
+            tasks: providerTasks.slice(0, 30).map(task => ({
               id: task.id,
               title: cleanAssistantText(task.title, 180),
               description: cleanAssistantText(task.description),
               dueDate: task.due_date,
               dueTime: task.due_time,
             })),
+            taskSummary,
             exams: [...exams]
               .sort((left, right) => left.exam_date.localeCompare(right.exam_date))
               .slice(0, 20)
@@ -927,7 +1341,53 @@ export function Planner() {
 
       const assistantMessageId = `assistant-${Date.now()}`;
       let assistantReply = payload.reply.trim() || 'Here is what I found.';
-      if (payload.normalizedCommands.length > 0) {
+      if (payload.planRequest) {
+        const planRequest = sanitizePlannerChatPlanRequest(payload.planRequest);
+        if (!planRequest) throw new Error('The Assistant returned an invalid planning request. Please try again.');
+        if (!plannerChatPlanRequestPreservesIntent(
+          conversation.map(message => ({ role: message.role, content: message.content })),
+          planRequest,
+          browserIntentContext,
+        )) {
+          assistantReply = 'I understood the main planning request, but I could not preserve every constraint safely, so I did not make a looser plan. Rephrase it as separate changes or give me the exact tasks and times.';
+          setMessages(previous => [...previous, {
+            id: assistantMessageId,
+            role: 'assistant' as const,
+            content: assistantReply,
+          }].slice(-CHAT_DISPLAY_LIMIT));
+          return;
+        }
+        const nextPreview = buildAssistantTaskPlan({
+          request: planRequest,
+          now: commandContext.now,
+          timeZone,
+          tasks,
+          entries,
+          occurrences: context.occurrences,
+          busy: context.busy,
+          settings: plannerSettings,
+          estimateCache: plannerRecord?.estimateCache || {},
+          feedbackMultipliers: plannerRecord?.feedbackMultipliers || {},
+        });
+        assistantReply = presentTaskPlanPreview(planRequest, nextPreview, commandContext.now);
+      } else if (payload.normalizedCommands.length > 0) {
+        // Treat even our own API response as untrusted input. The server
+        // performs the same check, but this second boundary prevents a stale,
+        // cached, or tampered response from staging a different operation,
+        // clock, duration, date, or target in the browser.
+        if (!plannerChatNormalizedCommandsPreserveIntent(
+          conversation.map(message => ({ role: message.role, content: message.content })),
+          payload.normalizedCommands,
+          browserIntentContext,
+        )) {
+          assistantReply = 'I could not preserve every exact detail in that request, so I made no calendar changes. Rephrase it or give me the exact item, date, time, and duration.';
+          setMessages(previous => [...previous, {
+            id: assistantMessageId,
+            role: 'assistant' as const,
+            content: assistantReply,
+          }].slice(-CHAT_DISPLAY_LIMIT));
+          return;
+        }
         let nextPreview = interpretScheduleCommands(payload.normalizedCommands, commandContext);
         if (payload.normalizedCommands.length === 1) {
           const normalizedCommand = payload.normalizedCommands[0];
@@ -941,7 +1401,7 @@ export function Planner() {
             nextPreview = interpretScheduleCommands([recovery.command], commandContext);
           }
         }
-        assistantReply = presentCommandPreview(nextPreview);
+        assistantReply = presentCommandPreview(nextPreview, commandContext.now);
       } else if (isUnverifiedCalendarOutcome(assistantReply)) {
         // A prose-only model response has no validated action or collision
         // result behind it. Never present such a claim as calendar truth.
@@ -973,13 +1433,16 @@ export function Planner() {
         setIsThinking(false);
       }
     }
-  }, [chatOwnerUserId, command, context, exams, isThinking, messages, pendingTasks, plannerSettings.bedtime, plannerSettings.weekendAvailableStart, presentCommandPreview, selectedDate, selectedTaskId, subjects, timeZone, userId]);
+  }, [assistantContextTasks, chatOwnerUserId, command, context, entries, exams, isThinking, messages, pendingTasks, plannerRecord?.estimateCache, plannerRecord?.feedbackMultipliers, plannerSettings, presentCommandPreview, presentTaskPlanPreview, selectedDate, selectedTaskId, subjects, tasks, timeZone, userId]);
 
   const applyPreview = useCallback(async () => {
     if (!userId || !preview || preview.status !== 'ready' || preview.actions.length === 0) return;
     const currentLocalDate = localDate(dateCarrierInTimeZone(timeZone));
     if (!previewValidatedLocalDate || previewValidatedLocalDate !== currentLocalDate) {
       setPreview(null);
+      setPreviewPlanRequest(null);
+      setPreviewPlanNow(null);
+      setPreviewAnchorDate(null);
       setPreviewValidatedLocalDate(null);
       setMessages(previous => [...previous, {
         id: `assistant-expired-${Date.now()}`,
@@ -989,16 +1452,41 @@ export function Planner() {
       toast.info('Calendar draft expired');
       return;
     }
-    const freshPreview = interpretScheduleCommands(preview.commands, {
-      ...context,
-      now: new Date().toISOString(),
-      selectedTaskId,
-    });
+    const saveNow = new Date().toISOString();
+    const refreshedPreview = previewPlanRequest
+      ? buildAssistantTaskPlan({
+          request: previewPlanRequest,
+          now: saveNow,
+          timeZone,
+          tasks,
+          entries,
+          occurrences: context.occurrences,
+          busy: context.busy,
+          settings: plannerSettings,
+          estimateCache: plannerRecord?.estimateCache || {},
+          feedbackMultipliers: plannerRecord?.feedbackMultipliers || {},
+        })
+      : interpretScheduleCommands(preview.commands, {
+          ...context,
+          // Midnight expiry guarantees that relative date words still resolve
+          // to the same local day. The stored anchor keeps commands without an
+          // explicit date on their original absolute calendar date.
+          now: saveNow,
+          selectedTaskId,
+          selectedDate: previewAnchorDate || context.selectedDate,
+        });
+    const freshPreview = withoutPastPlacements(refreshedPreview, saveNow);
     if (
       freshPreview.status !== 'ready'
       || JSON.stringify(freshPreview.actions) !== JSON.stringify(preview.actions)
     ) {
       setPreview(freshPreview);
+      setPreviewPlanNow(saveNow);
+      setPreviewAnchorDate(
+        freshPreview.status === 'ready'
+          ? freshPreview.occurrences[0]?.date || previewAnchorDate
+          : null,
+      );
       setPreviewValidatedLocalDate(freshPreview.status === 'ready' ? currentLocalDate : null);
       setMessages(previous => [...previous, {
         id: `assistant-recheck-${Date.now()}`,
@@ -1008,13 +1496,65 @@ export function Planner() {
       toast.info('Calendar draft refreshed');
       return;
     }
-    const before = cloneEntries(entries);
+    const before = currentScheduleEntries(userId);
     const createdTaskIds: string[] = [];
+    const createdCommitmentIds: string[] = [];
+    const operationUserId = userId;
+    const operationGeneration = mutationGenerationRef.current + 1;
+    mutationGenerationRef.current = operationGeneration;
+    const operationIsCurrent = () => plannerMutationIsCurrent({
+      operationUserId,
+      operationGeneration,
+      currentUserId: activeUserIdRef.current,
+      currentGeneration: mutationGenerationRef.current,
+    });
+    const rollbackCreatedResources = async () => {
+      const appliedEntries = cloneEntries(selectScheduleEntriesForUser(
+        useScheduleStore.getState().entriesByUser,
+        operationUserId,
+      ));
+      const cleanup = await deleteCreatedTasks(
+        createdTaskIds,
+        id => deleteTask(id, { silent: true }),
+      );
+      finalizeTaskCreations(cleanup.deletedTaskIds);
+      for (const id of createdCommitmentIds) removeCommitment(operationUserId, id);
+      const currentEntries = selectScheduleEntriesForUser(
+        useScheduleStore.getState().entriesByUser,
+        operationUserId,
+      );
+      const scheduleRestore = restoreScheduleSnapshotPreservingChanges(
+        before,
+        appliedEntries,
+        currentEntries,
+      );
+      if (scheduleRestore.restoredTaskIds.length > 0) {
+        replaceUserSchedules(operationUserId, cloneEntries(scheduleRestore.entries));
+      }
+      return cleanup;
+    };
     setApplying(true);
     try {
-      for (const action of preview.actions) {
+      for (const action of freshPreview.actions) {
+        if (!operationIsCurrent()) {
+          await rollbackCreatedResources();
+          return;
+        }
         if (action.type === 'schedule_batch') {
-          applyScheduleBatch(userId, action.operations);
+          applyScheduleBatch(operationUserId, action.operations);
+          continue;
+        }
+        if (action.type === 'create_event') {
+          const commitmentId = `event-${crypto.randomUUID()}`;
+          const commitment = scheduleEventActionToCommitment(action, {
+            id: commitmentId,
+            timeZone,
+            updatedAt: new Date().toISOString(),
+            color: '#3b82f6',
+          });
+          if (!commitment) throw new Error('The event could not be created.');
+          upsertCommitment(operationUserId, commitment);
+          createdCommitmentIds.push(commitmentId);
           continue;
         }
         const created = await addTask({
@@ -1032,48 +1572,183 @@ export function Planner() {
             : null,
           completed_at: null,
           source: 'manual',
-        });
+        }, { reversible: true });
         if (!created) throw new Error('The task could not be created.');
         createdTaskIds.push(created.id);
-        applyScheduleBatch(userId, [{ type: 'upsert', taskId: created.id, input: action.schedule }]);
+        if (!operationIsCurrent()) {
+          await rollbackCreatedResources();
+          return;
+        }
+        applyScheduleBatch(operationUserId, [{ type: 'upsert', taskId: created.id, input: action.schedule }]);
       }
-      setUndoState({ userId, entries: before, createdTaskIds, label: preview.summary });
+      if (!operationIsCurrent()) {
+        await rollbackCreatedResources();
+        return;
+      }
+      installUndoState({
+        userId: operationUserId,
+        entries: before,
+        createdTaskIds,
+        createdCommitmentIds,
+        label: freshPreview.summary,
+      });
       setMessages(previous => [...previous, {
         id: `applied-${Date.now()}`,
         role: 'assistant' as const,
-        content: `Done — ${preview.summary}`,
+        content: `Done — ${freshPreview.summary}`,
       }].slice(-CHAT_DISPLAY_LIMIT));
       toast.success('Schedule updated');
       setPreview(null);
+      setPreviewPlanRequest(null);
+      setPreviewPlanNow(null);
+      setPreviewAnchorDate(null);
       setPreviewValidatedLocalDate(null);
       setCommand('');
       setSelectedTaskId(null);
     } catch (error) {
-      for (const id of createdTaskIds) await deleteTask(id);
-      replaceUserSchedules(userId, before);
-      toast.error(error instanceof Error ? error.message : 'Could not update the schedule');
+      if (!operationIsCurrent()) {
+        await rollbackCreatedResources();
+        return;
+      }
+      const cleanup = await rollbackCreatedResources();
+      if (!operationIsCurrent()) return;
+      const errorMessage = error instanceof Error ? error.message : 'Could not update the schedule';
+      if (cleanup.failedTaskIds.length > 0) {
+        const recoveredEntries = cloneEntries(selectScheduleEntriesForUser(
+          useScheduleStore.getState().entriesByUser,
+          operationUserId,
+        ));
+        installUndoState({
+          userId: operationUserId,
+          entries: recoveredEntries,
+          appliedEntries: recoveredEntries,
+          createdTaskIds: cleanup.failedTaskIds,
+          createdCommitmentIds: [],
+          label: 'incomplete Assistant change',
+          recoveryOnly: true,
+        });
+        setMessages(previous => [...previous, {
+          id: `assistant-cleanup-${Date.now()}`,
+          role: 'assistant' as const,
+          content: `${errorMessage} I restored the calendar, but ${cleanup.failedTaskIds.length} created task${cleanup.failedTaskIds.length === 1 ? '' : 's'} could not be removed yet. Use Retry cleanup to finish safely.`,
+        }].slice(-CHAT_DISPLAY_LIMIT));
+        toast.error('Update failed; task cleanup still needs to be retried');
+      } else {
+        toast.error(errorMessage);
+      }
     } finally {
-      setApplying(false);
+      if (operationIsCurrent()) setApplying(false);
     }
-  }, [addTask, applyScheduleBatch, context, deleteTask, entries, preview, previewValidatedLocalDate, replaceUserSchedules, selectedTaskId, timeZone, userId]);
+  }, [addTask, applyScheduleBatch, context, deleteTask, entries, finalizeTaskCreations, installUndoState, plannerRecord?.estimateCache, plannerRecord?.feedbackMultipliers, plannerSettings, preview, previewAnchorDate, previewPlanNow, previewPlanRequest, previewValidatedLocalDate, removeCommitment, replaceUserSchedules, selectedTaskId, tasks, timeZone, upsertCommitment, userId]);
 
   const undo = useCallback(async () => {
     if (!userId || !undoState || undoState.userId !== userId) return;
-    for (const taskId of undoState.createdTaskIds) await deleteTask(taskId);
-    replaceUserSchedules(userId, cloneEntries(undoState.entries));
-    setMessages(previous => [...previous, {
-      id: `undo-${Date.now()}`,
-      role: 'assistant' as const,
-      content: `Undid: ${undoState.label}`,
-    }].slice(-CHAT_DISPLAY_LIMIT));
-    setUndoState(null);
-    toast.success('Last schedule change undone');
-  }, [deleteTask, replaceUserSchedules, undoState, userId]);
+    const snapshot = undoState;
+    const operationUserId = snapshot.userId;
+    const operationGeneration = mutationGenerationRef.current + 1;
+    mutationGenerationRef.current = operationGeneration;
+    inFlightUndoRef.current = snapshot;
+    const operationIsCurrent = () => plannerMutationIsCurrent({
+      operationUserId,
+      operationGeneration,
+      currentUserId: activeUserIdRef.current,
+      currentGeneration: mutationGenerationRef.current,
+    });
+    setApplying(true);
+    try {
+      const cleanup = await deleteCreatedTasks(
+        snapshot.createdTaskIds,
+        id => deleteTask(id, { silent: true }),
+      );
+      finalizeTaskCreations(cleanup.deletedTaskIds);
+
+      // Local calendar rollback is account-keyed and must finish even if the
+      // active account changes while the remote task deletions are pending.
+      for (const commitmentId of snapshot.createdCommitmentIds || []) {
+        removeCommitment(operationUserId, commitmentId);
+      }
+      for (const commitment of snapshot.commitmentSnapshots || []) {
+        upsertCommitment(operationUserId, cloneCommitment(commitment));
+      }
+
+      let storedEventRestoreFailed = false;
+      if ((snapshot.storedEventSnapshots || []).length > 0) {
+        try {
+          const restoredEvents = restoreStoredEventSnapshots(
+            readStoredCalendarEvents(operationUserId),
+            snapshot.storedEventSnapshots || [],
+          );
+          writeStoredCalendarEvents(operationUserId, restoredEvents);
+          if (operationIsCurrent()) setStoredEvents(restoredEvents);
+        } catch {
+          storedEventRestoreFailed = true;
+        }
+      }
+      const currentEntries = selectScheduleEntriesForUser(
+        useScheduleStore.getState().entriesByUser,
+        operationUserId,
+      );
+      const scheduleRestore = restoreScheduleSnapshotPreservingChanges(
+        snapshot.entries,
+        snapshot.appliedEntries || snapshot.entries,
+        currentEntries,
+      );
+      if (scheduleRestore.restoredTaskIds.length > 0) {
+        replaceUserSchedules(operationUserId, cloneEntries(scheduleRestore.entries));
+      }
+
+      if (!operationIsCurrent()) return;
+      if (cleanup.failedTaskIds.length > 0 || storedEventRestoreFailed) {
+        const recoveredEntries = cloneEntries(selectScheduleEntriesForUser(
+          useScheduleStore.getState().entriesByUser,
+          operationUserId,
+        ));
+        const recoverySnapshot: UndoState = {
+          ...snapshot,
+          entries: recoveredEntries,
+          appliedEntries: recoveredEntries,
+          createdTaskIds: cleanup.failedTaskIds,
+          createdCommitmentIds: [],
+          commitmentSnapshots: [],
+          storedEventSnapshots: storedEventRestoreFailed ? snapshot.storedEventSnapshots : [],
+          recoveryOnly: true,
+        };
+        activeUndoRef.current = recoverySnapshot;
+        setUndoState(recoverySnapshot);
+        setMessages(previous => [...previous, {
+          id: `undo-failed-${Date.now()}`,
+          role: 'assistant' as const,
+          content: storedEventRestoreFailed
+            ? 'I restored the account schedule, but the browser calendar event could not be restored yet. Retry cleanup when browser storage is available.'
+            : `I restored the calendar, but I could not remove ${cleanup.failedTaskIds.length} created task${cleanup.failedTaskIds.length === 1 ? '' : 's'}. Retry cleanup when the connection is stable.`,
+        }].slice(-CHAT_DISPLAY_LIMIT));
+        toast.error('Undo incomplete; retry cleanup');
+        return;
+      }
+      finalizeTaskCreations(snapshot.createdTaskIds);
+      setMessages(previous => [...previous, {
+        id: `undo-${Date.now()}`,
+        role: 'assistant' as const,
+        content: snapshot.recoveryOnly
+          ? 'Cleanup completed.'
+          : scheduleRestore.skippedTaskIds.length > 0
+            ? `Undid: ${snapshot.label}. I kept ${scheduleRestore.skippedTaskIds.length} newer schedule change${scheduleRestore.skippedTaskIds.length === 1 ? '' : 's'} made while Undo was running.`
+            : `Undid: ${snapshot.label}`,
+      }].slice(-CHAT_DISPLAY_LIMIT));
+      activeUndoRef.current = null;
+      setUndoState(null);
+      toast.success(snapshot.recoveryOnly ? 'Cleanup completed' : 'Last schedule change undone');
+    } finally {
+      if (inFlightUndoRef.current === snapshot) inFlightUndoRef.current = null;
+      if (operationIsCurrent()) setApplying(false);
+    }
+  }, [deleteTask, finalizeTaskCreations, removeCommitment, replaceUserSchedules, setStoredEvents, undoState, upsertCommitment, userId]);
 
   const persistCommitmentOccurrence = useCallback((
     block: PlannerBlockView,
     nextStart: Date,
     nextEnd: Date,
+    undoLabel: string,
   ) => {
     if (!userId || !block.commitmentId || !block.occurrenceDate || block.kind === 'school') return false;
     const commitment = commitmentById.get(block.commitmentId);
@@ -1093,19 +1768,40 @@ export function Planner() {
       endTime,
     });
     if (block.calendarEventId) {
+      const previousEvent = storedEvents.find(event => event.id === block.calendarEventId);
+      if (!previousEvent) return false;
       const nextEvents = storedEvents.map(event => event.id === block.calendarEventId
         ? { ...event, occurrenceOverrides: updated.occurrenceOverrides }
         : event);
-      setStoredEvents(nextEvents);
-      writeStoredCalendarEvents(nextEvents);
+      try {
+        writeStoredCalendarEvents(userId, nextEvents);
+        setStoredEvents(nextEvents);
+      } catch {
+        toast.error('That calendar event could not be updated');
+        return false;
+      }
+      installUndoState({
+        userId,
+        entries: currentScheduleEntries(userId),
+        createdTaskIds: [],
+        storedEventSnapshots: [cloneStoredEvent(previousEvent)],
+        label: undoLabel,
+      });
     } else {
       upsertCommitment(userId, updated);
+      installUndoState({
+        userId,
+        entries: currentScheduleEntries(userId),
+        createdTaskIds: [],
+        commitmentSnapshots: [cloneCommitment(commitment)],
+        label: undoLabel,
+      });
     }
     return true;
-  }, [commitmentById, storedEvents, timeZone, upsertCommitment, userId]);
+  }, [commitmentById, entries, installUndoState, setStoredEvents, storedEvents, timeZone, upsertCommitment, userId]);
 
   const handleMove = useCallback((block: PlannerBlockView, nextStart: Date, nextEnd: Date) => {
-    if (!userId) return;
+    if (!userId || applying) return;
     const conflict = conflictingBlock(blocks, block.id, nextStart, nextEnd);
     if (conflict) {
       toast.error(`That time overlaps “${conflict.title}”.`);
@@ -1113,7 +1809,9 @@ export function Planner() {
     }
     const occurrence = occurrenceById.get(block.id);
     if (!occurrence) {
-      if (persistCommitmentOccurrence(block, nextStart, nextEnd)) toast.success(`${block.title} moved`);
+      if (persistCommitmentOccurrence(block, nextStart, nextEnd, `Move “${block.title}”`)) {
+        toast.success(`${block.title} moved`);
+      }
       return;
     }
     const task = occurrence.task;
@@ -1126,7 +1824,7 @@ export function Planner() {
       });
     }
     const entry = entries.find(item => item.taskId === task.id);
-    setUndoState({ userId, entries: cloneEntries(entries), createdTaskIds: [], label: `Move “${task.title}”` });
+    const previousEntries = currentScheduleEntries(userId);
     if (!entry || occurrence.recurrence === 'none') {
       upsertTaskSchedule(userId, task.id, {
         ...occurrenceScheduleInput(entry, occurrence),
@@ -1137,10 +1835,11 @@ export function Planner() {
     } else {
       moveOccurrence(userId, task.id, occurrence.recurrenceSourceDate, nextDate, nextStart.toISOString());
     }
-  }, [blocks, entries, moveOccurrence, occurrenceById, persistCommitmentOccurrence, timeZone, upsertTaskSchedule, userId]);
+    installUndoState({ userId, entries: previousEntries, createdTaskIds: [], label: `Move “${task.title}”` });
+  }, [applying, blocks, entries, installUndoState, moveOccurrence, occurrenceById, persistCommitmentOccurrence, timeZone, upsertTaskSchedule, userId]);
 
   const handleResize = useCallback((block: PlannerBlockView, nextStart: Date, nextEnd: Date) => {
-    if (!userId) return;
+    if (!userId || applying) return;
     const conflict = conflictingBlock(blocks, block.id, nextStart, nextEnd);
     if (conflict) {
       toast.error(`That duration overlaps “${conflict.title}”.`);
@@ -1148,7 +1847,9 @@ export function Planner() {
     }
     const occurrence = occurrenceById.get(block.id);
     if (!occurrence) {
-      if (persistCommitmentOccurrence(block, nextStart, nextEnd)) toast.success(`${block.title} updated`);
+      if (persistCommitmentOccurrence(block, nextStart, nextEnd, `Resize “${block.title}”`)) {
+        toast.success(`${block.title} updated`);
+      }
       return;
     }
     const task = occurrence.task;
@@ -1160,7 +1861,7 @@ export function Planner() {
     }
     const durationSeconds = Math.max(15 * 60, Math.round((nextEnd.getTime() - nextStart.getTime()) / 1000));
     const entry = entries.find(item => item.taskId === task.id);
-    setUndoState({ userId, entries: cloneEntries(entries), createdTaskIds: [], label: `Resize “${task.title}”` });
+    const previousEntries = currentScheduleEntries(userId);
     if (!entry || occurrence.recurrence === 'none') {
       upsertTaskSchedule(userId, task.id, {
         ...occurrenceScheduleInput(entry, occurrence),
@@ -1169,14 +1870,15 @@ export function Planner() {
     } else {
       resizeOccurrence(userId, task.id, occurrence.recurrenceSourceDate, durationSeconds);
     }
-  }, [blocks, entries, occurrenceById, persistCommitmentOccurrence, resizeOccurrence, timeZone, upsertTaskSchedule, userId]);
+    installUndoState({ userId, entries: previousEntries, createdTaskIds: [], label: `Resize “${task.title}”` });
+  }, [applying, blocks, entries, installUndoState, occurrenceById, persistCommitmentOccurrence, resizeOccurrence, timeZone, upsertTaskSchedule, userId]);
 
   const handleScheduleUntimed = useCallback((
     item: UntimedScheduleItem,
     nextStart: Date,
     nextEnd: Date,
   ) => {
-    if (!userId) return;
+    if (!userId || applying) return;
     const occurrence = occurrenceById.get(item.id);
     if (!occurrence) return;
     const conflict = conflictingBlock(blocks, item.id, nextStart, nextEnd);
@@ -1194,7 +1896,7 @@ export function Planner() {
     }
     const entry = entries.find(candidate => candidate.taskId === occurrence.taskId);
     const durationSeconds = Math.max(15 * 60, Math.round((nextEnd.getTime() - nextStart.getTime()) / 1000));
-    setUndoState({ userId, entries: cloneEntries(entries), createdTaskIds: [], label: `Schedule “${occurrence.title}”` });
+    const previousEntries = currentScheduleEntries(userId);
     if (occurrence.recurrence !== 'none') {
       if (!entry) {
         upsertTaskSchedule(userId, occurrence.taskId, {
@@ -1219,17 +1921,18 @@ export function Planner() {
         durationSeconds,
       });
     }
+    installUndoState({ userId, entries: previousEntries, createdTaskIds: [], label: `Schedule “${occurrence.title}”` });
     toast.success(`${occurrence.title} scheduled`);
-  }, [blocks, entries, occurrenceById, setOccurrenceOverride, timeZone, upsertTaskSchedule, userId]);
+  }, [applying, blocks, entries, installUndoState, occurrenceById, setOccurrenceOverride, timeZone, upsertTaskSchedule, userId]);
 
   const handleMoveToUntimed = useCallback((block: PlannerBlockView, targetDate?: string) => {
-    if (!userId) return;
+    if (!userId || applying) return;
     const occurrence = occurrenceById.get(block.id);
     if (!occurrence?.startAt) return;
     const entry = entries.find(candidate => candidate.taskId === occurrence.taskId);
     const durationSeconds = occurrence.durationSeconds || 30 * 60;
     const nextDate = targetDate || occurrence.date;
-    setUndoState({ userId, entries: cloneEntries(entries), createdTaskIds: [], label: `Move “${occurrence.title}” to untimed` });
+    const previousEntries = currentScheduleEntries(userId);
     if (occurrence.recurrence !== 'none') {
       if (!entry) {
         upsertTaskSchedule(userId, occurrence.taskId, {
@@ -1254,8 +1957,9 @@ export function Planner() {
         durationSeconds,
       });
     }
+    installUndoState({ userId, entries: previousEntries, createdTaskIds: [], label: `Move “${occurrence.title}” to untimed` });
     toast.success(`${occurrence.title} moved to untimed`);
-  }, [entries, occurrenceById, setOccurrenceOverride, timeZone, upsertTaskSchedule, userId]);
+  }, [applying, entries, installUndoState, occurrenceById, setOccurrenceOverride, timeZone, upsertTaskSchedule, userId]);
 
   const startNewChat = useCallback(() => {
     stopThinking();
@@ -1269,6 +1973,9 @@ export function Planner() {
     setMessages([]);
     setCommand('');
     setPreview(null);
+    setPreviewPlanRequest(null);
+    setPreviewPlanNow(null);
+    setPreviewAnchorDate(null);
     setPreviewValidatedLocalDate(null);
     setSelectedTaskId(null);
     window.requestAnimationFrame(() => commandInputRef.current?.focus());
@@ -1310,8 +2017,8 @@ export function Planner() {
         </div>
         <div className="flex items-center gap-2">
           {undoState?.userId === userId && (
-            <Button type="button" variant="outline" size="sm" onClick={() => void undo()}>
-              <Undo2 className="h-4 w-4" /> Undo
+            <Button type="button" variant="outline" size="sm" disabled={applying} onClick={() => void undo()}>
+              <Undo2 className="h-4 w-4" /> {undoState.recoveryOnly ? 'Retry cleanup' : 'Undo'}
             </Button>
           )}
           <Button
@@ -1430,6 +2137,9 @@ export function Planner() {
                       size="sm"
                       onClick={() => {
                         setPreview(null);
+                        setPreviewPlanRequest(null);
+                        setPreviewPlanNow(null);
+                        setPreviewAnchorDate(null);
                         setPreviewValidatedLocalDate(null);
                       }}
                       disabled={applying}

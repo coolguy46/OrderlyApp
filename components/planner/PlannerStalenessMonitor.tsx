@@ -1,17 +1,16 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { useAppStore } from '@/lib/store';
 import { usePlannerStore } from '@/lib/planner/store';
 import {
   examsToPlannerInputs,
-  readStoredCalendarEvents,
   storedEventsToCommitments,
   tasksToPlannerInputs,
-  type StoredCalendarEvent,
 } from '@/lib/planner/adapters';
+import { useStoredCalendarEvents } from '@/lib/planner/use-stored-calendar-events';
 
 function notificationStorageKey(userId: string): string {
   return `orderly-planner-staleness-notified-${userId}`;
@@ -30,27 +29,12 @@ export function PlannerStalenessMonitor() {
   const setActiveUser = usePlannerStore(state => state.setActiveUser);
   const refreshPlanStaleness = usePlannerStore(state => state.refreshPlanStaleness);
   const plan = plannerRecord?.currentPlan || null;
-  const [storedEvents, setStoredEvents] = useState<StoredCalendarEvent[]>([]);
-  const [storedEventsReady, setStoredEventsReady] = useState(false);
+  const { events: storedEvents, ready: storedEventsReady } = useStoredCalendarEvents(user?.id || null);
 
   useEffect(() => {
     if (!user) return;
     setActiveUser(user.id, Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
   }, [setActiveUser, user?.id]);
-
-  useEffect(() => {
-    const refresh = () => {
-      setStoredEvents(readStoredCalendarEvents());
-      setStoredEventsReady(true);
-    };
-    refresh();
-    window.addEventListener('storage', refresh);
-    window.addEventListener('orderly-calendar-events-changed', refresh);
-    return () => {
-      window.removeEventListener('storage', refresh);
-      window.removeEventListener('orderly-calendar-events-changed', refresh);
-    };
-  }, []);
 
   const taskInputs = useMemo(() => {
     if (!plan) return [];

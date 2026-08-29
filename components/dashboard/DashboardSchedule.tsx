@@ -18,10 +18,9 @@ import type { ScheduleOccurrence } from '@/lib/schedule/types';
 import { useAppStore } from '@/lib/store';
 import { cn } from '@/lib/utils';
 import {
-  readStoredCalendarEvents,
   storedEventsToCommitments,
-  type StoredCalendarEvent,
 } from '@/lib/planner/adapters';
+import { useStoredCalendarEvents } from '@/lib/planner/use-stored-calendar-events';
 import { usePlannerStore } from '@/lib/planner/store';
 import type { RecurringCommitmentInput } from '@/lib/planner/types';
 import { buildCommitmentOccurrences } from '@/lib/planner/commitments';
@@ -92,9 +91,9 @@ export function DashboardSchedule() {
   const setActiveUser = usePlannerStore(state => state.setActiveUser);
   const [selectedDate, setSelectedDate] = useState(() => startOfDay(new Date()));
   const [detailOccurrenceId, setDetailOccurrenceId] = useState<string | null>(null);
-  const [storedEvents, setStoredEvents] = useState<StoredCalendarEvent[]>([]);
   const scrollerRef = useRef<HTMLDivElement>(null);
   const userId = user?.id || null;
+  const { events: storedEvents } = useStoredCalendarEvents(userId);
   const plannerRecord = userId ? plannerUsers[userId] : null;
   const timeZone = plannerRecord?.settings.timeZone
     || Intl.DateTimeFormat().resolvedOptions().timeZone
@@ -105,17 +104,6 @@ export function DashboardSchedule() {
     if (!userId) return;
     setActiveUser(userId, Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
   }, [setActiveUser, userId]);
-
-  useEffect(() => {
-    const refresh = () => setStoredEvents(readStoredCalendarEvents());
-    refresh();
-    window.addEventListener('storage', refresh);
-    window.addEventListener('orderly-calendar-events-changed', refresh);
-    return () => {
-      window.removeEventListener('storage', refresh);
-      window.removeEventListener('orderly-calendar-events-changed', refresh);
-    };
-  }, []);
 
   const entries = useMemo(
     () => selectScheduleEntriesForUser(entriesByUser, user?.id),

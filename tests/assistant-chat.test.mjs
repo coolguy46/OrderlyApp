@@ -3,8 +3,11 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 import {
+  PLANNER_CHAT_SYSTEM_PROMPT,
+  inferPlannerChatPlanRequest,
   parsePlannerChatAIJson,
   sanitizePlannerChatAIInput,
+  sanitizePlannerChatPlanRequest,
   selectPlannerChatProviderContext,
 } from '../lib/planner/deepseek-command.ts';
 import {
@@ -32,6 +35,12 @@ function chatInput(messageOrMessages, context = {}) {
         dueDate: '2026-08-28T06:59:00.000Z',
         dueTime: '23:59',
       }],
+      taskSummary: {
+        pendingTotal: 7,
+        overdueTotal: 2,
+        scheduledTotal: 3,
+        includedTotal: 1,
+      },
       exams: [{
         id: 'exam-1',
         title: 'Biology test',
@@ -73,6 +82,12 @@ test('chat history, tasks, and exams are validated and bounded', () => {
         title: `Task ${index}`,
         description: 'x'.repeat(900),
       })),
+      taskSummary: {
+        pendingTotal: 75,
+        overdueTotal: 12,
+        scheduledTotal: 18,
+        includedTotal: 75,
+      },
       exams: Array.from({ length: 30 }, (_, index) => ({
         id: `exam-${index}`,
         title: `Exam ${index}`,
@@ -86,6 +101,12 @@ test('chat history, tasks, and exams are validated and bounded', () => {
   assert.ok(input.messages.length <= 14);
   assert.equal(input.messages.at(-1).content, 'How does my week look?');
   assert.equal(input.context.tasks.length, 30);
+  assert.deepEqual(input.context.taskSummary, {
+    pendingTotal: 75,
+    overdueTotal: 12,
+    scheduledTotal: 18,
+    includedTotal: 30,
+  });
   assert.equal(input.context.exams.length, 20);
   assert.equal(input.context.tasks[0].description.length, 600);
   assert.equal(input.context.exams[0].description.length, 600);
@@ -106,6 +127,12 @@ test('provider context omits schedule data for greetings and descriptions by def
   assert.deepEqual(greetingContext.exams, []);
   assert.deepEqual(greetingContext.occurrences, []);
   assert.deepEqual(greetingContext.busy, []);
+  assert.deepEqual(greetingContext.taskSummary, {
+    pendingTotal: 0,
+    overdueTotal: 0,
+    scheduledTotal: 0,
+    includedTotal: 0,
+  });
 
   const unrelated = chatInput('Tell me a joke');
   assert.ok(unrelated);
@@ -118,8 +145,53 @@ test('provider context omits schedule data for greetings and descriptions by def
   const weekContext = selectPlannerChatProviderContext(week);
   assert.equal(weekContext.tasks[0].title, 'Chemistry worksheet');
   assert.equal(weekContext.tasks[0].description, null);
+  assert.deepEqual(weekContext.taskSummary, {
+    pendingTotal: 7,
+    overdueTotal: 2,
+    scheduledTotal: 3,
+    includedTotal: 1,
+  });
   assert.equal(weekContext.exams[0].description, null);
   assert.equal(weekContext.busy[0].title, 'Soccer');
+});
+
+test('task summary counts are bounded, consistent, and derived from the sanitized snapshot', () => {
+  const input = chatInput('List my pending tasks', {
+    tasks: [
+      { id: 'task-1', title: 'One' },
+      { id: 'task-2', title: 'Two' },
+    ],
+    taskSummary: {
+      pendingTotal: 1,
+      overdueTotal: 99,
+      scheduledTotal: -1,
+      includedTotal: 99_999,
+    },
+  });
+
+  assert.ok(input);
+  assert.deepEqual(input.context.taskSummary, {
+    pendingTotal: 2,
+    overdueTotal: 2,
+    scheduledTotal: 0,
+    includedTotal: 2,
+  });
+
+  const invalid = chatInput('List my pending tasks', {
+    taskSummary: {
+      pendingTotal: 100_001,
+      overdueTotal: '4',
+      scheduledTotal: 2.5,
+      includedTotal: -5,
+    },
+  });
+  assert.ok(invalid);
+  assert.deepEqual(invalid.context.taskSummary, {
+    pendingTotal: 1,
+    overdueTotal: 0,
+    scheduledTotal: 0,
+    includedTotal: 1,
+  });
 });
 
 test('only the referenced assignment description is sent when details are requested', () => {
@@ -180,13 +252,14 @@ test('Canvas HTML and control characters are removed from provider context', () 
 test('chat parser accepts replies and optional schedule commands but rejects model force overrides', () => {
   assert.deepEqual(
     parsePlannerChatAIJson('{"reply":"Thursday is your busiest day.","normalizedCommand":null}'),
-    { reply: 'Thursday is your busiest day.', normalizedCommands: [] },
+    { reply: 'Thursday is your busiest day.', normalizedCommands: [], planRequest: null },
   );
   assert.deepEqual(
     parsePlannerChatAIJson('{"reply":"I prepared a calendar draft.","normalizedCommand":"Schedule workout today at 5 pm for 1 hour"}'),
     {
       reply: 'I prepared a calendar draft.',
       normalizedCommands: ['Schedule workout today at 5 pm for 1 hour'],
+      planRequest: null,
     },
   );
   assert.deepEqual(
@@ -197,6 +270,7 @@ test('chat parser accepts replies and optional schedule commands but rejects mod
         'Schedule Common App tomorrow at 10 pm for 1 hour',
         'Schedule counselor meeting Saturday at 12 pm for 1 hour',
       ],
+      planRequest: null,
     })),
     {
       reply: 'I placed all three changes on the calendar.',
@@ -205,6 +279,7 @@ test('chat parser accepts replies and optional schedule commands but rejects mod
         'Schedule Common App tomorrow at 10 pm for 1 hour',
         'Schedule counselor meeting Saturday at 12 pm for 1 hour',
       ],
+      planRequest: null,
     },
   );
   assert.deepEqual(
@@ -212,6 +287,7 @@ test('chat parser accepts replies and optional schedule commands but rejects mod
     {
       reply: 'I prepared a calendar draft.',
       normalizedCommands: ['Schedule Force and Motion tomorrow at 5 pm for 1 hour'],
+      planRequest: null,
     },
   );
   assert.deepEqual(
@@ -219,6 +295,7 @@ test('chat parser accepts replies and optional schedule commands but rejects mod
     {
       reply: 'I cannot bypass Orderly’s schedule safeguards. Choose a different time or edit the schedule manually.',
       normalizedCommands: [],
+      planRequest: null,
     },
   );
   assert.equal(parsePlannerChatAIJson('not json'), null);
@@ -239,8 +316,9 @@ test('chat parser accepts replies and optional schedule commands but rejects mod
   assert.deepEqual(
     parsePlannerChatAIJson('{"reply":"I will generate a preview for you.","normalizedCommands":[]}'),
     {
-      reply: 'I could not turn that into calendar changes yet. Tell me the missing date, time, or duration and I’ll place the complete draft on your calendar.',
+      reply: 'I could not safely determine that change. Tell me which task or activity you mean, and I’ll either place the exact change or plan it into open time.',
       normalizedCommands: [],
+      planRequest: null,
     },
   );
 
@@ -259,8 +337,9 @@ test('chat parser accepts replies and optional schedule commands but rejects mod
     assert.deepEqual(
       parsePlannerChatAIJson(JSON.stringify({ reply, normalizedCommands: [] })),
       {
-        reply: 'I could not turn that into calendar changes yet. Tell me the missing date, time, or duration and I’ll place the complete draft on your calendar.',
+        reply: 'I could not safely determine that change. Tell me which task or activity you mean, and I’ll either place the exact change or plan it into open time.',
         normalizedCommands: [],
+        planRequest: null,
       },
     );
   }
@@ -268,7 +347,7 @@ test('chat parser accepts replies and optional schedule commands but rejects mod
   const workloadReply = 'You have three assignments due today. Thursday is your busiest day, and your overdue chemistry worksheet should be the first priority.';
   assert.deepEqual(
     parsePlannerChatAIJson(JSON.stringify({ reply: workloadReply, normalizedCommands: [] })),
-    { reply: workloadReply, normalizedCommands: [] },
+    { reply: workloadReply, normalizedCommands: [], planRequest: null },
   );
 
   assert.equal(
@@ -278,6 +357,255 @@ test('chat parser accepts replies and optional schedule commands but rejects mod
     })),
     null,
   );
+});
+
+test('broad planning requests are strictly validated and stay separate from exact commands', () => {
+  assert.match(PLANNER_CHAT_SYSTEM_PROMPT, /Use planRequest for broad planning requests/i);
+  assert.match(PLANNER_CHAT_SYSTEM_PROMPT, /Missing per-task times or durations are expected/i);
+  assert.match(PLANNER_CHAT_SYSTEM_PROMPT, /don't overload today/i);
+  const request = {
+    taskScope: 'overdue',
+    taskIds: [],
+    startDate: null,
+    horizonDays: 7,
+    todayLoad: 'light',
+    includeAlreadyScheduled: false,
+  };
+  assert.deepEqual(sanitizePlannerChatPlanRequest(request), request);
+  assert.deepEqual(
+    parsePlannerChatAIJson(JSON.stringify({
+      reply: 'I will spread your overdue work across the next week and keep today light.',
+      normalizedCommands: [],
+      planRequest: request,
+    })),
+    {
+      reply: 'I will spread your overdue work across the next week and keep today light.',
+      normalizedCommands: [],
+      planRequest: request,
+    },
+  );
+
+  for (const taskScope of ['today', 'tomorrow', 'this_week', 'all_pending']) {
+    assert.deepEqual(sanitizePlannerChatPlanRequest({
+      ...request,
+      taskScope,
+      startDate: '2026-08-28',
+      horizonDays: 1,
+      todayLoad: 'normal',
+    })?.taskScope, taskScope);
+  }
+  assert.deepEqual(sanitizePlannerChatPlanRequest({
+    ...request,
+    taskScope: 'task_ids',
+    taskIds: ['task-1', 'task-2'],
+    todayLoad: 'skip',
+    includeAlreadyScheduled: true,
+  }), {
+    taskScope: 'task_ids',
+    taskIds: ['task-1', 'task-2'],
+    startDate: null,
+    horizonDays: 7,
+    todayLoad: 'skip',
+    includeAlreadyScheduled: true,
+  });
+
+  const invalidRequests = [
+    { ...request, taskScope: 'everything' },
+    { ...request, taskIds: ['task-1'] },
+    { ...request, taskScope: 'task_ids', taskIds: [] },
+    { ...request, taskScope: 'task_ids', taskIds: ['task-1', 'task-1'] },
+    { ...request, taskScope: 'task_ids', taskIds: [' task-1'] },
+    { ...request, taskScope: 'task_ids', taskIds: ['x'.repeat(129)] },
+    { ...request, taskScope: 'task_ids', taskIds: [1] },
+    { ...request, startDate: '2026-02-30' },
+    { ...request, startDate: '2026-08-28 extra' },
+    { ...request, horizonDays: 0 },
+    { ...request, horizonDays: 8 },
+    { ...request, horizonDays: 2.5 },
+    { ...request, todayLoad: 'busy' },
+    { ...request, includeAlreadyScheduled: 'false' },
+    { ...request, extra: true },
+  ];
+  for (const invalidRequest of invalidRequests) {
+    assert.equal(sanitizePlannerChatPlanRequest(invalidRequest), null);
+    assert.equal(parsePlannerChatAIJson(JSON.stringify({
+      reply: 'Invalid request',
+      normalizedCommands: [],
+      planRequest: invalidRequest,
+    })), null);
+  }
+
+  assert.equal(parsePlannerChatAIJson(JSON.stringify({
+    reply: 'Conflicting request',
+    normalizedCommands: ['Schedule workout today at 5 pm for 1 hour'],
+    planRequest: request,
+  })), null);
+});
+
+test('broad plan requests are inferred deterministically without erasing exact times', () => {
+  const expected = (taskScope, overrides = {}) => ({
+    taskScope,
+    taskIds: [],
+    startDate: null,
+    horizonDays: taskScope === 'today' || taskScope === 'tomorrow' ? 1 : 7,
+    todayLoad: 'normal',
+    includeAlreadyScheduled: false,
+    ...overrides,
+  });
+  const infer = messages => {
+    const input = chatInput(messages);
+    assert.ok(input);
+    return inferPlannerChatPlanRequest(input.messages, input.context);
+  };
+
+  for (const request of [
+    'Schedule all my overdue assignments',
+    'Schedule my overdue',
+    'Plan my missing',
+    'Fit in overdue',
+  ]) {
+    assert.deepEqual(infer(request), expected('overdue'), request);
+  }
+  assert.deepEqual(
+    infer("Plan my missing work, but don't overload today"),
+    expected('overdue', { todayLoad: 'light' }),
+  );
+  assert.deepEqual(infer('Plan my week'), expected('this_week'));
+  assert.deepEqual(infer('Plan everything due this week'), expected('this_week'));
+  assert.deepEqual(infer('Schedule my workload'), expected('all_pending'));
+  assert.deepEqual(infer("Schedule today's tasks"), expected('today'));
+  assert.deepEqual(infer('Schedule my tasks for tomorrow'), expected('tomorrow'));
+  assert.deepEqual(
+    infer('Rebalance my week'),
+    expected('this_week', { includeAlreadyScheduled: true }),
+  );
+  assert.deepEqual(infer('Can you please plan my week?'), expected('this_week'));
+  assert.deepEqual(
+    infer('Plan my overdue starting tomorrow over the next two days'),
+    expected('overdue', { startDate: '2026-08-28', horizonDays: 2 }),
+  );
+  assert.deepEqual(
+    infer('Plan everything beginning tomorrow across the next 2 days'),
+    expected('all_pending', { startDate: '2026-08-28', horizonDays: 2 }),
+  );
+
+  for (const exactRequest of [
+    'Schedule all my overdue work from 10 PM to 11 PM',
+    'Schedule all my overdue work at 10 PM for 1 hour',
+    'Plan my week after 17:30',
+    'Schedule my overdue chemistry assignment',
+    'Schedule This Week Essay',
+  ]) {
+    assert.equal(infer(exactRequest), null);
+  }
+  for (const unsupportedBroadRequest of [
+    'Schedule my overdue only in the mornings',
+    'Schedule my overdue except chemistry',
+    'Schedule all my tasks and add a workout tomorrow',
+    'Schedule my missing work, prioritize math first',
+    'Plan everything due this week but not English',
+    'Plan my overdue on weekdays',
+    'Plan my overdue after school',
+    'Plan my overdue but avoid Friday',
+    'Plan my overdue over no more than 3 days',
+  ]) {
+    assert.equal(infer(unsupportedBroadRequest), null, unsupportedBroadRequest);
+  }
+});
+
+test('broad plan inference uses only an active prior mutation for confirmations', () => {
+  const infer = messages => {
+    const input = chatInput(messages);
+    assert.ok(input);
+    return inferPlannerChatPlanRequest(input.messages, input.context);
+  };
+  const overdueLight = {
+    taskScope: 'overdue',
+    taskIds: [],
+    startDate: null,
+    horizonDays: 7,
+    todayLoad: 'light',
+    includeAlreadyScheduled: false,
+  };
+
+  assert.deepEqual(infer([
+    { role: 'user', content: 'Schedule my missing assignments' },
+    { role: 'assistant', content: 'I can spread them across the week.' },
+    { role: 'user', content: "Do it, but don't overload today" },
+  ]), overdueLight);
+  assert.deepEqual(infer([
+    { role: 'user', content: 'Schedule my missing assignments' },
+    { role: 'assistant', content: 'I can spread them across the week.' },
+    { role: 'user', content: 'Do it starting tomorrow over the next two days' },
+  ]), {
+    ...overdueLight,
+    startDate: '2026-08-28',
+    horizonDays: 2,
+    todayLoad: 'normal',
+  });
+  assert.deepEqual(infer([
+    { role: 'user', content: 'Plan my overdue work' },
+    { role: 'assistant', content: 'I can do that.' },
+    { role: 'user', content: "I'm busy today" },
+    { role: 'assistant', content: 'Understood.' },
+    { role: 'user', content: 'Schedule them' },
+  ]), overdueLight);
+  for (const confirmation of ["Yes, that's fine", 'Schedule those']) {
+    assert.deepEqual(infer([
+      { role: 'user', content: 'Schedule my overdue' },
+      { role: 'assistant', content: 'I prepared the calendar draft.' },
+      { role: 'user', content: confirmation },
+    ]), { ...overdueLight, todayLoad: 'normal' }, confirmation);
+  }
+  assert.deepEqual(infer([
+    { role: 'user', content: 'Schedule my missing' },
+    { role: 'assistant', content: 'Would you like me to schedule that work now?' },
+    { role: 'user', content: 'Yes' },
+  ]), { ...overdueLight, todayLoad: 'normal' });
+
+  assert.equal(infer('Schedule them'), null);
+  assert.equal(infer([
+    { role: 'user', content: 'Plan my week' },
+    { role: 'assistant', content: 'Okay.' },
+    { role: 'user', content: 'Tell me what exams I have' },
+    { role: 'assistant', content: 'You have a biology exam.' },
+    { role: 'user', content: 'Do it' },
+  ]), null);
+  assert.equal(infer([
+    { role: 'user', content: 'Schedule workout tonight from 10 PM to 11 PM' },
+    { role: 'assistant', content: 'Ready.' },
+    { role: 'user', content: 'Do it' },
+  ]), null);
+  assert.equal(infer([
+    { role: 'user', content: 'Schedule my overdue' },
+    { role: 'assistant', content: 'Which assignments should I include?' },
+    { role: 'user', content: "Yes, that's fine" },
+  ]), null);
+  assert.equal(infer([
+    { role: 'user', content: 'Schedule my overdue' },
+    { role: 'assistant', content: 'Your biology exam is Friday.' },
+    { role: 'user', content: 'Schedule those' },
+  ]), null);
+});
+
+test('read-only and specific ambiguous requests never infer a broad mutation', () => {
+  const infer = message => {
+    const input = chatInput(message);
+    assert.ok(input);
+    return inferPlannerChatPlanRequest(input.messages, input.context);
+  };
+  for (const request of [
+    'What are my missing assignments?',
+    'List all my overdue work',
+    'How should I plan my week?',
+    'Can I schedule my overdue work?',
+    'Can you show me how to schedule my week?',
+    'I have a busy day and overdue work',
+    'Schedule my overdue chemistry assignment',
+    "Don't overload today",
+  ]) {
+    assert.equal(infer(request), null, request);
+  }
 });
 
 test('usage helpers disable message quotas by default and parse provider token accounting', () => {
@@ -455,6 +783,10 @@ test('chat route is authenticated, usage-tracked, per-minute limited, abortable,
   assert.match(route, /isRateLimited\(user\.id\)/);
   assert.match(route, /Retry-After', '60'/);
   assert.match(route, /usage: null/);
+  assert.match(route, /planRequest: PlannerChatPlanRequest \| null/);
+  assert.match(route, /plannerChatPlanRequestPreservesIntent/);
+  assert.match(route, /plannerChatNormalizedCommandsPreserveIntent/);
+  assert.match(route, /planRequest: rejectedWithoutFallback \? null : providerPlanRequest \|\| inferredPlanRequest/);
   assert.match(route, /selectPlannerChatProviderContext/);
   assert.match(route, /request\.signal\.addEventListener\('abort'/);
   assert.match(route, /20_000/);
@@ -482,6 +814,6 @@ test('chat route supports legacy single-command clients without partially exposi
     route,
     /function legacyNormalizedCommand\(commands: readonly string\[\]\): string \| null \{[\s\S]*?commands\.length === 1 \? commands\[0\] : null/,
   );
-  assert.match(route, /normalizedCommand: legacyNormalizedCommand\(result\.normalizedCommands\)/);
+  assert.match(route, /normalizedCommand: rejectedWithoutFallback[\s\S]*?legacyNormalizedCommand\(providerCommands\)/);
   assert.match(route, /normalizedCommands: \[\],[\s\S]*?normalizedCommand: null/);
 });

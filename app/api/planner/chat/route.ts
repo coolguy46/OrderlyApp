@@ -2,9 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import {
   buildPlannerChatSystemPrompt,
+  inferPlannerChatPlanRequest,
   parsePlannerChatAIJson,
+  plannerChatNormalizedCommandsPreserveIntent,
+  plannerChatPlanRequestPreservesIntent,
   sanitizePlannerChatAIInput,
   selectPlannerChatProviderContext,
+  type PlannerChatPlanRequest,
 } from '@/lib/planner/deepseek-command';
 import {
   completeAssistantUsage,
@@ -37,6 +41,7 @@ interface ChatResponseBody {
   reply: string;
   normalizedCommands: string[];
   normalizedCommand: string | null;
+  planRequest: PlannerChatPlanRequest | null;
   usage: null;
   aiUsed: boolean;
 }
@@ -75,6 +80,7 @@ function unavailable(
     reply,
     normalizedCommands: [],
     normalizedCommand: null,
+    planRequest: null,
     usage: null,
     aiUsed: false,
   }, { status });
@@ -187,10 +193,35 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const providerPlanRequest = result.planRequest
+      && plannerChatPlanRequestPreservesIntent(input.messages, result.planRequest, input.context)
+      ? result.planRequest
+      : null;
+    const providerPlanRejected = result.planRequest !== null && providerPlanRequest === null;
+    const providerCommands = result.normalizedCommands.length > 0
+      && plannerChatNormalizedCommandsPreserveIntent(
+        input.messages,
+        result.normalizedCommands,
+        input.context,
+      )
+      ? result.normalizedCommands
+      : [];
+    const providerCommandsRejected = result.normalizedCommands.length > 0
+      && providerCommands.length === 0;
+    const inferredPlanRequest = providerCommands.length === 0 && providerPlanRequest === null
+      ? inferPlannerChatPlanRequest(input.messages, input.context)
+      : null;
+    const rejectedWithoutFallback = (providerPlanRejected || providerCommandsRejected)
+      && inferredPlanRequest === null;
     return noStoreJson({
-      reply: result.reply,
-      normalizedCommands: result.normalizedCommands,
-      normalizedCommand: legacyNormalizedCommand(result.normalizedCommands),
+      reply: rejectedWithoutFallback
+        ? 'I could not preserve every planning constraint in that request, so I made no calendar changes. Rephrase the constraint or give me the exact task, date, and time.'
+        : result.reply,
+      normalizedCommands: rejectedWithoutFallback ? [] : providerCommands,
+      normalizedCommand: rejectedWithoutFallback
+        ? null
+        : legacyNormalizedCommand(providerCommands),
+      planRequest: rejectedWithoutFallback ? null : providerPlanRequest || inferredPlanRequest,
       usage: null,
       aiUsed: true,
     });

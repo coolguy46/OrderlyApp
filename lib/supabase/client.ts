@@ -1,8 +1,8 @@
 import { createBrowserClient } from '@supabase/ssr';
 import type { Database } from './types';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co';
-const supabasePublishableKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || 'placeholder-key';
+export const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co';
+export const supabasePublishableKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || 'placeholder-key';
 
 // Custom fetch that silently swallows AbortErrors so they never bubble up as
 // unhandled rejections or fake "SIGNED_OUT" events.

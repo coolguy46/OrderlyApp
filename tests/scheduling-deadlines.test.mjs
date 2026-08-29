@@ -66,6 +66,7 @@ const {
   interpretDirectScheduleRequest,
   interpretScheduleCommand,
   interpretScheduleCommands,
+  scheduleEventActionToCommitment,
 } = compiledRequire(join(buildRoot, 'lib/schedule/commands.js'));
 
 after(async () => {
@@ -264,6 +265,72 @@ test('direct Assistant scheduling keeps explicit PM ranges authoritative across 
   }
 });
 
+test('explicit event, game, and meeting requests create durable events instead of tasks', () => {
+  const context = {
+    now: '2026-08-28T19:00:00.000Z',
+    timeZone: 'America/Los_Angeles',
+    tasks: [],
+    entries: [],
+    occurrences: [],
+    busy: [],
+  };
+  const cases = [
+    ['create an event called Family Dinner tonight from 6 pm to 7 pm', 'other'],
+    ['create a soccer game tomorrow from 4 pm to 5:30 pm', 'sports'],
+    ['schedule counselor meeting tomorrow from 2 pm to 2:45 pm', 'appointment'],
+    ['add a math class next Monday from 9 am to 10 am', 'class'],
+  ];
+
+  cases.forEach(([command, expectedKind], index) => {
+    const preview = interpretDirectScheduleRequest(command, context);
+    assert.ok(preview, command);
+    assert.equal(preview.status, 'ready', `${command}: ${preview.summary}`);
+    assert.equal(preview.actions.length, 1);
+    const action = preview.actions[0];
+    assert.equal(action.type, 'create_event', command);
+    assert.equal(action.kind, expectedKind, command);
+    assert.match(preview.summary, /Create event/i);
+
+    const commitment = scheduleEventActionToCommitment(action, {
+      id: `assistant-event-${index}`,
+      timeZone: context.timeZone,
+      updatedAt: context.now,
+      color: '#3b82f6',
+    });
+    assert.ok(commitment, command);
+    assert.equal(commitment.id, `assistant-event-${index}`);
+    assert.equal(commitment.kind, expectedKind);
+    assert.equal(commitment.timeZone, context.timeZone);
+    assert.equal(commitment.enabled, true);
+    assert.equal(commitment.startDate, action.schedule.scheduledDate);
+    assert.equal(commitment.endDate, action.schedule.scheduledDate);
+  });
+});
+
+test('task creation remains task creation even when the task mentions an event', () => {
+  const context = {
+    now: '2026-08-28T19:00:00.000Z',
+    timeZone: 'America/Los_Angeles',
+    tasks: [],
+    entries: [],
+    occurrences: [],
+    busy: [],
+  };
+
+  for (const command of [
+    'create a task tonight from 7 pm to 8 pm to prepare for the soccer game',
+    'schedule chemistry homework tonight from 8 pm to 9 pm',
+    'add an assignment called Meeting Reflection tomorrow at 5 pm for 30 minutes',
+  ]) {
+    const preview = interpretDirectScheduleRequest(command, context);
+    assert.ok(preview, command);
+    assert.equal(preview.status, 'ready', `${command}: ${preview.summary}`);
+    assert.equal(preview.actions.length, 1);
+    assert.equal(preview.actions[0].type, 'create_task', command);
+    assert.match(preview.summary, /Create task/i);
+  }
+});
+
 test('direct Assistant scheduling still blocks a genuine school-time intersection', () => {
   const preview = interpretDirectScheduleRequest(
     'create Common App tonight from 10 am to 11 am',
@@ -308,6 +375,37 @@ test('direct Assistant scheduling supports overnight ranges and keeps conversati
 
   assert.equal(interpretDirectScheduleRequest('How does my week look?', context), null);
   assert.equal(interpretDirectScheduleRequest('What assignments are missing?', context), null);
+});
+
+test('direct scheduling distinguishes collection planning from exact titles containing broad words', () => {
+  const context = {
+    now: '2026-08-28T19:00:00.000Z',
+    timeZone: 'America/Los_Angeles',
+    tasks: [],
+    entries: [],
+    occurrences: [],
+    busy: [],
+  };
+
+  for (const broad of [
+    'Schedule my overdue',
+    'Schedule my missing',
+    'Schedule all my tasks after 5 pm',
+    'Plan everything except chemistry',
+    'Schedule those',
+  ]) {
+    assert.equal(interpretDirectScheduleRequest(broad, context), null, broad);
+  }
+
+  for (const exact of [
+    'Schedule Overdue Chemistry tonight from 5 pm to 6 pm',
+    'Schedule This Week Essay tomorrow at 5 pm for 30 minutes',
+  ]) {
+    const preview = interpretDirectScheduleRequest(exact, context);
+    assert.ok(preview, exact);
+    assert.equal(preview.status, 'ready', `${exact}: ${preview.summary}`);
+    assert.equal(preview.actions.length, 1);
+  }
 });
 
 test('direct scheduling requires an actual mutation request and preserves multi-action messages', () => {

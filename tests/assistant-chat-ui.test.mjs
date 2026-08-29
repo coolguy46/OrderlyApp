@@ -10,7 +10,9 @@ test('Assistant uses the bounded multi-turn chat API contract', async () => {
 
   assert.match(source, /fetch\('\/api\/planner\/chat'/);
   assert.match(source, /messages: conversation\.map\(message => \(\{ role: message\.role, content: message\.content \}\)\)/);
-  assert.match(source, /tasks: pendingTasks\.slice\(0, 30\)/);
+  assert.match(source, /const assistantContextTasks = useMemo/);
+  assert.match(source, /tasks: providerTasks\.slice\(0, 30\)/);
+  assert.match(source, /taskSummary,/);
   assert.match(source, /dueDate: task\.due_date/);
   assert.match(source, /dueTime: task\.due_time/);
   assert.match(source, /\.slice\(0, 20\)[\s\S]*examDate: exam\.exam_date/);
@@ -42,8 +44,14 @@ test('Assistant history is account-scoped and bounded', async () => {
   assert.match(source, /localStorage\.removeItem\(assistantChatStorageKey\(userId\)\)/);
   assert.match(source, /clearLegacyAssistantChatStorage\(userId\)/);
   assert.match(source, /readStoredAssistantDraft\(userId\)/);
+  assert.match(source, /kind: 'task_plan'/);
+  assert.match(source, /request: previewPlanRequest/);
+  assert.match(source, /kind: 'commands'/);
   assert.match(source, /commands: preview\.commands\.slice\(0, 8\)/);
+  assert.match(source, /plannedAt: previewPlanNow/);
   assert.match(source, /validatedLocalDate: previewValidatedLocalDate/);
+  assert.match(source, /storedDraft\.kind === 'task_plan'/);
+  assert.match(source, /buildAssistantTaskPlan\(\{/);
   assert.match(source, /interpretScheduleCommands\(storedDraft\.commands/);
   assert.match(source, /if \(!userId \|\| !dataLoaded \|\| chatOwnerUserId !== userId/);
   assert.match(source, /storedDraft\.validatedLocalDate !== currentLocalDate/);
@@ -95,14 +103,131 @@ test('Assistant stages changes on the calendar and revalidates before saving', a
     source.indexOf('const undo'),
   );
 
-  assert.match(applySection, /const freshPreview = interpretScheduleCommands\(preview\.commands/);
+  assert.match(applySection, /const saveNow = new Date\(\)\.toISOString\(\)/);
+  assert.match(applySection, /const refreshedPreview = previewPlanRequest/);
+  assert.match(applySection, /buildAssistantTaskPlan\(\{/);
+  assert.match(applySection, /request: previewPlanRequest,\s+now: saveNow/);
+  assert.match(applySection, /interpretScheduleCommands\(preview\.commands/);
+  assert.match(applySection, /now: saveNow,[\s\S]*selectedDate: previewAnchorDate \|\| context\.selectedDate/);
+  assert.match(applySection, /withoutPastPlacements\(refreshedPreview, saveNow\)/);
   assert.match(applySection, /JSON\.stringify\(freshPreview\.actions\) !== JSON\.stringify\(preview\.actions\)/);
+  assert.match(applySection, /setPreviewPlanNow\(saveNow\)/);
+  assert.match(applySection, /for \(const action of freshPreview\.actions\)/);
   assert.match(applySection, /refreshed the draft on the calendar/);
   assert.match(source, /function scheduleDraftBlocks/);
   assert.match(source, /Assistant draft on calendar/);
   assert.match(source, /Save changes/);
   assert.match(source, /Discard/);
   assert.doesNotMatch(source, /preview=\{activePreview\}/);
+});
+
+test('Assistant persists events as calendar commitments with rollback and undo', async () => {
+  const source = await readFile(plannerUrl, 'utf8');
+  const applySection = source.slice(
+    source.indexOf('const applyPreview'),
+    source.indexOf('const undo'),
+  );
+
+  assert.match(source, /scheduleEventActionToCommitment/);
+  assert.match(applySection, /action\.type === 'create_event'/);
+  assert.match(applySection, /upsertCommitment\(operationUserId, commitment\)/);
+  assert.match(applySection, /createdCommitmentIds\.push\(commitmentId\)/);
+  assert.match(applySection, /removeCommitment\(operationUserId, id\)/);
+  assert.match(applySection, /deleteCreatedTasks\(/);
+  assert.match(applySection, /cleanup\.failedTaskIds\.length > 0/);
+  assert.match(source, /Retry cleanup/);
+  assert.match(source, /for \(const commitmentId of snapshot\.createdCommitmentIds \|\| \[\]\)/);
+  assert.match(source, /removeCommitment\(operationUserId, commitmentId\)/);
+});
+
+test('event drag and resize replace stale Undo with the exact prior event state', async () => {
+  const source = await readFile(plannerUrl, 'utf8');
+  const installSection = source.slice(
+    source.indexOf('const installUndoState'),
+    source.indexOf('useEffect(() => {', source.indexOf('const installUndoState')),
+  );
+  const persistenceSection = source.slice(
+    source.indexOf('const persistCommitmentOccurrence'),
+    source.indexOf('const handleMove'),
+  );
+  const dragSection = source.slice(
+    source.indexOf('const handleMove'),
+    source.indexOf('const startNewChat'),
+  );
+
+  assert.match(installSection, /const previous = activeUndoRef\.current/);
+  assert.match(installSection, /finalizeTaskCreations\(previous\.createdTaskIds\)/);
+  assert.match(installSection, /activeUndoRef\.current = installed/);
+  assert.match(installSection, /setUndoState\(installed\)/);
+  assert.match(persistenceSection, /const previousEvent = storedEvents\.find/);
+  assert.match(persistenceSection, /storedEventSnapshots: \[cloneStoredEvent\(previousEvent\)\]/);
+  assert.match(persistenceSection, /commitmentSnapshots: \[cloneCommitment\(commitment\)\]/);
+  assert.match(persistenceSection, /writeStoredCalendarEvents\(userId, nextEvents\)/);
+  assert.match(persistenceSection, /installUndoState\(\{/);
+  assert.match(dragSection, /persistCommitmentOccurrence\(block, nextStart, nextEnd, `Move/);
+  assert.match(dragSection, /persistCommitmentOccurrence\(block, nextStart, nextEnd, `Resize/);
+  assert.doesNotMatch(dragSection, /setUndoState\(\{/);
+});
+
+test('Undo conditionally completes account-keyed rollback before guarding active-account UI', async () => {
+  const source = await readFile(plannerUrl, 'utf8');
+  const applySection = source.slice(
+    source.indexOf('const applyPreview'),
+    source.indexOf('const undo'),
+  );
+  const undoSection = source.slice(
+    source.indexOf('const undo'),
+    source.indexOf('const persistCommitmentOccurrence'),
+  );
+
+  assert.match(applySection, /addTask\([\s\S]*\{ reversible: true \}\)/);
+  assert.match(applySection, /installUndoState\(\{[\s\S]*createdTaskIds/);
+  assert.doesNotMatch(applySection, /finalizeTaskCreations\(createdTaskIds\)/);
+  assert.match(undoSection, /inFlightUndoRef\.current = snapshot/);
+  assert.match(undoSection, /removeCommitment\(operationUserId, commitmentId\)/);
+  assert.match(undoSection, /upsertCommitment\(operationUserId, cloneCommitment\(commitment\)\)/);
+  assert.match(undoSection, /readStoredCalendarEvents\(operationUserId\)/);
+  assert.match(undoSection, /writeStoredCalendarEvents\(operationUserId, restoredEvents\)/);
+  assert.match(undoSection, /restoreScheduleSnapshotPreservingChanges\(/);
+  assert.match(undoSection, /snapshot\.appliedEntries \|\| snapshot\.entries/);
+  assert.match(undoSection, /useScheduleStore\.getState\(\)\.entriesByUser/);
+  assert.match(undoSection, /replaceUserSchedules\(operationUserId, cloneEntries\(scheduleRestore\.entries\)\)/);
+
+  const activeAccountGuard = undoSection.indexOf('if (!operationIsCurrent()) return;');
+  assert.ok(activeAccountGuard > 0, 'Undo must guard UI after account-keyed rollback');
+  for (const accountKeyedMutation of [
+    'removeCommitment(operationUserId, commitmentId)',
+    'upsertCommitment(operationUserId, cloneCommitment(commitment))',
+    'writeStoredCalendarEvents(operationUserId, restoredEvents)',
+    'replaceUserSchedules(operationUserId, cloneEntries(scheduleRestore.entries))',
+  ]) {
+    assert.ok(
+      undoSection.indexOf(accountKeyedMutation) < activeAccountGuard,
+      `${accountKeyedMutation} must finish before active-account UI is guarded`,
+    );
+  }
+  assert.ok(
+    undoSection.indexOf('setMessages(previous =>', activeAccountGuard) > activeAccountGuard,
+    'Undo messages must only update the still-active account',
+  );
+});
+
+test('schedule Undo snapshots capture the applied state after synchronous drag mutations', async () => {
+  const source = await readFile(plannerUrl, 'utf8');
+  const installSection = source.slice(
+    source.indexOf('const installUndoState'),
+    source.indexOf('useEffect(() => {', source.indexOf('const installUndoState')),
+  );
+  const moveSection = source.slice(
+    source.indexOf('const handleMove'),
+    source.indexOf('const handleResize'),
+  );
+
+  assert.match(installSection, /appliedEntries: next\.appliedEntries \|\| cloneEntries\(selectScheduleEntriesForUser\(/);
+  assert.ok(
+    moveSection.indexOf('upsertTaskSchedule(userId, task.id') < moveSection.indexOf('installUndoState({ userId, entries: previousEntries'),
+    'the applied schedule must exist before Undo captures its conflict guard',
+  );
 });
 
 test('follow-up chat keeps an unsaved calendar draft and accepts atomic command bundles', async () => {
@@ -116,15 +241,32 @@ test('follow-up chat keeps an unsaved calendar draft and accepts atomic command 
     source.indexOf('const submitCommand'),
   );
 
-  const mutationBranch = submitSection.slice(submitSection.indexOf('if (payload.normalizedCommands.length > 0)'));
-  const questionOnlyPath = submitSection.slice(0, submitSection.indexOf('if (payload.normalizedCommands.length > 0)'));
+  const mutationBranch = submitSection.slice(submitSection.indexOf('if (payload.planRequest)'));
+  const questionOnlyPath = submitSection.slice(0, submitSection.indexOf('if (payload.planRequest)'));
 
   assert.doesNotMatch(questionOnlyPath, /setPreview\(null\)/);
-  assert.match(mutationBranch, /if \(payload\.normalizedCommands\.length > 0\)/);
+  assert.match(mutationBranch, /if \(payload\.planRequest\)/);
+  assert.match(mutationBranch, /else if \(payload\.normalizedCommands\.length > 0\)/);
   assert.match(presentationSection, /setPreview\(nextPreview\)/);
   assert.doesNotMatch(presentationSection, /setPreview\(null\)/);
-  assert.match(submitSection, /presentCommandPreview\(nextPreview\)/);
+  assert.match(submitSection, /presentCommandPreview\(nextPreview/);
+  assert.match(submitSection, /presentTaskPlanPreview\(planRequest, nextPreview/);
   assert.match(presentationSection, /one draft/);
+});
+
+test('a factual task answer can be scheduled by an immediate grounded follow-up', async () => {
+  const source = await readFile(plannerUrl, 'utf8');
+  const submitSection = source.slice(
+    source.indexOf('const submitCommand'),
+    source.indexOf('const applyPreview'),
+  );
+
+  assert.match(submitSection, /const factualResult = resolveAssistantTaskQuery/);
+  assert.match(submitSection, /const priorTaskResult = priorUserMessage/);
+  assert.match(submitSection, /taskScope: 'task_ids'/);
+  assert.match(submitSection, /taskIds: priorTaskResult\.taskIds/);
+  assert.match(submitSection, /lastAssistantMessage\.content === priorTaskResult\.reply/);
+  assert.match(submitSection, /presentTaskPlanPreview\(/);
 });
 
 test('Assistant drafts expire safely across a local-date boundary', async () => {
@@ -134,11 +276,43 @@ test('Assistant drafts expire safely across a local-date boundary', async () => 
     source.indexOf('const undo'),
   );
 
-  assert.match(source, /interface StoredAssistantDraft \{\s+commands: string\[\];\s+validatedLocalDate: LocalDate;/);
+  assert.match(source, /type StoredAssistantDraft =/);
+  assert.match(source, /kind: 'commands';\s+commands: string\[\];\s+validatedLocalDate: LocalDate;\s+plannedAt: string;/);
+  assert.match(source, /plannedAt: string;\s+anchorDate: LocalDate;/);
+  assert.match(source, /kind: 'task_plan';\s+request: AssistantTaskPlanRequest;\s+validatedLocalDate: LocalDate;\s+plannedAt: string;/);
   assert.match(source, /storedDraft\.validatedLocalDate !== currentLocalDate/);
+  assert.match(source, /selectedDate: storedDraft\.anchorDate/);
+  assert.match(source, /anchorDate: previewAnchorDate \|\| previewValidatedLocalDate/);
   assert.match(applySection, /previewValidatedLocalDate !== currentLocalDate/);
   assert.match(applySection, /calendar draft expired at midnight/i);
-  assert.match(applySection, /setPreview\(null\);\s+setPreviewValidatedLocalDate\(null\)/);
+  assert.match(applySection, /setPreview\(null\);\s+setPreviewPlanRequest\(null\);\s+setPreviewPlanNow\(null\);\s+setPreviewAnchorDate\(null\);\s+setPreviewValidatedLocalDate\(null\)/);
+});
+
+test('Assistant client rejects malformed plan requests before planning', async () => {
+  const source = await readFile(plannerUrl, 'utf8');
+
+  assert.match(
+    source,
+    /candidate\.planRequest === null \|\| sanitizePlannerChatPlanRequest\(candidate\.planRequest\) !== null/,
+  );
+  assert.match(source, /const planRequest = sanitizePlannerChatPlanRequest\(payload\.planRequest\)/);
+  assert.match(source, /if \(!planRequest\) throw new Error\('The Assistant returned an invalid planning request/);
+});
+
+test('Assistant save guard cannot apply a newly placed block in the past', async () => {
+  const source = await readFile(plannerUrl, 'utf8');
+  const guardSection = source.slice(
+    source.indexOf('function scheduledPlacementStarts'),
+    source.indexOf('function conflictingBlock'),
+  );
+
+  assert.match(guardSection, /action\.schedule\.startAt/);
+  assert.match(guardSection, /operation\.type === 'upsert'/);
+  assert.match(guardSection, /operation\.type === 'override'/);
+  assert.match(guardSection, /startTime < nowTime/);
+  assert.match(guardSection, /status: 'clarification'/);
+  assert.match(guardSection, /actions: \[\]/);
+  assert.match(guardSection, /occurrences: \[\]/);
 });
 
 test('chat UI keeps the composer visible and calendar controls secondary', async () => {

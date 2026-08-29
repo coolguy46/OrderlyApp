@@ -73,6 +73,72 @@ const userHydrationPromises = new Map<string, Promise<void>>();
 let dataLoadSequence = 0;
 const latestDataLoadByUser = new Map<string, number>();
 
+interface ReversibleTaskReceipt {
+  ownerUserId: string;
+  accessToken: string;
+}
+
+const reversibleTaskReceipts = new Map<string, ReversibleTaskReceipt>();
+const PENDING_TASK_CLEANUP_KEY = 'orderly-pending-task-cleanups';
+
+function pendingTaskCleanups(): Record<string, string[]> {
+  if (typeof window === 'undefined') return {};
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(PENDING_TASK_CLEANUP_KEY) || '{}') as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    return Object.fromEntries(Object.entries(parsed as Record<string, unknown>).map(([userId, ids]) => [
+      userId,
+      Array.isArray(ids) ? ids.filter((id): id is string => typeof id === 'string') : [],
+    ]));
+  } catch {
+    return {};
+  }
+}
+
+function writePendingTaskCleanups(value: Record<string, string[]>) {
+  if (typeof window === 'undefined') return;
+  try {
+    const compact = Object.fromEntries(Object.entries(value).filter(([, ids]) => ids.length > 0));
+    if (Object.keys(compact).length === 0) window.localStorage.removeItem(PENDING_TASK_CLEANUP_KEY);
+    else window.localStorage.setItem(PENDING_TASK_CLEANUP_KEY, JSON.stringify(compact));
+  } catch {
+    // Storage can be unavailable in private browsing. Immediate token-based
+    // compensation still runs before this fallback is needed.
+  }
+}
+
+function queuePendingTaskCleanup(ownerUserId: string, taskId: string) {
+  const pending = pendingTaskCleanups();
+  pending[ownerUserId] = Array.from(new Set([...(pending[ownerUserId] || []), taskId]));
+  writePendingTaskCleanups(pending);
+}
+
+async function compensateInterruptedTaskCreation(
+  ownerUserId: string,
+  taskId: string,
+  accessToken: string,
+) {
+  let deleted = false;
+  try {
+    deleted = await db.deleteTaskWithAccessToken(taskId, ownerUserId, accessToken);
+  } catch {
+    deleted = false;
+  }
+  if (!deleted) queuePendingTaskCleanup(ownerUserId, taskId);
+}
+
+async function retryPendingTaskCleanups(ownerUserId: string) {
+  const pending = pendingTaskCleanups();
+  const taskIds = pending[ownerUserId] || [];
+  if (taskIds.length === 0) return;
+  const remaining: string[] = [];
+  for (const taskId of taskIds) {
+    if (!await db.deleteTask(taskId)) remaining.push(taskId);
+  }
+  pending[ownerUserId] = remaining;
+  writePendingTaskCleanups(pending);
+}
+
 export type Theme = 'light' | 'dark' | 'system';
 
 interface AppState {
@@ -134,9 +200,13 @@ interface AppState {
   setCurrentView: (view: string) => void;
   
   // Task actions
-  addTask: (task: Omit<Task, 'id' | 'created_at' | 'updated_at'>) => Promise<Task | null>;
+  addTask: (
+    task: Omit<Task, 'id' | 'created_at' | 'updated_at'>,
+    options?: { reversible?: boolean },
+  ) => Promise<Task | null>;
+  finalizeTaskCreations: (taskIds: readonly string[]) => void;
   updateTask: (id: string, updates: Partial<Task>) => Promise<void>;
-  deleteTask: (id: string) => Promise<void>;
+  deleteTask: (id: string, options?: { silent?: boolean }) => Promise<boolean>;
   completeTask: (id: string) => Promise<void>;
   
   // Goal actions
@@ -221,6 +291,17 @@ async function hydrateAuthenticatedUser(authUser: User): Promise<void> {
   if (existing) return existing;
 
   const hydration = (async () => {
+    try {
+      await withTimeout(
+        retryPendingTaskCleanups(authUser.id),
+        AUTH_PROFILE_TIMEOUT_MS,
+        'Interrupted task cleanup',
+      );
+    } catch (error) {
+      // Cleanup is retried on the next sign-in. It must never hold the app's
+      // normal data hydration hostage when the network is unhealthy.
+      console.error('Deferred task cleanup failed:', error);
+    }
     const profilePromise = withTimeout(
       db.getProfile(authUser.id),
       AUTH_PROFILE_TIMEOUT_MS,
@@ -488,28 +569,59 @@ export const useAppStore = create<AppState>()(
       setCurrentView: (view) => set({ currentView: view }),
       
       // Task actions
-      addTask: async (taskData) => {
+      addTask: async (taskData, options) => {
         const user = get().user;
         if (!user) return null;
+
+        let reversibleAccessToken = '';
+        if (options?.reversible) {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session?.user.id !== user.id) return null;
+          reversibleAccessToken = session.access_token;
+        }
+
+        // Generate the remote primary key before the request. If the insert is
+        // committed but its response is lost, compensation can still target
+        // the exact row instead of leaving an unidentifiable orphan behind.
+        const taskId = crypto.randomUUID();
         
         try {
           const newTask = await db.createTask({
             ...taskData,
             user_id: user.id,
+            id: taskId,
           });
+
+          if (!newTask && options?.reversible && reversibleAccessToken) {
+            await compensateInterruptedTaskCreation(user.id, taskId, reversibleAccessToken);
+          }
           
-          if (newTask) {
+          if (newTask && options?.reversible && reversibleAccessToken) {
+            reversibleTaskReceipts.set(newTask.id, {
+              ownerUserId: user.id,
+              accessToken: reversibleAccessToken,
+            });
+          }
+
+          if (newTask && get().user?.id === user.id) {
             set((state) => ({ tasks: [newTask, ...state.tasks] }));
             toast.success('Task created');
-          } else {
+          } else if (!newTask && get().user?.id === user.id) {
             toast.error('Failed to create task');
           }
           
           return newTask;
         } catch (error) {
+          if (options?.reversible && reversibleAccessToken) {
+            await compensateInterruptedTaskCreation(user.id, taskId, reversibleAccessToken);
+          }
           toast.error('Failed to create task');
           return null;
         }
+      },
+
+      finalizeTaskCreations: (taskIds) => {
+        for (const taskId of taskIds) reversibleTaskReceipts.delete(taskId);
       },
       
       updateTask: async (id, updates) => {
@@ -523,19 +635,32 @@ export const useAppStore = create<AppState>()(
         }
       },
       
-      deleteTask: async (id) => {
+      deleteTask: async (id, options) => {
+        const activeUserId = get().user?.id || null;
+        const receipt = reversibleTaskReceipts.get(id);
+        const ownerUserId = receipt?.ownerUserId || activeUserId;
         try {
-          const success = await db.deleteTask(id);
+          const success = receipt && activeUserId !== receipt.ownerUserId
+            ? await db.deleteTaskWithAccessToken(id, receipt.ownerUserId, receipt.accessToken)
+            : await db.deleteTask(id);
           if (success) {
-            set((state) => ({
-              tasks: state.tasks.filter((task) => task.id !== id),
-            }));
-            const userId = get().user?.id;
-            if (userId) useScheduleStore.getState().removeTaskSchedule(userId, id);
-            toast.success('Task deleted');
+            reversibleTaskReceipts.delete(id);
+            if (ownerUserId && get().user?.id === ownerUserId) {
+              set((state) => ({
+                tasks: state.tasks.filter((task) => task.id !== id),
+              }));
+              useScheduleStore.getState().removeTaskSchedule(ownerUserId, id);
+              if (!options?.silent) toast.success('Task deleted');
+            }
+            return true;
           }
+          if (receipt) queuePendingTaskCleanup(receipt.ownerUserId, id);
+          if (!options?.silent && get().user?.id === ownerUserId) toast.error('Failed to delete task');
+          return false;
         } catch (error) {
-          toast.error('Failed to delete task');
+          if (receipt) queuePendingTaskCleanup(receipt.ownerUserId, id);
+          if (!options?.silent && get().user?.id === ownerUserId) toast.error('Failed to delete task');
+          return false;
         }
       },
       

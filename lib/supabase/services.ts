@@ -1,5 +1,10 @@
 // Supabase Service Functions for Database Operations
-import { supabase, isSupabaseAvailable } from './client';
+import {
+  supabase,
+  isSupabaseAvailable,
+  supabasePublishableKey,
+  supabaseUrl,
+} from './client';
 import type { 
   Profile, 
   Subject, 
@@ -10,6 +15,7 @@ import type {
   Friendship,
 } from './types';
 import { AUTH_ACTION_TIMEOUT_MS, authCallbackUrl, withTimeout } from '@/lib/auth/lifecycle';
+import { deleteOwnedTaskWithToken } from './task-compensation';
 
 // Use the supabase client with any to bypass strict typing issues
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -157,9 +163,16 @@ export async function getTasks(userId: string, options?: ReadOptions): Promise<T
   return (data || []) as Task[];
 }
 
-export async function createTask(task: Omit<Task, 'id' | 'created_at' | 'updated_at'>): Promise<Task | null> {
+type CreateTaskInput = Omit<Task, 'id' | 'created_at' | 'updated_at'> & { id?: string };
+
+export async function createTask(task: CreateTaskInput): Promise<Task | null> {
   // Strip undefined values and only send fields that have values
-  const cleanTask: Record<string, unknown> = {};
+  const cleanTask: Record<string, unknown> = {
+    // The browser owns the ID so an interrupted response can still be
+    // compensated precisely. Upserting this stable ID also makes a retried
+    // request idempotent instead of creating a second remote row.
+    id: task.id || crypto.randomUUID(),
+  };
   for (const [key, value] of Object.entries(task)) {
     if (value !== undefined) {
       cleanTask[key] = value;
@@ -168,7 +181,7 @@ export async function createTask(task: Omit<Task, 'id' | 'created_at' | 'updated
   
   const { data, error } = await db
     .from('tasks')
-    .insert(cleanTask)
+    .upsert(cleanTask, { onConflict: 'id' })
     .select()
     .single();
   
@@ -197,18 +210,41 @@ export async function updateTask(id: string, updates: Partial<Task>): Promise<Ta
 }
 
 export async function deleteTask(id: string): Promise<boolean> {
-  
-  
   const { error } = await db
     .from('tasks')
     .delete()
-    .eq('id', id);
+    .eq('id', id)
+    .select('id');
   
   if (error) {
     console.error('Error deleting task:', error);
     return false;
   }
+  // DELETE is idempotent. Supabase returns an empty representation when a
+  // retry finds the row already gone; that is a completed cleanup, not a
+  // failure that should remain queued forever.
   return true;
+}
+
+/**
+ * Compensates a reversible task creation after the active browser account has
+ * changed. The short-lived access token belongs to the account that created
+ * the row, so RLS still verifies ownership instead of allowing a new account
+ * to delete another user's data.
+ */
+export async function deleteTaskWithAccessToken(
+  id: string,
+  ownerUserId: string,
+  accessToken: string,
+): Promise<boolean> {
+  if (!isSupabaseAvailable() || !accessToken) return false;
+  return deleteOwnedTaskWithToken({
+    supabaseUrl,
+    publishableKey: supabasePublishableKey,
+    taskId: id,
+    ownerUserId,
+    accessToken,
+  });
 }
 
 export async function completeTask(id: string): Promise<Task | null> {

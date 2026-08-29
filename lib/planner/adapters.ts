@@ -24,6 +24,289 @@ export interface StoredCalendarEvent {
   occurrenceOverrides?: Record<string, CommitmentOccurrenceOverride>;
 }
 
+const CALENDAR_EVENTS_STORAGE_PREFIX = 'orderly-calendar-events-v2';
+const LEGACY_CALENDAR_EVENTS_STORAGE_KEY = 'calendarEvents';
+const LEGACY_CALENDAR_EVENTS_MIGRATION_KEY = `${CALENDAR_EVENTS_STORAGE_PREFIX}:legacy-migration`;
+const LEGACY_PLANNER_STORAGE_KEY = 'orderly-planner-storage';
+
+export interface LegacyCalendarEventsMigration {
+  version: 1;
+  ownerUserId: string;
+  status: 'available' | 'imported';
+  eventCount: number;
+  updatedAt: string;
+}
+
+export interface LegacyCalendarEventsRecoveryInfo {
+  status: 'available' | 'already-imported' | 'unavailable';
+  eventCount: number;
+  ownerKnown: boolean;
+}
+
+export type LegacyCalendarEventsRecoveryResult =
+  | { status: 'recovered'; events: StoredCalendarEvent[]; recoveredCount: number }
+  | { status: 'already-imported'; events: StoredCalendarEvent[]; recoveredCount: number }
+  | { status: 'unavailable' | 'not-confirmed' | 'failed'; events: StoredCalendarEvent[]; recoveredCount: 0 };
+
+function normalizedStorageUserId(userId: string | null | undefined): string | null {
+  const value = userId?.trim();
+  return value || null;
+}
+
+export function storedCalendarEventsStorageKey(userId: string): string {
+  return `${CALENDAR_EVENTS_STORAGE_PREFIX}:${encodeURIComponent(userId)}`;
+}
+
+export function legacyCalendarEventsMigrationStorageKey(): string {
+  return LEGACY_CALENDAR_EVENTS_MIGRATION_KEY;
+}
+
+function parseStoredCalendarEvents(raw: string | null): StoredCalendarEvent[] | null {
+  if (raw === null) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function parseLegacyCalendarEventsMigration(raw: string | null): LegacyCalendarEventsMigration | null | 'invalid' {
+  if (raw === null) return null;
+  try {
+    const parsed = JSON.parse(raw) as Partial<LegacyCalendarEventsMigration>;
+    if (
+      parsed.version !== 1
+      || typeof parsed.ownerUserId !== 'string'
+      || !parsed.ownerUserId.trim()
+      || (parsed.status !== 'available' && parsed.status !== 'imported')
+      || typeof parsed.eventCount !== 'number'
+      || !Number.isInteger(parsed.eventCount)
+      || parsed.eventCount < 0
+      || typeof parsed.updatedAt !== 'string'
+    ) return 'invalid';
+    return {
+      version: 1,
+      ownerUserId: parsed.ownerUserId.trim(),
+      status: parsed.status,
+      eventCount: parsed.eventCount,
+      updatedAt: parsed.updatedAt,
+    };
+  } catch {
+    return 'invalid';
+  }
+}
+
+/**
+ * Older authenticated planner builds persisted the active account alongside
+ * their browser data. Use that existing owner marker when available; never
+ * infer ownership from whichever account happens to be signed in now.
+ */
+function legacyPlannerOwnerUserId(storage: Storage): string | null {
+  try {
+    const parsed = JSON.parse(storage.getItem(LEGACY_PLANNER_STORAGE_KEY) || 'null') as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    const record = parsed as Record<string, unknown>;
+    const state = record.state && typeof record.state === 'object' && !Array.isArray(record.state)
+      ? record.state as Record<string, unknown>
+      : record;
+    return normalizedStorageUserId(
+      typeof state.activeUserId === 'string' ? state.activeUserId : null,
+    );
+  } catch {
+    return null;
+  }
+}
+
+function containsEveryLegacyEvent(
+  scopedEvents: readonly StoredCalendarEvent[],
+  legacyEvents: readonly StoredCalendarEvent[],
+): boolean {
+  const scopedIds = new Set(scopedEvents.map(event => event.id));
+  return legacyEvents.every(event => scopedIds.has(event.id));
+}
+
+function mergedCalendarEvents(
+  scopedEvents: readonly StoredCalendarEvent[],
+  legacyEvents: readonly StoredCalendarEvent[],
+): StoredCalendarEvent[] {
+  const seenIds = new Set<string>();
+  return [...scopedEvents, ...legacyEvents].filter(event => {
+    if (seenIds.has(event.id)) return false;
+    seenIds.add(event.id);
+    return true;
+  });
+}
+
+function restoreStorageValue(storage: Storage, key: string, previousValue: string | null): void {
+  if (previousValue === null) storage.removeItem(key);
+  else storage.setItem(key, previousValue);
+}
+
+/**
+ * Return recovery metadata without exposing, copying, or assigning any legacy
+ * event. A caller may use this to offer an explicit recovery action, but a
+ * passive account visit can never claim the ownerless `calendarEvents` value.
+ */
+export function getLegacyCalendarEventsRecoveryInfo(
+  userId: string | null | undefined,
+): LegacyCalendarEventsRecoveryInfo {
+  if (typeof window === 'undefined') return { status: 'unavailable', eventCount: 0, ownerKnown: false };
+  const ownerUserId = normalizedStorageUserId(userId);
+  if (!ownerUserId) return { status: 'unavailable', eventCount: 0, ownerKnown: false };
+
+  try {
+    const legacyEvents = parseStoredCalendarEvents(
+      window.localStorage.getItem(LEGACY_CALENDAR_EVENTS_STORAGE_KEY),
+    );
+    if (!legacyEvents?.length) return { status: 'unavailable', eventCount: 0, ownerKnown: false };
+
+    const storedMigration = parseLegacyCalendarEventsMigration(
+      window.localStorage.getItem(LEGACY_CALENDAR_EVENTS_MIGRATION_KEY),
+    );
+    // A corrupt ownership record must fail closed. Guessing here could expose
+    // another account's events on a shared browser.
+    if (storedMigration === 'invalid') return { status: 'unavailable', eventCount: 0, ownerKnown: true };
+    const migration = storedMigration || (() => {
+      const legacyOwnerUserId = legacyPlannerOwnerUserId(window.localStorage);
+      return legacyOwnerUserId
+        ? {
+            version: 1 as const,
+            ownerUserId: legacyOwnerUserId,
+            status: 'available' as const,
+            eventCount: legacyEvents.length,
+            updatedAt: '',
+          }
+        : null;
+    })();
+    // Truly ownerless data cannot safely be attached to whichever account is
+    // currently open on a shared browser. Recovery is only offered when an
+    // earlier authenticated build recorded a matching owner.
+    if (!migration) return { status: 'unavailable', eventCount: 0, ownerKnown: false };
+    if (migration.ownerUserId !== ownerUserId) {
+      return { status: 'unavailable', eventCount: 0, ownerKnown: true };
+    }
+
+    const scopedEvents = parseStoredCalendarEvents(
+      window.localStorage.getItem(storedCalendarEventsStorageKey(ownerUserId)),
+    ) || [];
+    if (
+      migration?.status === 'imported'
+      && containsEveryLegacyEvent(scopedEvents, legacyEvents)
+    ) {
+      return { status: 'already-imported', eventCount: legacyEvents.length, ownerKnown: true };
+    }
+
+    return {
+      status: 'available',
+      eventCount: legacyEvents.length,
+      ownerKnown: true,
+    };
+  } catch {
+    return { status: 'unavailable', eventCount: 0, ownerKnown: false };
+  }
+}
+
+/**
+ * Explicitly recover pre-account-scoping events for their confirmed owner.
+ *
+ * The legacy value is deliberately retained as a backup. The scoped copy and
+ * owner/status marker are verified before success is reported; if either
+ * write fails, both values are restored to their exact previous state.
+ */
+export function recoverLegacyCalendarEvents(options: {
+  userId: string | null | undefined;
+  confirmedOwnerUserId: string | null | undefined;
+}): LegacyCalendarEventsRecoveryResult {
+  const ownerUserId = normalizedStorageUserId(options.userId);
+  const confirmedOwnerUserId = normalizedStorageUserId(options.confirmedOwnerUserId);
+  if (typeof window === 'undefined' || !ownerUserId) {
+    return { status: 'unavailable', events: [], recoveredCount: 0 };
+  }
+
+  const currentEvents = readStoredCalendarEvents(ownerUserId);
+  if (confirmedOwnerUserId !== ownerUserId) {
+    return { status: 'not-confirmed', events: currentEvents, recoveredCount: 0 };
+  }
+
+  const storage = window.localStorage;
+  const scopedKey = storedCalendarEventsStorageKey(ownerUserId);
+  const migrationKey = LEGACY_CALENDAR_EVENTS_MIGRATION_KEY;
+  let previousScopedValue: string | null = null;
+  let previousMigrationValue: string | null = null;
+  let capturedPreviousValues = false;
+
+  try {
+    const legacyEvents = parseStoredCalendarEvents(storage.getItem(LEGACY_CALENDAR_EVENTS_STORAGE_KEY));
+    if (!legacyEvents?.length) {
+      return { status: 'unavailable', events: currentEvents, recoveredCount: 0 };
+    }
+
+    previousScopedValue = storage.getItem(scopedKey);
+    previousMigrationValue = storage.getItem(migrationKey);
+    capturedPreviousValues = true;
+    const storedMigration = parseLegacyCalendarEventsMigration(previousMigrationValue);
+    const legacyOwnerUserId = storedMigration === null
+      ? legacyPlannerOwnerUserId(storage)
+      : null;
+    if (
+      storedMigration === 'invalid'
+      || (storedMigration?.ownerUserId || legacyOwnerUserId) !== ownerUserId
+    ) {
+      return { status: 'unavailable', events: currentEvents, recoveredCount: 0 };
+    }
+    const migration = storedMigration || {
+      version: 1 as const,
+      ownerUserId,
+      status: 'available' as const,
+      eventCount: legacyEvents.length,
+      updatedAt: '',
+    };
+
+    const scopedEvents = parseStoredCalendarEvents(previousScopedValue) || [];
+    if (migration?.status === 'imported' && containsEveryLegacyEvent(scopedEvents, legacyEvents)) {
+      return {
+        status: 'already-imported',
+        events: scopedEvents,
+        recoveredCount: legacyEvents.length,
+      };
+    }
+
+    const nextEvents = mergedCalendarEvents(scopedEvents, legacyEvents);
+    const nextScopedValue = JSON.stringify(nextEvents);
+    const nextMigrationValue = JSON.stringify({
+      version: 1,
+      ownerUserId,
+      status: 'imported',
+      eventCount: legacyEvents.length,
+      updatedAt: new Date().toISOString(),
+    } satisfies LegacyCalendarEventsMigration);
+
+    storage.setItem(scopedKey, nextScopedValue);
+    if (storage.getItem(scopedKey) !== nextScopedValue) throw new Error('Calendar recovery copy verification failed');
+    storage.setItem(migrationKey, nextMigrationValue);
+    if (storage.getItem(migrationKey) !== nextMigrationValue) throw new Error('Calendar recovery owner verification failed');
+
+    window.dispatchEvent(new CustomEvent('orderly-calendar-events-changed', {
+      detail: { userId: ownerUserId },
+    }));
+    return { status: 'recovered', events: nextEvents, recoveredCount: legacyEvents.length };
+  } catch {
+    // localStorage has no multi-key transaction. Roll back the scoped copy and
+    // marker so a failed import never becomes a partial or silent claim.
+    if (capturedPreviousValues) {
+      try {
+        restoreStorageValue(storage, scopedKey, previousScopedValue);
+        restoreStorageValue(storage, migrationKey, previousMigrationValue);
+      } catch {
+        // The untouched legacy key remains the recovery backup even if the
+        // browser refuses a rollback write (for example, storage is disabled).
+      }
+    }
+    return { status: 'failed', events: readStoredCalendarEvents(ownerUserId), recoveredCount: 0 };
+  }
+}
+
 function validTime(value: string | null | undefined): value is string {
   if (!value || !/^\d{2}:\d{2}$/.test(value)) return false;
   const [hours, minutes] = value.split(':').map(Number);
@@ -392,18 +675,41 @@ export function storedEventsToCommitments(
   });
 }
 
-export function readStoredCalendarEvents(): StoredCalendarEvent[] {
+/**
+ * Read browser-only calendar events for one signed-in account.
+ *
+ * Older Orderly builds used the unowned global `calendarEvents` key. There is
+ * no trustworthy way to tell which account created that value, so assigning it
+ * to the next account that happens to sign in can expose one student's events
+ * to another student on a shared browser. Keep that legacy value untouched for
+ * recovery, but never expose it to an account automatically. Account-scoped
+ * values are the only values this reader returns.
+ */
+export function readStoredCalendarEvents(userId: string | null | undefined): StoredCalendarEvent[] {
   if (typeof window === 'undefined') return [];
+  const ownerUserId = normalizedStorageUserId(userId);
+  if (!ownerUserId) return [];
+
   try {
-    const raw = JSON.parse(localStorage.getItem('calendarEvents') || '[]');
-    return Array.isArray(raw) ? raw : [];
+    const scopedKey = storedCalendarEventsStorageKey(ownerUserId);
+    const scopedEvents = parseStoredCalendarEvents(window.localStorage.getItem(scopedKey));
+    if (scopedEvents !== null) return scopedEvents;
+
+    return [];
   } catch {
     return [];
   }
 }
 
-export function writeStoredCalendarEvents(events: readonly StoredCalendarEvent[]): void {
+export function writeStoredCalendarEvents(
+  userId: string | null | undefined,
+  events: readonly StoredCalendarEvent[],
+): void {
   if (typeof window === 'undefined') return;
-  localStorage.setItem('calendarEvents', JSON.stringify(events));
-  window.dispatchEvent(new CustomEvent('orderly-calendar-events-changed'));
+  const ownerUserId = normalizedStorageUserId(userId);
+  if (!ownerUserId) return;
+  window.localStorage.setItem(storedCalendarEventsStorageKey(ownerUserId), JSON.stringify(events));
+  window.dispatchEvent(new CustomEvent('orderly-calendar-events-changed', {
+    detail: { userId: ownerUserId },
+  }));
 }

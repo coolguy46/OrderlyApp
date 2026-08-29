@@ -1,5 +1,9 @@
 import type { Task } from '@/lib/supabase/types';
 import { plannerTaskDeadline } from '@/lib/planner/adapters';
+import type {
+  CommitmentKind,
+  RecurringCommitmentInput,
+} from '@/lib/planner/types';
 import {
   addLocalDays,
   isLocalDate,
@@ -53,12 +57,36 @@ export interface ScheduleCommandCreateTaskAction {
   schedule: ScheduleEntryInput;
 }
 
+/**
+ * A calendar event is intentionally distinct from a task. Events are fixed
+ * commitments (classes, games, meetings, appointments, and similar blocks),
+ * so they must not acquire task-only behavior such as completion, deadlines,
+ * priority, or the untimed task shelf.
+ */
+export interface ScheduleCommandCreateEventAction {
+  type: 'create_event';
+  title: string;
+  description: string | null;
+  kind: CommitmentKind;
+  schedule: ScheduleEntryInput;
+}
+
 export interface ScheduleCommandBatchAction {
   type: 'schedule_batch';
   operations: ScheduleBatchOperation[];
 }
 
-export type ScheduleCommandAction = ScheduleCommandCreateTaskAction | ScheduleCommandBatchAction;
+export type ScheduleCommandAction =
+  | ScheduleCommandCreateTaskAction
+  | ScheduleCommandCreateEventAction
+  | ScheduleCommandBatchAction;
+
+export interface ScheduleCommandEventCommitmentOptions {
+  id: string;
+  timeZone: string;
+  updatedAt: string;
+  color?: string | null;
+}
 
 export interface ScheduleCommandGap {
   startAt: string;
@@ -213,6 +241,66 @@ function dateFromLocalDate(value: LocalDate): Date {
 
 function localDayOfWeek(value: LocalDate): number {
   return dateFromLocalDate(value).getUTCDay();
+}
+
+/** Convert a validated event command into the planner's durable event shape. */
+export function scheduleEventActionToCommitment(
+  action: ScheduleCommandCreateEventAction,
+  options: ScheduleCommandEventCommitmentOptions,
+): RecurringCommitmentInput | null {
+  const scheduledDate = action.schedule.scheduledDate;
+  const startAt = action.schedule.startAt;
+  const durationSeconds = action.schedule.durationSeconds;
+  const recurrence = action.schedule.recurrence || 'none';
+  if (
+    !scheduledDate
+    || !isLocalDate(scheduledDate)
+    || !startAt
+    || !Number.isFinite(durationSeconds)
+    || !durationSeconds
+    || durationSeconds <= 0
+    || recurrence === 'monthly'
+  ) return null;
+
+  const start = new Date(startAt);
+  if (Number.isNaN(start.getTime())) return null;
+  const end = new Date(start.getTime() + durationSeconds * 1_000);
+  try {
+    const localStart = localDateParts(start, options.timeZone);
+    const localEnd = localDateParts(end, options.timeZone);
+    // scheduledDate is the authoritative local event date. A mismatch means
+    // the action was generated for a different timezone and must be rebuilt.
+    if (localStart.date !== scheduledDate) return null;
+
+    const daysOfWeek = recurrence === 'daily'
+      ? [0, 1, 2, 3, 4, 5, 6]
+      : recurrence === 'weekly'
+        ? [...new Set(action.schedule.recurrenceDays || [localDayOfWeek(scheduledDate)])]
+          .filter(day => Number.isInteger(day) && day >= 0 && day <= 6)
+          .sort((left, right) => left - right)
+        : [localDayOfWeek(scheduledDate)];
+    if (daysOfWeek.length === 0) return null;
+
+    return {
+      id: options.id,
+      title: action.title,
+      kind: action.kind,
+      daysOfWeek,
+      startTime: localStart.time,
+      endTime: localEnd.time,
+      startDate: scheduledDate,
+      endDate: recurrence === 'none'
+        ? scheduledDate
+        : action.schedule.recurrenceEndDate || null,
+      timeZone: options.timeZone,
+      enabled: true,
+      color: options.color || null,
+      updatedAt: options.updatedAt,
+      occurrenceOverrides: {},
+    };
+  } catch {
+    return null;
+  }
 }
 
 function localDateFromParts(year: number, month: number, day: number): LocalDate | null {
@@ -546,6 +634,42 @@ function stripTrailingScheduleDetails(value: string): string {
     .trim();
 }
 
+interface RequestedNewCalendarEntity {
+  type: 'task' | 'event';
+  kind: CommitmentKind | null;
+}
+
+/**
+ * Infer only explicit event nouns. Generic scheduled work remains a task so a
+ * title containing ordinary activity prose cannot silently lose completion
+ * and deadline behavior.
+ */
+function requestedNewCalendarEntity(command: string): RequestedNewCalendarEntity {
+  const actionable = withoutConversationalCommandPrefix(command);
+  const mutation = actionable.match(
+    /^(?:add|schedule|create|put|plan|include|fit\s+in)\s+(?:me\s+)?(?:a\s+|an\s+)?([\s\S]+)$/i,
+  );
+  if (!mutation) return { type: 'task', kind: null };
+  const target = mutation[1];
+
+  // Explicit task language wins even when its title mentions an event, e.g.
+  // "create a task to prepare for the game".
+  if (/\b(?:task|assignment|homework|to[ -]?do)\b/i.test(target)) {
+    return { type: 'task', kind: null };
+  }
+  const eventKind: CommitmentKind | null = /\b(?:meeting|appointment)\b/i.test(target)
+    ? 'appointment'
+    : /\bgame\b/i.test(target)
+      ? 'sports'
+      : /\bclass\b/i.test(target)
+        ? 'class'
+        : null;
+  if (/^(?:calendar\s+)?event\b/i.test(target) || eventKind) {
+    return { type: 'event', kind: eventKind || 'other' };
+  }
+  return { type: 'task', kind: null };
+}
+
 function activityTitle(text: string, duration: ParsedDuration | null): string {
   const actionPattern = /\b(?:study(?:\s+for)?|practice|review|read|exercise|train|work\s+on|prepare\s+for|meditate|write|code)\b/gi;
   const actionMatches = [...text.matchAll(actionPattern)];
@@ -856,7 +980,10 @@ function previewForAdd(command: string, context: ScheduleCommandContext): Schedu
     return { ...preview, status: 'clarification', summary: 'The repeat end date must be on or after the first scheduled date.' };
   }
   const title = activityTitle(command, durationMatch);
-  const existing = resolveTask(command, context);
+  const requestedEntity = requestedNewCalendarEntity(command);
+  const existing = requestedEntity.type === 'event'
+    ? { task: null, candidates: [] as Task[] }
+    : resolveTask(command, context);
   if (!existing.task && existing.candidates.length > 1) {
     return {
       ...preview,
@@ -877,10 +1004,18 @@ function previewForAdd(command: string, context: ScheduleCommandContext): Schedu
   preview.assumptions = assumptions;
   preview.summary = task
     ? `${range.start ? 'Schedule' : 'Add duration for'} “${task.title}”${recurrence.explicit ? ' with the requested repeat rule' : ''}.`
-    : `Create “${title}” and ${range.start ? 'schedule it' : 'save its duration'}${recurrence.explicit ? ' with the requested repeat rule' : ''}.`;
+    : `Create ${requestedEntity.type === 'event' ? 'event' : 'task'} “${title}” and ${range.start ? 'schedule it' : 'save its duration'}${recurrence.explicit ? ' with the requested repeat rule' : ''}.`;
   preview.actions = task
     ? [{ type: 'schedule_batch', operations: [{ type: 'upsert', taskId: task.id, input: schedule }] }]
-    : [{ type: 'create_task', title, description: null, schedule }];
+    : requestedEntity.type === 'event'
+      ? [{
+          type: 'create_event',
+          title,
+          description: null,
+          kind: requestedEntity.kind || 'other',
+          schedule,
+        }]
+      : [{ type: 'create_task', title, description: null, schedule }];
   preview.occurrences = occurrencePreviews(task?.title || title, task?.id || null, schedule, context);
   return preview;
 }
@@ -1232,6 +1367,26 @@ export function interpretScheduleCommand(
   };
 }
 
+function isCollectionPlanningRequest(value: string): boolean {
+  const normalized = value.trim().replace(/\s+/g, ' ');
+  const action = normalized.match(/^\s*(?:add|schedule|plan|fit\s+in|organize|organise|arrange|spread\s+out|allocate|rebalance|re-?plan|reschedule)\s+(.+)$/i);
+  if (!action) return false;
+  const target = action[1].trim();
+
+  if (/^(?:them|those|these\s+(?:assignments?|tasks?|items?))\b/i.test(target)) return true;
+  if (/^(?:my\s+(?:week|workload|day)|everything)(?:\b|$)/i.test(target)) return true;
+  if (/^(?:all|every)(?:\s+of)?\s+(?:my\s+)?(?:pending\s+)?(?:tasks?|assignments?|homework|work|items?)(?:\b|$)/i.test(target)) return true;
+  if (/^(?:pending|remaining)\s+(?:tasks?|assignments?|homework|work|items?)(?:\b|$)/i.test(target)) return true;
+  if (/^(?:my\s+)?(?:tasks?|assignments?|homework|work)\s+(?:due\s+|for\s+)?(?:today|tomorrow|this\s+week)(?:\b|$)/i.test(target)) return true;
+  if (/^(?:today|tomorrow)(?:[’']s)?\s+(?:tasks?|assignments?|homework|work|workload)(?:\b|$)/i.test(target)) return true;
+
+  // "my overdue chemistry assignment" is a named task and must remain in the
+  // exact deterministic parser. A generic/bare collection target is broad,
+  // including when it carries an unsupported constraint that must not be
+  // silently reinterpreted as a single activity.
+  return /^(?:(?:all|everything)(?:\s+of)?\s+)?(?:my\s+)?(?:overdue|missing|past[-\s]+due|late)(?:\s+(?:work|homework|tasks?|assignments?|items?))?(?=$|[,.!?]|\s+(?:after|before|only|except|excluding|but|and|plus|prioriti[sz]e|starting|first)\b)/i.test(target);
+}
+
 /**
  * Recognize schedule operations that Orderly can answer authoritatively without
  * asking an AI model to reason about dates, clocks, timezones, or collisions.
@@ -1244,6 +1399,13 @@ export function interpretDirectScheduleRequest(
   context: ScheduleCommandContext,
 ): ScheduleCommandPreview | null {
   const actionable = withoutConversationalCommandPrefix(command);
+  // Collection-level planning belongs to the deterministic task allocator,
+  // not the single-item command parser. Treating "schedule my overdue" as an
+  // add command is what caused the assistant to ask for one activity duration
+  // instead of planning the user's actual workload.
+  if (isCollectionPlanningRequest(actionable)) {
+    return null;
+  }
   const gapRequest = /\b(?:best\s+time|find\s+(?:me\s+)?(?:a\s+)?(?:gap|opening)|free\s+(?:time|slot)|when\s+(?:can|should)\s+i)\b/i.test(actionable);
   // Only imperative requests may bypass the model and become mutations.
   // Questions such as "Can I study 4–5?" and "Should I schedule this?"

@@ -9,18 +9,21 @@ import {
   startOfDay,
   startOfWeek,
 } from 'date-fns';
-import { ChevronLeft, ChevronRight, Clock3 } from 'lucide-react';
+import { ArchiveRestore, ChevronLeft, ChevronRight, Clock3 } from 'lucide-react';
 import { TaskDetailViewer } from '@/components/tasks/TaskDetailViewer';
 import { Button } from '@/components/ui/Button';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { WeekTimeGrid, type PlannerBlockView } from '@/components/planner';
 import type { UntimedScheduleItem } from '@/components/schedule/UntimedTaskShelf';
 import { usePlannerStore } from '@/lib/planner/store';
 import {
-  readStoredCalendarEvents,
+  getLegacyCalendarEventsRecoveryInfo,
+  recoverLegacyCalendarEvents,
   storedEventsToCommitments,
-  type StoredCalendarEvent,
+  type LegacyCalendarEventsRecoveryInfo,
   writeStoredCalendarEvents,
 } from '@/lib/planner/adapters';
+import { useStoredCalendarEvents } from '@/lib/planner/use-stored-calendar-events';
 import {
   buildCommitmentOccurrences,
   withCommitmentOccurrenceOverride,
@@ -191,23 +194,28 @@ export function ScheduleCalendar() {
   const [weekStart, setWeekStart] = useState<Date | null>(null);
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [detailOccurrenceId, setDetailOccurrenceId] = useState<string | null>(null);
-  const [storedEvents, setStoredEvents] = useState<StoredCalendarEvent[]>([]);
+  const [legacyRecoveryOpen, setLegacyRecoveryOpen] = useState(false);
+  const [legacyRecoverySnapshot, setLegacyRecoverySnapshot] = useState<{
+    userId: string | null;
+    info: LegacyCalendarEventsRecoveryInfo | null;
+  }>({ userId: null, info: null });
+  const { events: storedEvents, setEvents: setStoredEvents } = useStoredCalendarEvents(userId);
+  const legacyRecovery = legacyRecoverySnapshot.userId === userId
+    ? legacyRecoverySnapshot.info
+    : null;
+
+  useEffect(() => {
+    setLegacyRecoveryOpen(false);
+    setLegacyRecoverySnapshot({
+      userId,
+      info: userId ? getLegacyCalendarEventsRecoveryInfo(userId) : null,
+    });
+  }, [userId]);
 
   useEffect(() => {
     if (!userId) return;
     setActiveUser(userId, Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
   }, [setActiveUser, userId]);
-
-  useEffect(() => {
-    const refresh = () => setStoredEvents(readStoredCalendarEvents());
-    refresh();
-    window.addEventListener('storage', refresh);
-    window.addEventListener('orderly-calendar-events-changed', refresh);
-    return () => {
-      window.removeEventListener('storage', refresh);
-      window.removeEventListener('orderly-calendar-events-changed', refresh);
-    };
-  }, []);
 
   const plannerRecord = userId ? plannerUsers[userId] : null;
   const timeZone = plannerRecord?.settings.timeZone
@@ -334,7 +342,7 @@ export function ScheduleCalendar() {
         ? { ...event, occurrenceOverrides: updated.occurrenceOverrides }
         : event);
       setStoredEvents(nextEvents);
-      writeStoredCalendarEvents(nextEvents);
+      writeStoredCalendarEvents(userId, nextEvents);
     } else {
       upsertCommitment(userId, updated);
     }
@@ -531,6 +539,32 @@ export function ScheduleCalendar() {
     setSelectedDate(today);
   };
 
+  const handleLegacyRecovery = () => {
+    if (!userId) return;
+    const result = recoverLegacyCalendarEvents({
+      userId,
+      confirmedOwnerUserId: userId,
+    });
+    if (result.status === 'recovered' || result.status === 'already-imported') {
+      setStoredEvents(result.events);
+      setLegacyRecoverySnapshot({
+        userId,
+        info: getLegacyCalendarEventsRecoveryInfo(userId),
+      });
+      toast.success(
+        result.status === 'recovered'
+          ? `${result.recoveredCount} older calendar item${result.recoveredCount === 1 ? '' : 's'} imported`
+          : 'Those calendar items were already imported',
+      );
+      return;
+    }
+    toast.error(
+      result.status === 'failed'
+        ? 'Calendar import could not be saved. Your older backup was kept.'
+        : 'Those calendar items are not available to this account.',
+    );
+  };
+
   return (
     <div className="flex min-h-0 flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border/50 bg-card/55 px-3 py-2 shadow-sm backdrop-blur-sm">
@@ -575,6 +609,21 @@ export function ScheduleCalendar() {
         </div>
       </div>
 
+      {legacyRecovery?.status === 'available' && legacyRecovery.ownerKnown && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-primary/25 bg-primary/5 px-3 py-2.5">
+          <div className="flex min-w-0 items-center gap-2.5">
+            <ArchiveRestore className="h-4 w-4 shrink-0 text-primary" />
+            <div className="min-w-0">
+              <p className="text-sm font-medium">Recover your older calendar items</p>
+              <p className="text-xs text-muted-foreground">A previous Orderly version saved items for this account on this browser.</p>
+            </div>
+          </div>
+          <Button type="button" variant="outline" size="sm" onClick={() => setLegacyRecoveryOpen(true)}>
+            Review recovery
+          </Button>
+        </div>
+      )}
+
       <WeekTimeGrid
         weekStart={weekStart}
         blocks={timedBlocks}
@@ -602,6 +651,17 @@ export function ScheduleCalendar() {
         scheduleOccurrence={detailOccurrence}
         open={Boolean(detailTask)}
         onOpenChange={open => !open && setDetailOccurrenceId(null)}
+      />
+
+      <ConfirmDialog
+        open={legacyRecoveryOpen}
+        onOpenChange={setLegacyRecoveryOpen}
+        title="Recover older calendar items?"
+        description={`Copy ${legacyRecovery?.eventCount || 0} calendar item${legacyRecovery?.eventCount === 1 ? '' : 's'} previously saved for ${user?.email || 'this account'} into its account-scoped calendar. The original browser backup will be kept.`}
+        confirmLabel="Recover items"
+        cancelLabel="Cancel"
+        variant="default"
+        onConfirm={handleLegacyRecovery}
       />
     </div>
   );
