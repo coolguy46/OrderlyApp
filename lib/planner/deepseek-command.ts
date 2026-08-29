@@ -17,6 +17,9 @@ const MAX_TASK_SUMMARY_COUNT = 100_000;
 const MAX_ACTIVE_DRAFT_COMMANDS = 8;
 const MAX_ACTIVE_DRAFT_TASK_IDS = 60;
 const MAX_ACTIVE_DRAFT_SUMMARY_LENGTH = 600;
+const MAX_PLAN_ADDITIONAL_TASKS = 8;
+const MIN_PLAN_ADDITIONAL_TASK_DURATION_SECONDS = 5 * 60;
+const MAX_PLAN_ADDITIONAL_TASK_DURATION_SECONDS = 12 * 60 * 60;
 
 export interface PlannerCommandTaskSnapshot {
   id: string;
@@ -105,6 +108,11 @@ export type PlannerChatTaskScope =
 
 export type PlannerChatTodayLoad = 'normal' | 'light' | 'skip';
 
+export interface PlannerChatAdditionalTask {
+  title: string;
+  durationSeconds: number;
+}
+
 export interface PlannerChatPlanRequest {
   taskScope: PlannerChatTaskScope;
   taskIds: string[];
@@ -112,6 +120,9 @@ export interface PlannerChatPlanRequest {
   horizonDays: number;
   todayLoad: PlannerChatTodayLoad;
   includeAlreadyScheduled: boolean;
+  availableAfter: string | null;
+  availableBefore: string | null;
+  additionalTasks: PlannerChatAdditionalTask[];
 }
 
 export interface PlannerChatAIResult {
@@ -130,7 +141,7 @@ const EXPLICIT_CLOCK_PATTERN = /(?:\b(?:0?[1-9]|1[0-2])(?::[0-5]\d)?\s*(?:a\.?m\
 const BROAD_PLAN_CONFIRMATION_PATTERN = /^(?:yes|yeah|yep|sure|okay|ok|do\s+it|go\s+ahead|schedule\s+(?:them|those)|plan\s+(?:them|those)|fit\s+(?:them|those)\s+in|make\s+it\s+happen|that(?:[’']s|\s+is)\s+fine|sounds\s+good)\b/i;
 const UNSUPPORTED_BROAD_CONSTRAINT_PATTERN = /\b(?:except|excluding|only\s+(?:in\s+the\s+)?(?:morning|afternoon|evening|night)|prioriti[sz]e|before\s+(?:the\s+)?(?:other|rest)|after\s+(?:the\s+)?(?:other|rest)|weekdays?|weekends?|after\s+school|before\s+school|avoid(?:ing)?|no\s+more\s+than|at\s+most|max(?:imum)?\s+(?:of\s+)?\d+\s+days?|(?:not|nothing|no\s+work)\s+(?:on\s+)?(?:mon(?:day)?|tue(?:sday)?|wed(?:nesday)?|thu(?:rsday)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?))\b/i;
 const TODAY_SKIP_PATTERN = /(?:\b(?:skip|leave)\s+today\b|\bkeep\s+today\s+(?:free|open|empty)\b|\b(?:nothing|no\s+work)\s+(?:for\s+)?today\b|\bnot\s+today\b)/i;
-const TODAY_LIGHT_PATTERN = /(?:\b(?:don[’']?t|do\s+not)\s+(?:overload|pack|fill\s+up)\s+today\b|\bwithout\s+overloading\s+today\b|\b(?:keep|make)\s+today\s+light\b|\b(?:i(?:[’']m|\s+am)\s+(?:really\s+)?busy\s+today|today(?:[’']s|\s+is)\s+(?:really\s+)?busy)\b|\blight(?:er)?\s+(?:load\s+)?today\b|\bnot\s+too\s+much\s+today\b)/i;
+const TODAY_LIGHT_PATTERN = /(?:\b(?:don[’']?t|do\s+not)\s+(?:overload|pack|fill\s+up)\s+today\b|\bwithout\s+overloading\s+today\b|\b(?:keep|make)\s+today\s+light\b|\b(?:i(?:[’']m|\s+am)\s+(?:(?:really|pretty|very)\s+)?busy\s+today|today(?:[’']s|\s+is)\s+(?:(?:really|pretty|very)\s+)?busy)\b|\blight(?:er)?\s+(?:load\s+)?today\b|\bnot\s+too\s+much\s+today\b)/i;
 const INCLUDE_SCHEDULED_PATTERN = /\b(?:rebalance|re-?plan|reschedule|redo|rework|already\s+scheduled)\b/i;
 const EMPTY_DRAFT_PROMISE_PATTERN = /\b(?:i(?:'ll|\s+will)|i\s+am\s+going\s+to|orderly\s+will)\b[\s\S]{0,220}\b(?:preview|calendar\s+draft)\b/i;
 const EMPTY_COMMAND_REPLY = 'I could not safely determine that change. Tell me which task or activity you mean, and I’ll either place the exact change or plan it into open time.';
@@ -189,7 +200,7 @@ Return only a JSON object with exactly this shape:
 
 The normalizedCommands field must be an array containing zero to eight concise commands for Orderly's deterministic schedule engine.
 The planRequest field must be either null or exactly this object:
-{"taskScope":"overdue|today|tomorrow|this_week|all_pending|task_ids","taskIds":[],"startDate":null,"horizonDays":7,"todayLoad":"normal|light|skip","includeAlreadyScheduled":false}
+{"taskScope":"overdue|today|tomorrow|this_week|all_pending|task_ids","taskIds":[],"startDate":null,"horizonDays":7,"todayLoad":"normal|light|skip","includeAlreadyScheduled":false,"availableAfter":null,"availableBefore":null,"additionalTasks":[]}
 
 Conversation rules:
 1. Answer questions about the user's workload, deadlines, free time, and schedule using only the supplied context. Be honest when the context does not contain enough information. Use taskSummary for complete aggregate counts; if pendingTotal is greater than includedTotal, the task list is only a partial snapshot, so never present its titles as the complete list.
@@ -200,6 +211,9 @@ Conversation rules:
 6. Never return both a non-empty normalizedCommands array and a non-null planRequest.
 7. For planRequest, use taskScope "task_ids" with exact supplied task IDs when the user names or refers to a specific set of existing tasks. Otherwise use the matching broad scope. taskIds must be non-empty only for "task_ids" and empty for every other scope. Never invent task IDs.
 8. taskScope selects which existing pending tasks to plan by their deadlines; startDate and horizonDays select the placement window. Resolve an explicit requested planning start date to YYYY-MM-DD. Use null to start today. Set horizonDays from 1 through 7; use 7 when the user asks for a general plan without a shorter range. Set todayLoad to "light" for requests such as "don't overload today" or "I'm busy today", "skip" for "not today" or "nothing today", and "normal" otherwise. Set includeAlreadyScheduled to true only when the user explicitly asks to rebalance or reschedule work that is already scheduled.
+8a. availableAfter and availableBefore are optional placement boundaries in 24-hour HH:mm form. Set them only when the user explicitly gives a free/available-after or free/available-before time; otherwise use null. They constrain placement and are not exact task start times.
+8b. additionalTasks contains explicitly requested new work that must be planned alongside the selected existing tasks. Each item must be exactly {"title":"...","durationSeconds":number}. Include an item only when the user supplied both its activity title and duration. Do not invent activities or durations. A planRequest may combine a broad existing-task scope, availability boundaries, and additionalTasks; do not split that request into normalizedCommands.
+8c. A correction such as "no, overdue overall" changes the existing-task scope of the immediately preceding request while retaining its dates, load preference, availability boundaries, and additionalTasks. Do not discard the rest of the request.
 9. If a request is neither an exact supported operation nor a broad planning request, and a required detail is genuinely missing, ask one brief clarifying question with both normalizedCommands empty and planRequest null.
 10. A short confirmation such as "yes", "do it", "go ahead", or "that's fine" means execute only the concrete exact changes or broad planning request established in the immediately preceding conversation. If activeDraft is present, it is the current unsaved draft and may be used for that immediate confirmation; never revive an older mutation from deeper in the transcript. Do not merely repeat or promise the plan.
 11. Never use the word "preview" and never promise a future action. When normalizedCommands is non-empty or planRequest is non-null, briefly say the request is ready for Orderly's deterministic scheduling engine.
@@ -505,6 +519,159 @@ function inferredTodayLoad(value: string): PlannerChatTodayLoad {
   return 'normal';
 }
 
+/**
+ * Normalize only the small set of common scheduling misspellings that affect
+ * intent routing. The original user text is still sent to the provider and is
+ * never rewritten for display.
+ */
+function normalizePlannerIntentSpelling(value: string): string {
+  return value
+    .replace(/\b(?:schedual|shedule|scedual|scedule)\b/gi, 'schedule')
+    .replace(/\b(?:schedualing|sheduling|scedualing|sceduling)\b/gi, 'scheduling')
+    .replace(/\biverdue\b/gi, 'overdue')
+    .replace(/\bwork\s+n\b/gi, 'work on');
+}
+
+interface AvailabilityModifiers {
+  stripped: string;
+  availableAfter: string | null;
+  availableBefore: string | null;
+  valid: boolean;
+}
+
+function parseUserClock(value: string): string | null {
+  const normalized = value.toLowerCase().replace(/\./g, '').replace(/\s+/g, ' ').trim();
+  const match = normalized.match(/^(\d{1,2})(?::([0-5]\d))?\s*(am|pm)?$/);
+  if (!match) return null;
+  let hour = Number(match[1]);
+  const minute = Number(match[2] || '0');
+  const meridiem = match[3] || null;
+  if (meridiem) {
+    if (hour < 1 || hour > 12) return null;
+    if (meridiem === 'am') hour = hour === 12 ? 0 : hour;
+    else hour = hour === 12 ? 12 : hour + 12;
+  } else {
+    if (hour > 23) return null;
+    // A bare time with no minutes or meridiem is too ambiguous. For a bare
+    // clock such as "2:15", use the conventional afternoon interpretation
+    // for hours 1-7, which covers common after-school availability phrasing.
+    if (!match[2]) return null;
+    if (hour >= 1 && hour <= 7) hour += 12;
+  }
+  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+}
+
+function parseAvailabilityModifiers(value: string): AvailabilityModifiers {
+  let stripped = value;
+  let valid = true;
+  const afterValues: string[] = [];
+  const beforeValues: string[] = [];
+  const clock = String.raw`(?:[01]?\d|2[0-3])(?::[0-5]\d)?(?:\s*(?:a\.?m\.?|p\.?m\.?))?`;
+  const afterPattern = new RegExp(
+    String.raw`\b(?:(?:i(?:['’]?m|\s+am)|im)\s+(?:only\s+)?(?:free|available)\s+|(?:only\s+)?(?:free|available)\s+)?(?:after|from|starting(?:\s+at)?)\s+(${clock})\b`,
+    'gi',
+  );
+  const beforePattern = new RegExp(
+    String.raw`\b(?:(?:i(?:['’]?m|\s+am)|im)\s+(?:only\s+)?(?:free|available)\s+|(?:only\s+)?(?:free|available)\s+)?(?:before|until)\s+(${clock})\b`,
+    'gi',
+  );
+
+  stripped = stripped.replace(afterPattern, (_match, rawClock: string) => {
+    const parsed = parseUserClock(rawClock);
+    if (!parsed) valid = false;
+    else afterValues.push(parsed);
+    return ' ';
+  });
+  stripped = stripped.replace(beforePattern, (_match, rawClock: string) => {
+    const parsed = parseUserClock(rawClock);
+    if (!parsed) valid = false;
+    else beforeValues.push(parsed);
+    return ' ';
+  });
+
+  if (new Set(afterValues).size > 1 || new Set(beforeValues).size > 1) valid = false;
+  return {
+    stripped,
+    availableAfter: afterValues[0] || null,
+    availableBefore: beforeValues[0] || null,
+    valid,
+  };
+}
+
+const PLAN_DURATION_NUMBERS: Readonly<Record<string, number>> = {
+  one: 1,
+  two: 2,
+  three: 3,
+  four: 4,
+  five: 5,
+  six: 6,
+  seven: 7,
+  eight: 8,
+  nine: 9,
+  ten: 10,
+  eleven: 11,
+  twelve: 12,
+};
+
+function planDurationSeconds(value: string, unit: string): number | null {
+  const number = /^\d+(?:\.\d+)?$/.test(value)
+    ? Number(value)
+    : PLAN_DURATION_NUMBERS[value.toLowerCase()];
+  if (!Number.isFinite(number) || number <= 0) return null;
+  const seconds = Math.round(number * (/^h/i.test(unit) ? 60 * 60 : 60));
+  return seconds >= MIN_PLAN_ADDITIONAL_TASK_DURATION_SECONDS
+    && seconds <= MAX_PLAN_ADDITIONAL_TASK_DURATION_SECONDS
+    ? seconds
+    : null;
+}
+
+function cleanAdditionalTaskTitle(value: string): string | null {
+  const cleaned = boundedString(
+    value
+      .replace(/^[\s"'“”‘’]+|[\s"'“”‘’]+$/g, '')
+      .replace(/^(?:my|the|a|an)\s+/i, '')
+      .replace(/\s+(?:today|tonight)$/i, '')
+      .replace(/\s+/g, ' '),
+    MAX_TITLE_LENGTH,
+  );
+  if (!cleaned) return null;
+  const normalized = normalizedIntentText(cleaned);
+  if (!normalized || /^(?:overdue|missing|past due|late)(?: work| tasks?| assignments?)?$/.test(normalized)) {
+    return null;
+  }
+  return `${cleaned.charAt(0).toUpperCase()}${cleaned.slice(1)}`;
+}
+
+function extractAdditionalPlanTasks(value: string): PlannerChatAdditionalTask[] {
+  const tasks: PlannerChatAdditionalTask[] = [];
+  const seen = new Set<string>();
+  const durationToken = String.raw`(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|\d+(?:\.\d+)?)\s*(hours?|hrs?|minutes?|mins?)`;
+  const add = (titleValue: string, numberValue: string, unitValue: string) => {
+    const title = cleanAdditionalTaskTitle(titleValue);
+    const durationSeconds = planDurationSeconds(numberValue, unitValue);
+    if (!title || !durationSeconds || tasks.length >= MAX_PLAN_ADDITIONAL_TASKS) return;
+    const key = normalizedIntentText(title);
+    if (seen.has(key)) return;
+    seen.add(key);
+    tasks.push({ title, durationSeconds });
+  };
+
+  // "four hours for my college essay"
+  const durationFirst = new RegExp(
+    String.raw`(?:(?:around|about|roughly|like)\s+)*${durationToken}\s+(?:for|on|to\s+work\s+on)\s+(?:my\s+|the\s+)?([^,.!?]+?)(?=\s+(?:and|but)\b|\s+(?:(?:i(?:['’]?m|\s+am)|im)\s+)?(?:free|available)\b|[,.!?]|$)`,
+    'gi',
+  );
+  for (const match of value.matchAll(durationFirst)) add(match[3], match[1], match[2]);
+
+  // "work on my college essays today, which will take around like 4 hours"
+  const titleFirst = new RegExp(
+    String.raw`(?:work\s+on|write|finish|complete|do)\s+(?:my\s+|the\s+)?([^,.!?]+?)(?:\s+today|\s+tonight)?\s*(?:,?\s*which\s+)?(?:will\s+)?(?:take|takes)\s+(?:(?:around|about|roughly|like)\s+)*${durationToken}`,
+    'gi',
+  );
+  for (const match of value.matchAll(titleFirst)) add(match[1], match[2], match[3]);
+  return tasks;
+}
+
 interface BroadPlacementModifiers {
   stripped: string;
   startDate: string | null;
@@ -613,6 +780,7 @@ function parseBroadPlacementModifiers(
 
 function stripSupportedBroadModifiers(value: string): string {
   let remainder = parseBroadPlacementModifiers(value).stripped;
+  remainder = parseAvailabilityModifiers(remainder).stripped;
   const supportedModifiers = [
     /\b(?:skip|leave)\s+today\b/gi,
     /\bkeep\s+today\s+(?:free|open|empty|light)\b/gi,
@@ -621,40 +789,48 @@ function stripSupportedBroadModifiers(value: string): string {
     /\b(?:don[’']?t|do\s+not)\s+(?:overload|pack|fill\s+up)\s+today\b/gi,
     /\bwithout\s+overloading\s+today\b/gi,
     /\b(?:keep|make)\s+today\s+light\b/gi,
-    /\bi(?:[’']m|\s+am)\s+(?:really\s+)?busy\s+today\b/gi,
-    /\btoday(?:[’']s|\s+is)\s+(?:really\s+)?busy\b/gi,
+    /\bi(?:[’']m|\s+am)\s+(?:(?:really|pretty|very)\s+)?busy\s+today\b/gi,
+    /\btoday(?:[’']s|\s+is)\s+(?:(?:really|pretty|very)\s+)?busy\b/gi,
     /\blight(?:er)?\s+(?:load\s+)?today\b/gi,
     /\bnot\s+too\s+much\s+today\b/gi,
     /\b(?:rebalance|re-?plan|reschedule)(?:\s+(?:it|them|everything))?\b/gi,
     /\binclude\s+(?:the\s+)?already\s+scheduled\s+(?:work|tasks?|assignments?)\b/gi,
+    // This is an explanatory restatement of the overdue set, not a filter.
+    /\bwhich\s+means\s+everything\s+due\s+before\s+now\b/gi,
   ];
   for (const pattern of supportedModifiers) remainder = remainder.replace(pattern, ' ');
   return remainder;
 }
 
 function onlyContainsBroadPlanFollowUp(value: string): boolean {
-  const placement = parseBroadPlacementModifiers(value);
+  const normalizedValue = normalizePlannerIntentSpelling(value);
+  const placement = parseBroadPlacementModifiers(normalizedValue);
+  const availability = parseAvailabilityModifiers(normalizedValue);
   const hasFollowUpCue = BROAD_PLAN_CONFIRMATION_PATTERN.test(value)
     || TODAY_SKIP_PATTERN.test(value)
     || TODAY_LIGHT_PATTERN.test(value)
     || placement.startDateSpecified
-    || placement.horizonDays !== null;
+    || placement.horizonDays !== null
+    || availability.availableAfter !== null
+    || availability.availableBefore !== null;
   if (!hasFollowUpCue) return false;
 
-  let remainder = stripSupportedBroadModifiers(value);
+  let remainder = stripSupportedBroadModifiers(normalizedValue);
   const allowedPhrases = [
     /\b(?:yes|yeah|yep|sure|okay|ok|do\s+it|go\s+ahead|schedule\s+(?:them|those)|plan\s+(?:them|those)|fit\s+(?:them|those)\s+in|make\s+it\s+happen|that(?:[’']s|\s+is)\s+fine|sounds\s+good)\b/gi,
   ];
   for (const pattern of allowedPhrases) remainder = remainder.replace(pattern, ' ');
   remainder = remainder
+    .replace(/\b(?:can|could|would|will)\s+you\b/gi, ' ')
     .replace(/\b(?:and|but|also|just|please|then)\b/gi, ' ')
     .replace(/[\s,.;:!?()\u2013\u2014-]+/g, '');
   return remainder.length === 0;
 }
 
 function broadPlanTargetCore(value: string): string | null {
-  if (!BROAD_PLAN_ACTION_PREFIX_PATTERN.test(value)) return null;
-  const remainder = stripSupportedBroadModifiers(value.replace(BROAD_PLAN_ACTION_PREFIX_PATTERN, ' '));
+  const normalizedValue = normalizePlannerIntentSpelling(value);
+  if (!BROAD_PLAN_ACTION_PREFIX_PATTERN.test(normalizedValue)) return null;
+  const remainder = stripSupportedBroadModifiers(normalizedValue.replace(BROAD_PLAN_ACTION_PREFIX_PATTERN, ' '));
   return remainder
     .replace(/\b(?:and|but|also|just|please|then)\b/gi, ' ')
     .replace(/[’']/g, '')
@@ -690,17 +866,89 @@ function assistantKeepsBroadMutationActive(value: string): boolean {
   return /\b(?:plan|planned|schedule|scheduled|scheduling|spread|fit|rebalance|calendar\s+draft|save\s+changes|ready|understood|got\s+it|okay|ok|sounds\s+good|can\s+do\s+that)\b/i.test(value);
 }
 
+function mentionedBroadScope(value: string): PlannerChatTaskScope | null {
+  const normalized = normalizedIntentText(normalizePlannerIntentSpelling(value));
+  if (/\b(?:overdue|missing|past due|late)\b/.test(normalized)) return 'overdue';
+  if (/\b(?:this week|week workload|plan my week)\b/.test(normalized)) return 'this_week';
+  if (/\b(?:tasks?|assignments?|homework|work)\b[\s\S]*\b(?:tomorrow)\b|\btomorrow(?:s)?\b[\s\S]*\b(?:tasks?|assignments?|homework|work)\b/.test(normalized)) {
+    return 'tomorrow';
+  }
+  if (/\b(?:tasks?|assignments?|homework|work)\b[\s\S]*\b(?:today)\b|\btoday(?:s)?\b[\s\S]*\b(?:tasks?|assignments?|homework|work)\b/.test(normalized)) {
+    return 'today';
+  }
+  if (/\b(?:all pending|everything|all my work|my workload|remaining tasks?|remaining assignments?)\b/.test(normalized)) {
+    return 'all_pending';
+  }
+  return null;
+}
+
+function inferMixedBroadPlanRequest(
+  value: string,
+  context?: PlannerCommandAIContext,
+): PlannerChatPlanRequest | null {
+  const normalizedValue = normalizePlannerIntentSpelling(value);
+  if (!/\b(?:plan|schedule|scheduling|fit\s+in|organize|organise|arrange|spread\s+out|allocate|rebalance|re-?plan|reschedule)\b/i.test(normalizedValue)) {
+    return null;
+  }
+  const taskScope = mentionedBroadScope(normalizedValue);
+  if (!taskScope) return null;
+
+  const placement = parseBroadPlacementModifiers(normalizedValue, context);
+  const availability = parseAvailabilityModifiers(placement.stripped);
+  if (!placement.valid || !availability.valid) return null;
+  // Any remaining explicit clock is an exact task time, not a broad placement
+  // boundary. Leave it to the exact command interpreter rather than dropping it.
+  if (EXPLICIT_CLOCK_PATTERN.test(availability.stripped)) return null;
+  const additionalTasks = extractAdditionalPlanTasks(normalizedValue);
+  if (
+    additionalTasks.length === 0
+    && availability.availableAfter === null
+    && availability.availableBefore === null
+  ) return null;
+  if (UNSUPPORTED_BROAD_CONSTRAINT_PATTERN.test(normalizedValue)) return null;
+
+  const explicitlyToday = /\b(?:today|tonight)\b/i.test(normalizedValue);
+  return {
+    taskScope,
+    taskIds: [],
+    startDate: placement.startDateSpecified
+      ? placement.startDate
+      : explicitlyToday
+        ? contextCalendarDate(context)
+        : null,
+    horizonDays: placement.horizonDays
+      || (explicitlyToday || taskScope === 'today' || taskScope === 'tomorrow' ? 1 : 7),
+    todayLoad: inferredTodayLoad(normalizedValue),
+    includeAlreadyScheduled: INCLUDE_SCHEDULED_PATTERN.test(normalizedValue),
+    availableAfter: availability.availableAfter,
+    availableBefore: availability.availableBefore,
+    additionalTasks,
+  };
+}
+
+function correctionScopeOverride(value: string): PlannerChatTaskScope | null {
+  const normalized = normalizedIntentText(normalizePlannerIntentSpelling(value));
+  if (/^(?:no\s+)?(?:(?:i\s*m|im|i\s+am)\s+)?(?:(?:am\s+)?talking\s+about\s+|mean\s+|meant\s+)?(?:my\s+)?(?:(?:all|overall)\s+overdue|overdue\s+overall|overdue)(?:\s+(?:work|tasks?|assignments?|items?))?$/.test(normalized)) {
+    return 'overdue';
+  }
+  return null;
+}
+
 function inferDirectBroadPlanRequest(
   value: string,
   context?: PlannerCommandAIContext,
 ): PlannerChatPlanRequest | null {
-  // Any explicit clock belongs to the exact command interpreter. Treating it
-  // as a broad request would silently discard a time the user supplied.
-  if (EXPLICIT_CLOCK_PATTERN.test(value)) return null;
+  const normalizedValue = normalizePlannerIntentSpelling(value);
+  const mixed = inferMixedBroadPlanRequest(normalizedValue, context);
+  if (mixed) return mixed;
 
-  const modifiers = parseBroadPlacementModifiers(value, context);
-  if (!modifiers.valid) return null;
-  const core = broadPlanTargetCore(value);
+  const modifiers = parseBroadPlacementModifiers(normalizedValue, context);
+  const availability = parseAvailabilityModifiers(modifiers.stripped);
+  if (!modifiers.valid || !availability.valid) return null;
+  // Any explicit clock that was not consumed as a free-time boundary belongs
+  // to the exact command interpreter.
+  if (EXPLICIT_CLOCK_PATTERN.test(availability.stripped)) return null;
+  const core = broadPlanTargetCore(normalizedValue);
   if (!core) return null;
   const taskScope = broadScopeFromCore(core);
   // A non-empty, unrecognized remainder is a specific task name, a mixed
@@ -714,8 +962,11 @@ function inferDirectBroadPlanRequest(
     startDate: modifiers.startDateSpecified ? modifiers.startDate : null,
     horizonDays: modifiers.horizonDays
       || (taskScope === 'today' || taskScope === 'tomorrow' ? 1 : 7),
-    todayLoad: inferredTodayLoad(value),
-    includeAlreadyScheduled: INCLUDE_SCHEDULED_PATTERN.test(value),
+    todayLoad: inferredTodayLoad(normalizedValue),
+    includeAlreadyScheduled: INCLUDE_SCHEDULED_PATTERN.test(normalizedValue),
+    availableAfter: availability.availableAfter,
+    availableBefore: availability.availableBefore,
+    additionalTasks: [],
   };
 }
 
@@ -732,6 +983,25 @@ export function inferPlannerChatPlanRequest(
   const latest = sanitizedMessages.at(-1);
   if (!latest || latest.role !== 'user') return null;
 
+  // A correction applies only to the immediately preceding user turn. It may
+  // cross one assistant response, including an erroneous clarification, but it
+  // can never revive an older request from deeper in the transcript.
+  const correctedScope = correctionScopeOverride(latest.content);
+  if (correctedScope) {
+    for (let index = sanitizedMessages.length - 2; index >= 0; index -= 1) {
+      const priorMessage = sanitizedMessages[index];
+      if (priorMessage.role === 'assistant') continue;
+      const priorRequest = inferDirectBroadPlanRequest(priorMessage.content, context);
+      if (!priorRequest) return null;
+      return {
+        ...priorRequest,
+        taskScope: correctedScope,
+        taskIds: [],
+      };
+    }
+    return null;
+  }
+
   const direct = inferDirectBroadPlanRequest(latest.content, context);
   if (direct) return direct;
   if (!onlyContainsBroadPlanFollowUp(latest.content)) return null;
@@ -740,9 +1010,13 @@ export function inferPlannerChatPlanRequest(
   let inheritedIncludeAlreadyScheduled = INCLUDE_SCHEDULED_PATTERN.test(latest.content);
   const latestPlacement = parseBroadPlacementModifiers(latest.content, context);
   if (!latestPlacement.valid) return null;
+  const latestAvailability = parseAvailabilityModifiers(latestPlacement.stripped);
+  if (!latestAvailability.valid) return null;
   let inheritedStartDateSpecified = latestPlacement.startDateSpecified;
   let inheritedStartDate = latestPlacement.startDate;
   let inheritedHorizonDays = latestPlacement.horizonDays;
+  let inheritedAvailableAfter = latestAvailability.availableAfter;
+  let inheritedAvailableBefore = latestAvailability.availableBefore;
   for (let index = sanitizedMessages.length - 2; index >= 0; index -= 1) {
     const priorMessage = sanitizedMessages[index];
     if (priorMessage.role === 'assistant') {
@@ -760,6 +1034,8 @@ export function inferPlannerChatPlanRequest(
           : inheritedTodayLoad,
         includeAlreadyScheduled: priorRequest.includeAlreadyScheduled
           || inheritedIncludeAlreadyScheduled,
+        availableAfter: inheritedAvailableAfter || priorRequest.availableAfter,
+        availableBefore: inheritedAvailableBefore || priorRequest.availableBefore,
       };
     }
     // Continue through a chain of confirmations or load modifiers, but never
@@ -767,12 +1043,20 @@ export function inferPlannerChatPlanRequest(
     if (!onlyContainsBroadPlanFollowUp(priorMessage.content)) break;
     const priorPlacement = parseBroadPlacementModifiers(priorMessage.content, context);
     if (!priorPlacement.valid) break;
+    const priorAvailability = parseAvailabilityModifiers(priorPlacement.stripped);
+    if (!priorAvailability.valid) break;
     if (!inheritedStartDateSpecified && priorPlacement.startDateSpecified) {
       inheritedStartDateSpecified = true;
       inheritedStartDate = priorPlacement.startDate;
     }
     if (inheritedHorizonDays === null && priorPlacement.horizonDays !== null) {
       inheritedHorizonDays = priorPlacement.horizonDays;
+    }
+    if (!inheritedAvailableAfter && priorAvailability.availableAfter) {
+      inheritedAvailableAfter = priorAvailability.availableAfter;
+    }
+    if (!inheritedAvailableBefore && priorAvailability.availableBefore) {
+      inheritedAvailableBefore = priorAvailability.availableBefore;
     }
     const priorLoad = inferredTodayLoad(priorMessage.content);
     if (inheritedTodayLoad === 'normal' && priorLoad !== 'normal') {
@@ -829,10 +1113,11 @@ function inferNamedTaskIntent(
   value: string,
   context?: PlannerCommandAIContext,
 ): NamedTaskIntent | null {
-  if (!context || EXPLICIT_CLOCK_PATTERN.test(value) || !BROAD_PLAN_ACTION_PREFIX_PATTERN.test(value)) {
+  const normalizedValue = normalizePlannerIntentSpelling(value);
+  if (!context || EXPLICIT_CLOCK_PATTERN.test(normalizedValue) || !BROAD_PLAN_ACTION_PREFIX_PATTERN.test(normalizedValue)) {
     return null;
   }
-  const placement = parseBroadPlacementModifiers(value, context);
+  const placement = parseBroadPlacementModifiers(normalizedValue, context);
   if (!placement.valid) return null;
 
   const titleAliases = context.tasks.flatMap(task => (
@@ -846,7 +1131,7 @@ function inferNamedTaskIntent(
   }
 
   let remainder = stripSupportedBroadModifiers(
-    value.replace(BROAD_PLAN_ACTION_PREFIX_PATTERN, ' '),
+    normalizedValue.replace(BROAD_PLAN_ACTION_PREFIX_PATTERN, ' '),
   );
   remainder = normalizedIntentText(remainder);
   const selectedTaskIds = new Set<string>();
@@ -872,8 +1157,8 @@ function inferNamedTaskIntent(
     taskIds: [...selectedTaskIds],
     startDate: placement.startDateSpecified ? placement.startDate : null,
     horizonDays: placement.horizonDays || 7,
-    todayLoad: inferredTodayLoad(value),
-    includeAlreadyScheduled: INCLUDE_SCHEDULED_PATTERN.test(value),
+    todayLoad: inferredTodayLoad(normalizedValue),
+    includeAlreadyScheduled: INCLUDE_SCHEDULED_PATTERN.test(normalizedValue),
   };
 }
 
@@ -893,7 +1178,14 @@ function samePlanRequest(
     && left.startDate === right.startDate
     && left.horizonDays === right.horizonDays
     && left.todayLoad === right.todayLoad
-    && left.includeAlreadyScheduled === right.includeAlreadyScheduled;
+    && left.includeAlreadyScheduled === right.includeAlreadyScheduled
+    && left.availableAfter === right.availableAfter
+    && left.availableBefore === right.availableBefore
+    && left.additionalTasks.length === right.additionalTasks.length
+    && left.additionalTasks.every((task, index) => (
+      task.title === right.additionalTasks[index]?.title
+      && task.durationSeconds === right.additionalTasks[index]?.durationSeconds
+    ));
 }
 
 /**
@@ -913,8 +1205,6 @@ export function plannerChatPlanRequestPreservesIntent(
   const sanitizedRequest = sanitizePlannerChatPlanRequest(request);
   if (!sanitizedRequest) return false;
 
-  if (EXPLICIT_CLOCK_PATTERN.test(latest.content)) return false;
-
   const local = inferPlannerChatPlanRequest(sanitizedMessages, context);
   if (local) {
     // A broad collection request must stay broad. A provider may not replace
@@ -928,7 +1218,10 @@ export function plannerChatPlanRequestPreservesIntent(
     && sanitizedRequest.startDate === named.startDate
     && sanitizedRequest.horizonDays === named.horizonDays
     && sanitizedRequest.todayLoad === named.todayLoad
-    && sanitizedRequest.includeAlreadyScheduled === named.includeAlreadyScheduled;
+    && sanitizedRequest.includeAlreadyScheduled === named.includeAlreadyScheduled
+    && sanitizedRequest.availableAfter === null
+    && sanitizedRequest.availableBefore === null
+    && sanitizedRequest.additionalTasks.length === 0;
 }
 
 const EXACT_MUTATION_FAMILY_PATTERNS = {
@@ -1500,6 +1793,9 @@ const PLANNER_CHAT_PLAN_REQUEST_KEYS = new Set([
   'horizonDays',
   'todayLoad',
   'includeAlreadyScheduled',
+  'availableAfter',
+  'availableBefore',
+  'additionalTasks',
 ]);
 
 export function sanitizePlannerChatPlanRequest(value: unknown): PlannerChatPlanRequest | null {
@@ -1542,6 +1838,40 @@ export function sanitizePlannerChatPlanRequest(value: unknown): PlannerChatPlanR
     return null;
   }
 
+  const availableAfter = record.availableAfter === null ? null : validClock(record.availableAfter);
+  const availableBefore = record.availableBefore === null ? null : validClock(record.availableBefore);
+  // Like dates and IDs, provider boundaries use an exact wire format. Reject
+  // values that validation would have to trim or coerce.
+  if (record.availableAfter !== null && availableAfter !== record.availableAfter) return null;
+  if (record.availableBefore !== null && availableBefore !== record.availableBefore) return null;
+  if (!Array.isArray(record.additionalTasks) || record.additionalTasks.length > MAX_PLAN_ADDITIONAL_TASKS) {
+    return null;
+  }
+  const additionalTasks: PlannerChatAdditionalTask[] = [];
+  const additionalTaskTitles = new Set<string>();
+  for (const item of record.additionalTasks) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return null;
+    const itemRecord = item as Record<string, unknown>;
+    const itemKeys = Object.keys(itemRecord);
+    if (
+      itemKeys.length !== 2
+      || itemKeys.some(key => key !== 'title' && key !== 'durationSeconds')
+    ) return null;
+    const title = boundedString(itemRecord.title, MAX_TITLE_LENGTH);
+    if (!title || title !== itemRecord.title) return null;
+    const durationSeconds = itemRecord.durationSeconds;
+    if (
+      typeof durationSeconds !== 'number'
+      || !Number.isInteger(durationSeconds)
+      || durationSeconds < MIN_PLAN_ADDITIONAL_TASK_DURATION_SECONDS
+      || durationSeconds > MAX_PLAN_ADDITIONAL_TASK_DURATION_SECONDS
+    ) return null;
+    const normalizedTitle = normalizedIntentText(title);
+    if (!normalizedTitle || additionalTaskTitles.has(normalizedTitle)) return null;
+    additionalTaskTitles.add(normalizedTitle);
+    additionalTasks.push({ title, durationSeconds });
+  }
+
   return {
     taskScope: taskScope as PlannerChatTaskScope,
     taskIds: normalizedTaskIds,
@@ -1549,6 +1879,9 @@ export function sanitizePlannerChatPlanRequest(value: unknown): PlannerChatPlanR
     horizonDays,
     todayLoad: todayLoad as PlannerChatTodayLoad,
     includeAlreadyScheduled: record.includeAlreadyScheduled,
+    availableAfter,
+    availableBefore,
+    additionalTasks,
   };
 }
 

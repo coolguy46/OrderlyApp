@@ -159,6 +159,9 @@ function request(overrides = {}) {
     horizonDays: 7,
     todayLoad: 'normal',
     includeAlreadyScheduled: false,
+    availableAfter: null,
+    availableBefore: null,
+    additionalTasks: [],
     ...overrides,
   };
 }
@@ -207,6 +210,52 @@ test('overdue planning selects every pending task beyond eight and excludes comp
   assert.deepEqual(scheduledIds, pending.map(item => item.id).sort());
   assert.ok(!scheduledIds.includes(completed.id));
   assert.match(preview.summary, /Scheduled 12 of 12/);
+});
+
+test('a resolved overdue-plus-essay request uses the complete unfinished set, availability, and partial-fit explanation', () => {
+  const overdue = [
+    task('overdue-reading', { title: 'Overdue reading' }),
+    task('overdue-worksheet', { title: 'Overdue worksheet' }),
+    task('overdue-review', { title: 'Overdue review' }),
+  ];
+  const completedOverdue = task('completed-overdue', {
+    title: 'Already completed overdue item',
+    status: 'completed',
+  });
+  const preview = plan({
+    request: request({
+      taskScope: 'overdue',
+      taskIds: [],
+      startDate: '2026-08-27',
+      horizonDays: 1,
+      todayLoad: 'normal',
+      availableAfter: '14:15',
+      availableBefore: null,
+      additionalTasks: [{ title: 'College essay', durationSeconds: 14_400 }],
+    }),
+    tasks: [...overdue, completedOverdue],
+    settings: settings({
+      // The base window starts earlier; the request-specific availability must
+      // deterministically clip it to 2:15 PM.
+      weekendAvailableStart: '08:00',
+      weekendAvailableEnd: '18:15',
+      maxDailyMinutes: 4 * 60,
+    }),
+  });
+  const scheduled = operations(preview);
+  const scheduledIds = scheduled.map(operation => operation.taskId).sort();
+
+  assert.equal(preview.status, 'ready');
+  assert.deepEqual(scheduledIds, overdue.map(item => item.id).sort());
+  assert.ok(!scheduledIds.includes(completedOverdue.id));
+  assert.ok(scheduled.every(operation => (
+    new Date(operation.input.startAt) >= new Date('2026-08-27T21:15:00.000Z')
+  )));
+  assert.match(preview.summary, /Scheduled 3 of 4/);
+  assert.ok(preview.assumptions.some(assumption => (
+    /could not fit 1 (?:task|item)/i.test(assumption)
+    && /College essay/i.test(assumption)
+  )), preview.assumptions.join('\n'));
 });
 
 test('already-scheduled tasks are excluded unless rescheduling was explicitly requested', () => {
@@ -669,10 +718,10 @@ test('partial capacity schedules what fits and honestly names the remainder', ()
   assert.equal(operations(preview).length, 1);
   assert.match(preview.summary, /Scheduled 1 of 3/);
   assert.ok(preview.assumptions.some(assumption => (
-    /could not fit 2 tasks/i.test(assumption)
+    /could not fit 2 (?:tasks|items)/i.test(assumption)
     && /beta/i.test(assumption)
     && /gamma/i.test(assumption)
-  )));
+  )), preview.assumptions.join('\n'));
 });
 
 test('identical snapshots produce byte-for-byte identical plans', () => {

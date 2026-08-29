@@ -223,7 +223,22 @@ function readStoredAssistantDraft(userId: string): StoredAssistantDraft | null {
         anchorDate,
       };
     }
-    const request = sanitizePlannerChatPlanRequest(candidate.request);
+    // Drafts written by the first v2 planner schema predate request-specific
+    // availability and additional chat-created work. Supply only the neutral
+    // defaults for absent fields so an in-progress draft survives a deploy;
+    // malformed or unexpected saved values still go through strict validation.
+    const storedRequest = candidate.request && typeof candidate.request === 'object' && !Array.isArray(candidate.request)
+      ? candidate.request as Record<string, unknown>
+      : null;
+    const migratedRequest = storedRequest
+      ? {
+          ...storedRequest,
+          availableAfter: Object.hasOwn(storedRequest, 'availableAfter') ? storedRequest.availableAfter : null,
+          availableBefore: Object.hasOwn(storedRequest, 'availableBefore') ? storedRequest.availableBefore : null,
+          additionalTasks: Object.hasOwn(storedRequest, 'additionalTasks') ? storedRequest.additionalTasks : [],
+        }
+      : candidate.request;
+    const request = sanitizePlannerChatPlanRequest(migratedRequest);
     if (candidate.kind === 'task_plan' && request) {
       return {
         kind: 'task_plan',
@@ -1098,6 +1113,80 @@ export function Planner() {
       selectedTaskId: taskId,
     };
 
+    const queryTerms = normalized.toLocaleLowerCase().match(/[a-z0-9]{3,}/g) || [];
+    const providerTasks = [...assistantContextTasks].sort((left, right) => {
+      const leftText = `${left.title} ${left.course_name || ''}`.toLocaleLowerCase();
+      const rightText = `${right.title} ${right.course_name || ''}`.toLocaleLowerCase();
+      const leftMatches = queryTerms.reduce((count, term) => count + (leftText.includes(term) ? 1 : 0), 0);
+      const rightMatches = queryTerms.reduce((count, term) => count + (rightText.includes(term) ? 1 : 0), 0);
+      return rightMatches - leftMatches;
+    });
+    const commandNow = new Date(commandContext.now).getTime();
+    const scheduledTaskIds = new Set(entries
+      .filter(entry => Boolean(entry.scheduledDate && entry.startAt))
+      .map(entry => entry.taskId));
+    const taskSummary = {
+      pendingTotal: pendingTasks.length,
+      overdueTotal: pendingTasks.filter(task => {
+        const deadline = plannerTaskDeadline(task, timeZone);
+        return deadline !== null && new Date(deadline).getTime() < commandNow;
+      }).length,
+      scheduledTotal: pendingTasks.filter(task => scheduledTaskIds.has(task.id)).length,
+      includedTotal: Math.min(30, providerTasks.length),
+    };
+    // This local context lets the deterministic intent resolver understand
+    // relative clocks and named work before either the read-only query path or
+    // the external provider can reinterpret the request.
+    const browserIntentContext: PlannerCommandAIContext = {
+      now: commandContext.now,
+      timeZone,
+      selectedTaskId: taskId,
+      selectedDate: localDate(selectedDate),
+      availableStartTime: plannerSettings.weekendAvailableStart,
+      availableEndTime: plannerSettings.bedtime,
+      tasks: providerTasks.slice(0, 30).map(task => ({
+        id: task.id,
+        title: cleanAssistantText(task.title, 180),
+        description: null,
+        dueDate: task.due_date,
+        dueTime: task.due_time,
+      })),
+      taskSummary,
+      exams: [],
+      occurrences: [],
+      busy: [],
+    };
+
+    // Mutations take precedence over factual keyword matching. This matters
+    // for natural requests such as “schedule my overdue work, which will take
+    // four hours”: the relative word “which” must not turn the request into a
+    // read-only overdue query.
+    const localPlanRequest = inferPlannerChatPlanRequest(
+      conversation.map(message => ({ role: message.role, content: message.content })),
+      browserIntentContext,
+    );
+    if (localPlanRequest) {
+      const nextPreview = buildAssistantTaskPlan({
+        request: localPlanRequest,
+        now: commandContext.now,
+        timeZone,
+        tasks,
+        entries,
+        occurrences: context.occurrences,
+        busy: context.busy,
+        settings: plannerSettings,
+        estimateCache: plannerRecord?.estimateCache || {},
+        feedbackMultipliers: plannerRecord?.feedbackMultipliers || {},
+      });
+      const assistantReply = presentTaskPlanPreview(localPlanRequest, nextPreview, commandContext.now);
+      setMessages(previous => [...previous, {
+        id: `assistant-${Date.now()}`,
+        role: 'assistant' as const,
+        content: assistantReply,
+      }].slice(-CHAT_DISPLAY_LIMIT));
+      return;
+    }
+
     const factualResult = resolveAssistantTaskQuery({
       message: normalized,
       now: commandContext.now,
@@ -1146,6 +1235,9 @@ export function Planner() {
             ? 'light'
             : 'normal',
         includeAlreadyScheduled: /\b(?:rebalance|replan|reschedule|move)\b/i.test(normalized),
+        availableAfter: null,
+        availableBefore: null,
+        additionalTasks: [],
       };
       const referencedPreview = buildAssistantTaskPlan({
         request: referencedRequest,
@@ -1164,35 +1256,6 @@ export function Planner() {
         referencedPreview,
         commandContext.now,
       );
-      setMessages(previous => [...previous, {
-        id: `assistant-${Date.now()}`,
-        role: 'assistant' as const,
-        content: assistantReply,
-      }].slice(-CHAT_DISPLAY_LIMIT));
-      return;
-    }
-
-    // Broad requests are interpreted locally before the exact-command parser.
-    // That distinction is essential: "schedule my overdue work" intentionally
-    // leaves task choice, duration estimates, and clock placement to Orderly's
-    // deterministic planner instead of being rejected as one incomplete task.
-    const localPlanRequest = inferPlannerChatPlanRequest(
-      conversation.map(message => ({ role: message.role, content: message.content })),
-    );
-    if (localPlanRequest) {
-      const nextPreview = buildAssistantTaskPlan({
-        request: localPlanRequest,
-        now: commandContext.now,
-        timeZone,
-        tasks,
-        entries,
-        occurrences: context.occurrences,
-        busy: context.busy,
-        settings: plannerSettings,
-        estimateCache: plannerRecord?.estimateCache || {},
-        feedbackMultipliers: plannerRecord?.feedbackMultipliers || {},
-      });
-      const assistantReply = presentTaskPlanPreview(localPlanRequest, nextPreview, commandContext.now);
       setMessages(previous => [...previous, {
         id: `assistant-${Date.now()}`,
         role: 'assistant' as const,
@@ -1226,48 +1289,6 @@ export function Planner() {
     }, CHAT_TIMEOUT_MS);
 
     try {
-      const queryTerms = normalized.toLocaleLowerCase().match(/[a-z0-9]{3,}/g) || [];
-      const providerTasks = [...assistantContextTasks].sort((left, right) => {
-        const leftText = `${left.title} ${left.course_name || ''}`.toLocaleLowerCase();
-        const rightText = `${right.title} ${right.course_name || ''}`.toLocaleLowerCase();
-        const leftMatches = queryTerms.reduce((count, term) => count + (leftText.includes(term) ? 1 : 0), 0);
-        const rightMatches = queryTerms.reduce((count, term) => count + (rightText.includes(term) ? 1 : 0), 0);
-        return rightMatches - leftMatches;
-      });
-      const commandNow = new Date(commandContext.now).getTime();
-      const scheduledTaskIds = new Set(entries
-        .filter(entry => Boolean(entry.scheduledDate && entry.startAt))
-        .map(entry => entry.taskId));
-      const taskSummary = {
-        pendingTotal: pendingTasks.length,
-        overdueTotal: pendingTasks.filter(task => {
-          const deadline = plannerTaskDeadline(task, timeZone);
-          return deadline !== null && new Date(deadline).getTime() < commandNow;
-        }).length,
-        scheduledTotal: pendingTasks.filter(task => scheduledTaskIds.has(task.id)).length,
-        includedTotal: Math.min(30, providerTasks.length),
-      };
-      // Keep a separate, browser-only context for the second intent check.
-      // It is deliberately not included in the request body below.
-      const browserIntentContext: PlannerCommandAIContext = {
-        now: commandContext.now,
-        timeZone,
-        selectedTaskId: taskId,
-        selectedDate: localDate(selectedDate),
-        availableStartTime: plannerSettings.weekendAvailableStart,
-        availableEndTime: plannerSettings.bedtime,
-        tasks: providerTasks.slice(0, 30).map(task => ({
-          id: task.id,
-          title: cleanAssistantText(task.title, 180),
-          description: null,
-          dueDate: task.due_date,
-          dueTime: task.due_time,
-        })),
-        taskSummary,
-        exams: [],
-        occurrences: [],
-        busy: [],
-      };
       const response = await fetch('/api/planner/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

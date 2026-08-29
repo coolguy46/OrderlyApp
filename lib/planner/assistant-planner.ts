@@ -18,6 +18,7 @@ import type {
   ScheduleOccurrence,
 } from '@/lib/schedule/types';
 import type {
+  ScheduleCommandAction,
   ScheduleCommandBusyInterval,
   ScheduleCommandPreview,
 } from '@/lib/schedule/commands';
@@ -32,6 +33,11 @@ export type AssistantTaskPlanScope =
   | 'all_pending'
   | 'task_ids';
 
+export interface AssistantTaskPlanAdditionalTask {
+  title: string;
+  durationSeconds: number;
+}
+
 /**
  * High-level intent produced by the language model. Clock arithmetic and task
  * selection remain deterministic and local to Orderly.
@@ -43,6 +49,9 @@ export interface AssistantTaskPlanRequest {
   horizonDays: number;
   todayLoad: 'normal' | 'light' | 'skip';
   includeAlreadyScheduled: boolean;
+  availableAfter?: string | null;
+  availableBefore?: string | null;
+  additionalTasks?: readonly AssistantTaskPlanAdditionalTask[];
 }
 
 export interface AssistantTaskPlanInput {
@@ -64,19 +73,20 @@ interface Interval {
 }
 
 interface PlannedTask {
-  task: Task;
+  key: string;
+  title: string;
+  task: Task | null;
   deadline: number | null;
-  minutes: number;
+  durationSeconds: number;
+  workloadMinutes: number;
   estimateReasons: string[];
 }
 
 interface Placement {
-  task: Task;
+  item: PlannedTask;
   date: LocalDate;
   start: number;
   end: number;
-  minutes: number;
-  deadline: number | null;
 }
 
 function isTimedScheduleEntry(entry: ScheduleEntry): boolean {
@@ -103,10 +113,47 @@ function validTimestamp(value: string | null | undefined): number | null {
   return Number.isFinite(timestamp) ? timestamp : null;
 }
 
-function priorityRank(task: Task): number {
+function validClock(value: string | null | undefined): string | null {
+  if (!value || !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value)) return null;
+  return value;
+}
+
+function priorityRank(task: Task | null): number {
+  if (!task) return 1;
   if (task.priority === 'high') return 0;
   if (task.priority === 'medium') return 1;
   return 2;
+}
+
+function additionalWorkItems(
+  additionalTasks: readonly AssistantTaskPlanAdditionalTask[] | undefined,
+): { items: PlannedTask[]; invalidCount: number } {
+  const items: PlannedTask[] = [];
+  let invalidCount = 0;
+
+  for (const [index, candidate] of (additionalTasks || []).entries()) {
+    const title = typeof candidate?.title === 'string'
+      ? candidate.title.trim().replace(/\s+/g, ' ').slice(0, 180)
+      : '';
+    const durationSeconds = Number.isFinite(candidate?.durationSeconds)
+      ? Math.round(candidate.durationSeconds)
+      : 0;
+    if (!title || durationSeconds <= 0 || durationSeconds > 24 * 60 * 60) {
+      invalidCount += 1;
+      continue;
+    }
+    items.push({
+      key: `additional-${index}-${plannerHash({ title, durationSeconds })}`,
+      title,
+      task: null,
+      deadline: null,
+      durationSeconds,
+      workloadMinutes: Math.ceil(durationSeconds / 60),
+      estimateReasons: ['Used the duration supplied in chat.'],
+    });
+  }
+
+  return { items, invalidCount };
 }
 
 function scheduledTaskIds(
@@ -196,6 +243,8 @@ function availabilityForDate(
   settings: PlannerSettings,
   today: LocalDate,
   now: number,
+  availableAfter: string | null,
+  availableBefore: string | null,
 ): Interval | null {
   const schoolDay = settings.schoolDays.includes(localDayOfWeek(date));
   const startTime = schoolDay ? settings.schoolHomeTime : settings.weekendAvailableStart;
@@ -206,8 +255,32 @@ function availabilityForDate(
   const start = validTimestamp(startIso);
   const end = validTimestamp(endIso);
   if (start === null || end === null || end <= start) return null;
-  const effectiveStart = date === today ? Math.max(start, now) : start;
-  return effectiveStart < end ? { start: effectiveStart, end } : null;
+
+  const requestStart = availableAfter
+    ? validTimestamp(localDateTimeToIso(date, `${availableAfter}:00`, settings.timeZone))
+    : null;
+  let requestEnd: number | null = null;
+  if (availableBefore) {
+    // An explicit range such as 22:00-01:00 crosses midnight. When only an
+    // end clock is supplied, mirror the saved availability's overnight shape.
+    const crossesMidnight = availableAfter
+      ? availableBefore <= availableAfter
+      : endTime <= startTime && availableBefore <= startTime;
+    const requestEndDate = crossesMidnight ? addLocalDays(date, 1) : date;
+    requestEnd = validTimestamp(localDateTimeToIso(
+      requestEndDate,
+      `${availableBefore}:00`,
+      settings.timeZone,
+    ));
+  }
+
+  const effectiveStart = Math.max(
+    start,
+    date === today ? now : start,
+    requestStart ?? start,
+  );
+  const effectiveEnd = Math.min(end, requestEnd ?? end);
+  return effectiveStart < effectiveEnd ? { start: effectiveStart, end: effectiveEnd } : null;
 }
 
 function normalizeBusy(
@@ -253,11 +326,11 @@ function minutesAlreadyScheduledByDay(
 
 function firstFreeStart(
   window: Interval,
-  durationMinutes: number,
+  durationSeconds: number,
   busy: readonly Interval[],
   slotMinutes: number,
 ): number | null {
-  const durationMs = durationMinutes * MINUTE_MS;
+  const durationMs = durationSeconds * 1_000;
   let candidate = ceilToSlot(window.start, slotMinutes);
   for (const interval of busy) {
     if (interval.end <= candidate || interval.start >= window.end) continue;
@@ -343,8 +416,16 @@ export function buildAssistantTaskPlan(input: AssistantTaskPlanInput): ScheduleC
   const busy = normalizeBusy(input, ignoredOccurrenceIds, settings.minBreakMinutes);
   const scheduledMinutes = minutesAlreadyScheduledByDay(input.occurrences, ignoredOccurrenceIds);
   const assumptions: string[] = [];
+  const availableAfter = validClock(input.request.availableAfter);
+  const availableBefore = validClock(input.request.availableBefore);
+  const additional = additionalWorkItems(input.request.additionalTasks);
+  const softCompositeDailyLimit = (
+    horizonDays === 1
+    && additional.items.length > 0
+    && Boolean(availableAfter || availableBefore)
+  );
 
-  if (selectedTasks.length === 0) {
+  if (selectedTasks.length === 0 && additional.items.length === 0) {
     return {
       id: `assistant-plan-${plannerHash({ request: input.request, now: input.now, empty: true })}`,
       command: 'plan tasks',
@@ -352,9 +433,11 @@ export function buildAssistantTaskPlan(input: AssistantTaskPlanInput): ScheduleC
       normalizedCommand: 'plan tasks',
       kind: null,
       status: 'query',
-      summary: input.request.taskScope === 'overdue'
+      summary: input.request.taskScope === 'overdue' && !(input.request.additionalTasks?.length)
         ? 'You have no unscheduled overdue tasks to plan.'
-        : 'I could not find any matching unscheduled tasks to plan.',
+        : additional.invalidCount > 0
+          ? 'I could not find valid work to plan. Each new activity needs a title and a duration between one second and 24 hours.'
+          : 'I could not find any matching unscheduled tasks to plan.',
       actions: [],
       assumptions: [],
       candidates: [],
@@ -363,23 +446,28 @@ export function buildAssistantTaskPlan(input: AssistantTaskPlanInput): ScheduleC
     };
   }
 
-  const work: PlannedTask[] = selectedTasks.map(task => {
+  const selectedWork = selectedTasks.map<PlannedTask>(task => {
     const estimate = estimatePlannerTask(
       taskToPlannerInput(task, settings.timeZone),
       input.estimateCache || {},
       input.feedbackMultipliers || {},
     );
+    const minutes = roundMinutesToSlot(estimate.finalMinutes, settings.slotMinutes);
     return {
+      key: `task-${task.id}`,
+      title: task.title,
       task,
       deadline: validTimestamp(plannerTaskDeadline(task, settings.timeZone)),
-      minutes: roundMinutesToSlot(estimate.finalMinutes, settings.slotMinutes),
+      durationSeconds: minutes * 60,
+      workloadMinutes: minutes,
       estimateReasons: estimate.reasons,
     };
-  }).sort((left, right) => (
+  });
+  const work: PlannedTask[] = [...selectedWork, ...additional.items].sort((left, right) => (
     (left.deadline ?? Number.POSITIVE_INFINITY) - (right.deadline ?? Number.POSITIVE_INFINITY)
     || priorityRank(left.task) - priorityRank(right.task)
-    || left.task.title.localeCompare(right.task.title)
-    || left.task.id.localeCompare(right.task.id)
+    || left.title.localeCompare(right.title)
+    || left.key.localeCompare(right.key)
   ));
 
   const placements: Placement[] = [];
@@ -390,9 +478,10 @@ export function buildAssistantTaskPlan(input: AssistantTaskPlanInput): ScheduleC
 
   for (const item of work) {
     let placement: Placement | null = null;
-    const entry = entriesByTask.get(item.task.id);
+    const entry = item.task ? entriesByTask.get(item.task.id) : undefined;
     if (
-      scheduledSelectedIds.has(item.task.id)
+      item.task
+      && scheduledSelectedIds.has(item.task.id)
       && entry?.recurrence !== 'none'
       && !replacementOccurrences.has(item.task.id)
     ) {
@@ -406,7 +495,14 @@ export function buildAssistantTaskPlan(input: AssistantTaskPlanInput): ScheduleC
       if (requireDeadline && (item.deadline === null || item.deadline < now)) continue;
       for (const date of horizonDates) {
         if (placement) break;
-        const availability = availabilityForDate(date, settings, today, now);
+        const availability = availabilityForDate(
+          date,
+          settings,
+          today,
+          now,
+          availableAfter,
+          availableBefore,
+        );
         if (!availability) continue;
 
         const deadlineEnd = requireDeadline && item.deadline !== null
@@ -415,7 +511,7 @@ export function buildAssistantTaskPlan(input: AssistantTaskPlanInput): ScheduleC
         if (deadlineEnd <= availability.start) continue;
         const start = firstFreeStart(
           { start: availability.start, end: deadlineEnd },
-          item.minutes,
+          item.durationSeconds,
           busy,
           settings.slotMinutes,
         );
@@ -423,34 +519,47 @@ export function buildAssistantTaskPlan(input: AssistantTaskPlanInput): ScheduleC
         const placementDate = localDateFromIso(new Date(start).toISOString(), settings.timeZone) || date;
         if (placementDate < startDate || placementDate > horizonEndDate) continue;
         const normalCap = settings.maxDailyMinutes;
+        const scheduledForDay = scheduledMinutes.get(placementDate) || 0;
+        // In a one-day mixed request, an explicit availability boundary is a
+        // stronger statement than the user's usual workload target. The real
+        // time window (plus collision checks) is still a hard upper bound.
+        const constrainedWindowCap = scheduledForDay
+          + Math.floor((availability.end - availability.start) / MINUTE_MS);
         const requestedCap = placementDate === today && input.request.todayLoad === 'skip'
           ? 0
+          : softCompositeDailyLimit
+            ? constrainedWindowCap
           : placementDate === today && input.request.todayLoad === 'light'
             ? Math.min(60, Math.max(settings.slotMinutes, roundMinutesToSlot(normalCap / 4, settings.slotMinutes)))
             : normalCap;
-        const used = (scheduledMinutes.get(placementDate) || 0) + (dailyPlanned.get(placementDate) || 0);
-        if (used + item.minutes > requestedCap) continue;
-        const end = start + item.minutes * MINUTE_MS;
-        placement = { task: item.task, date: placementDate, start, end, minutes: item.minutes, deadline: item.deadline };
+        const used = scheduledForDay + (dailyPlanned.get(placementDate) || 0);
+        if (used + item.workloadMinutes > requestedCap) continue;
+        const end = start + item.durationSeconds * 1_000;
+        placement = { item, date: placementDate, start, end };
         placements.push(placement);
-        dailyPlanned.set(placementDate, (dailyPlanned.get(placementDate) || 0) + item.minutes);
+        dailyPlanned.set(
+          placementDate,
+          (dailyPlanned.get(placementDate) || 0) + item.workloadMinutes,
+        );
         busy.push({ start: Math.max(0, start - breakMs), end: end + breakMs });
         busy.sort((left, right) => left.start - right.start || left.end - right.end);
-        if (item.deadline !== null && end > item.deadline) afterDeadline.add(item.task.id);
+        if (item.deadline !== null && end > item.deadline) afterDeadline.add(item.key);
       }
       if (placement) break;
     }
     if (!placement) unscheduled.push(item);
   }
 
-  const failedScheduled = unscheduled.filter(item => scheduledSelectedIds.has(item.task.id));
+  const failedScheduled = unscheduled.filter(item => (
+    item.task && scheduledSelectedIds.has(item.task.id)
+  ));
   if (failedScheduled.length > 0) {
-    const failedTitles = failedScheduled.map(item => item.task.title).join(', ');
+    const failedTitles = failedScheduled.map(item => item.title).join(', ');
     return {
       id: `assistant-plan-${plannerHash({
         request: input.request,
         now: input.now,
-        atomicRebalanceFailed: failedScheduled.map(item => item.task.id),
+        atomicRebalanceFailed: failedScheduled.map(item => item.task?.id),
       })}`,
       command: 'plan tasks',
       commands: [],
@@ -466,40 +575,81 @@ export function buildAssistantTaskPlan(input: AssistantTaskPlanInput): ScheduleC
     };
   }
 
-  if (input.request.todayLoad === 'light') {
+  if (softCompositeDailyLimit && input.request.todayLoad !== 'skip') {
+    assumptions.push('For this one-day mixed request, I treated your saved daily workload limit as a soft target and used the actual requested free-time window instead. School, bedtime, and occupied calendar blocks remained hard limits.');
+  } else if (input.request.todayLoad === 'light') {
     assumptions.push('I kept today light: at most 60 minutes of newly planned work, while still respecting your saved daily limit.');
   } else if (input.request.todayLoad === 'skip') {
     assumptions.push('I left today free and started planning on the next available day.');
+  }
+  if (availableAfter || availableBefore) {
+    const requestedWindow = availableAfter && availableBefore
+      ? `${availableAfter}-${availableBefore}`
+      : availableAfter
+        ? `after ${availableAfter}`
+        : `before ${availableBefore}`;
+    assumptions.push(`I limited each planning day to your requested time window (${requestedWindow}), intersected with your saved availability.`);
+  }
+  if (additional.invalidCount > 0) {
+    assumptions.push(`${additional.invalidCount} new ${additional.invalidCount === 1 ? 'activity was' : 'activities were'} ignored because the title or duration was invalid.`);
   }
   if (afterDeadline.size > 0) {
     assumptions.push(`${afterDeadline.size} overdue or capacity-limited ${afterDeadline.size === 1 ? 'task was' : 'tasks were'} placed at the earliest available time, even though the original deadline has passed.`);
   }
   if (unscheduled.length > 0) {
-    assumptions.push(`I could not fit ${unscheduled.length} ${unscheduled.length === 1 ? 'task' : 'tasks'} inside this ${horizonDays}-day window without exceeding your availability or daily workload limit: ${unscheduled.map(item => item.task.title).join(', ')}.`);
+    const unscheduledMinutes = Math.ceil(
+      unscheduled.reduce((total, item) => total + item.durationSeconds, 0) / 60,
+    );
+    assumptions.push(`I scheduled only the work that fit. I could not fit ${unscheduled.length} ${unscheduled.length === 1 ? 'task' : 'tasks'} (${unscheduledMinutes} minutes total) inside this ${horizonDays}-day window without exceeding your availability or daily workload limit: ${unscheduled.map(item => item.title).join(', ')}.`);
   }
 
-  const operations: ScheduleBatchOperation[] = placements.map(placement => {
-    const entry = entriesByTask.get(placement.task.id);
-    const replacement = replacementOccurrences.get(placement.task.id);
+  const operations: ScheduleBatchOperation[] = [];
+  const createActions: ScheduleCommandAction[] = [];
+  for (const placement of placements) {
     const scheduledDate = placement.date;
     const startAt = new Date(placement.start).toISOString();
-    const durationSeconds = placement.minutes * 60;
-    if (scheduledSelectedIds.has(placement.task.id) && entry?.recurrence !== 'none' && replacement) {
-      return {
+    const durationSeconds = placement.item.durationSeconds;
+    if (!placement.item.task) {
+      createActions.push({
+        type: 'create_task',
+        title: placement.item.title,
+        description: null,
+        schedule: {
+          scheduledDate,
+          startAt,
+          durationSeconds,
+          recurrence: 'none',
+          recurrenceDays: null,
+          recurrenceEndDate: null,
+        },
+      });
+      continue;
+    }
+
+    const taskId = placement.item.task.id;
+    const entry = entriesByTask.get(taskId);
+    const replacement = replacementOccurrences.get(taskId);
+    if (scheduledSelectedIds.has(taskId) && entry?.recurrence !== 'none' && replacement) {
+      operations.push({
         type: 'override',
-        taskId: placement.task.id,
+        taskId,
         occurrenceDate: replacement.recurrenceSourceDate,
         override: { scheduledDate, startAt, durationSeconds },
-      };
+      });
+      continue;
     }
-    return {
+    operations.push({
       type: 'upsert',
-      taskId: placement.task.id,
+      taskId,
       // Omitting recurrence fields preserves an existing row's recurrence and
       // occurrenceOverrides in the schedule store instead of flattening it.
       input: { scheduledDate, startAt, durationSeconds },
-    };
-  });
+    });
+  }
+  const actions: ScheduleCommandAction[] = [
+    ...(operations.length > 0 ? [{ type: 'schedule_batch' as const, operations }] : []),
+    ...createActions,
+  ];
   const coverage = `${placements.length} of ${work.length}`;
   const daysUsed = [...new Set(placements.map(placement => placement.date))];
   const summary = placements.length === 0
@@ -508,7 +658,11 @@ export function buildAssistantTaskPlan(input: AssistantTaskPlanInput): ScheduleC
   const id = `assistant-plan-${plannerHash({
     request: input.request,
     now: input.now,
-    placements: placements.map(placement => [placement.task.id, placement.start, placement.minutes]),
+    placements: placements.map(placement => [
+      placement.item.key,
+      placement.start,
+      placement.item.durationSeconds,
+    ]),
   })}`;
 
   return {
@@ -517,18 +671,18 @@ export function buildAssistantTaskPlan(input: AssistantTaskPlanInput): ScheduleC
     commands: [],
     normalizedCommand: 'plan tasks',
     kind: null,
-    status: operations.length > 0 ? 'ready' : 'clarification',
+    status: actions.length > 0 ? 'ready' : 'clarification',
     summary,
-    actions: operations.length > 0 ? [{ type: 'schedule_batch', operations }] : [],
+    actions,
     assumptions,
     candidates: [],
     gaps: [],
     occurrences: placements.map(placement => ({
-      taskId: placement.task.id,
-      title: placement.task.title,
+      taskId: placement.item.task?.id || null,
+      title: placement.item.title,
       date: placement.date,
       startAt: new Date(placement.start).toISOString(),
-      durationSeconds: placement.minutes * 60,
+      durationSeconds: placement.item.durationSeconds,
     })),
   };
 }

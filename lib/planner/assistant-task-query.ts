@@ -15,8 +15,14 @@ export interface AssistantTaskQueryResult {
   scope: 'overdue' | 'today' | 'tomorrow' | 'this_week' | 'all_pending';
 }
 
-const MUTATION_PATTERN = /\b(?:add|create|fit|move|plan|put|rebalance|replan|reschedule|schedule|shift|spread|unschedule)\b/i;
-const LIST_PATTERN = /\b(?:all|any|count|do i have|give me|how many|list|name|show|tell me|what(?:'s| is| are)?|which)\b/i;
+// Keep common scheduling misspellings here as well as in the chat planner. A
+// mutation must never fall into the read-only task-answer path just because a
+// student typed "schedual" instead of "schedule".
+const MUTATION_PATTERN = /\b(?:add|create|fit|move|plan|put|rebalance|replan|reschedule|schedule|schedual|shedule|scedual|scedule|shift|spread|unschedule)\b/i;
+// Query words are intentionally anchored to the beginning (or to an explicit
+// request verb). An incidental relative clause such as "college essays, which
+// will take four hours" is not a request to list tasks.
+const LIST_PATTERN = /^\s*(?:(?:can|could|would|will)\s+(?:you|u)\s+)?(?:please\s+)?(?:count|do\s+i\s+have|give\s+me|how\s+many|list|name|show|tell\s+me|what(?:'s|\s+is|\s+are)?|which)\b/i;
 const TASK_PATTERN = /\b(?:assignment|assignments|deadline|deadlines|homework|item|items|missing|overdue|task|tasks|work)\b/i;
 
 function formatDeadline(task: Task, timeZone: string): string {

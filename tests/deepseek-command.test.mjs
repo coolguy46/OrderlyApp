@@ -149,6 +149,9 @@ test('provider broad plans cannot silently discard user constraints', () => {
     horizonDays: 7,
     todayLoad: 'normal',
     includeAlreadyScheduled: false,
+    availableAfter: null,
+    availableBefore: null,
+    additionalTasks: [],
   };
 
   assert.equal(plannerChatPlanRequestPreservesIntent([

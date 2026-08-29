@@ -162,6 +162,42 @@ test('mutation requests bypass factual answers and continue into the planner', (
   assert.equal(response, null);
 });
 
+test('the exact overdue-plus-essay screenshot bypasses task Q&A and reaches the composite planner', () => {
+  const response = answerAssistantTaskQuery({
+    message: "Schedule all of my overdue work plus four hours for my college essay. I'm free after 2:15 PM today.",
+    now: NOW,
+    timeZone: TIME_ZONE,
+    tasks: [
+      task('overdue', '2026-08-25T18:00:00.000Z'),
+      task('college-essay', '2026-09-05T18:00:00.000Z'),
+    ],
+  });
+
+  assert.equal(response, null);
+});
+
+test('the exact misspelled scedual-them screenshot bypasses task Q&A', () => {
+  const response = answerAssistantTaskQuery({
+    message: 'can you please scedual them but dont overload today I am pretty busy today',
+    now: NOW,
+    timeZone: TIME_ZONE,
+    tasks: [task('overdue', '2026-08-25T18:00:00.000Z')],
+  });
+
+  assert.equal(response, null);
+});
+
+test('a list-prefixed request with a scheduling typo is still treated as a mutation', () => {
+  const response = answerAssistantTaskQuery({
+    message: 'show my overdue tasks and scedual them',
+    now: NOW,
+    timeZone: TIME_ZONE,
+    tasks: [task('overdue', '2026-08-25T18:00:00.000Z')],
+  });
+
+  assert.equal(response, null);
+});
+
 test('all pending questions bypass the provider cap and include undated work', () => {
   const pending = Array.from({ length: 35 }, (_, index) => (
     task(`pending-${index + 1}`, index === 34 ? null : '2026-09-10T18:00:00.000Z')

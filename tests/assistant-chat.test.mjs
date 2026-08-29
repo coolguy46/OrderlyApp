@@ -363,6 +363,8 @@ test('broad planning requests are strictly validated and stay separate from exac
   assert.match(PLANNER_CHAT_SYSTEM_PROMPT, /Use planRequest for broad planning requests/i);
   assert.match(PLANNER_CHAT_SYSTEM_PROMPT, /Missing per-task times or durations are expected/i);
   assert.match(PLANNER_CHAT_SYSTEM_PROMPT, /don't overload today/i);
+  assert.match(PLANNER_CHAT_SYSTEM_PROMPT, /availableAfter/i);
+  assert.match(PLANNER_CHAT_SYSTEM_PROMPT, /additionalTasks/i);
   const request = {
     taskScope: 'overdue',
     taskIds: [],
@@ -370,6 +372,9 @@ test('broad planning requests are strictly validated and stay separate from exac
     horizonDays: 7,
     todayLoad: 'light',
     includeAlreadyScheduled: false,
+    availableAfter: null,
+    availableBefore: null,
+    additionalTasks: [],
   };
   assert.deepEqual(sanitizePlannerChatPlanRequest(request), request);
   assert.deepEqual(
@@ -407,7 +412,19 @@ test('broad planning requests are strictly validated and stay separate from exac
     horizonDays: 7,
     todayLoad: 'skip',
     includeAlreadyScheduled: true,
+    availableAfter: null,
+    availableBefore: null,
+    additionalTasks: [],
   });
+
+  const compositeRequest = {
+    ...request,
+    startDate: '2026-08-27',
+    horizonDays: 1,
+    availableAfter: '14:15',
+    additionalTasks: [{ title: 'College essay', durationSeconds: 14_400 }],
+  };
+  assert.deepEqual(sanitizePlannerChatPlanRequest(compositeRequest), compositeRequest);
 
   const invalidRequests = [
     { ...request, taskScope: 'everything' },
@@ -424,6 +441,10 @@ test('broad planning requests are strictly validated and stay separate from exac
     { ...request, horizonDays: 2.5 },
     { ...request, todayLoad: 'busy' },
     { ...request, includeAlreadyScheduled: 'false' },
+    { ...request, availableAfter: '2:15 PM' },
+    { ...request, availableBefore: '24:00' },
+    { ...request, additionalTasks: [{ title: '', durationSeconds: 14_400 }] },
+    { ...request, additionalTasks: [{ title: 'College essay', durationSeconds: 0 }] },
     { ...request, extra: true },
   ];
   for (const invalidRequest of invalidRequests) {
@@ -450,6 +471,9 @@ test('broad plan requests are inferred deterministically without erasing exact t
     horizonDays: taskScope === 'today' || taskScope === 'tomorrow' ? 1 : 7,
     todayLoad: 'normal',
     includeAlreadyScheduled: false,
+    availableAfter: null,
+    availableBefore: null,
+    additionalTasks: [],
     ...overrides,
   });
   const infer = messages => {
@@ -492,12 +516,15 @@ test('broad plan requests are inferred deterministically without erasing exact t
   for (const exactRequest of [
     'Schedule all my overdue work from 10 PM to 11 PM',
     'Schedule all my overdue work at 10 PM for 1 hour',
-    'Plan my week after 17:30',
     'Schedule my overdue chemistry assignment',
     'Schedule This Week Essay',
   ]) {
     assert.equal(infer(exactRequest), null);
   }
+  assert.deepEqual(
+    infer('Plan my week after 17:30'),
+    expected('this_week', { availableAfter: '17:30' }),
+  );
   for (const unsupportedBroadRequest of [
     'Schedule my overdue only in the mornings',
     'Schedule my overdue except chemistry',
@@ -513,6 +540,156 @@ test('broad plan requests are inferred deterministically without erasing exact t
   }
 });
 
+test('broad planning accepts the reported schedual wording', () => {
+  const expected = {
+    taskScope: 'overdue',
+    taskIds: [],
+    startDate: null,
+    horizonDays: 7,
+    todayLoad: 'light',
+    includeAlreadyScheduled: false,
+    availableAfter: null,
+    availableBefore: null,
+    additionalTasks: [],
+  };
+  const infer = message => {
+    const input = chatInput(message);
+    assert.ok(input);
+    return inferPlannerChatPlanRequest(input.messages, input.context);
+  };
+
+  // Exact wording from the reported failure: ordinary spelling mistakes must
+  // not turn a complete-set planning request into a duration clarification.
+  assert.deepEqual(
+    infer('can you please schedual my overdue but dont overload today I am pretty busy today'),
+    expected,
+  );
+
+  // Exact wording from the explicit-scope screenshot must remain a complete
+  // overdue-set request rather than an ambiguous single activity.
+  assert.deepEqual(
+    infer('can you please schedule my overdue but dont overload today I am pretty busy today'),
+    expected,
+  );
+});
+
+test('the exact scedual-them screenshot wording keeps its prior overdue target', () => {
+  const input = chatInput([
+    { role: 'user', content: 'Plan all of my overdue work' },
+    { role: 'assistant', content: 'I can spread all of that overdue work across your open time.' },
+    { role: 'user', content: 'can you please scedual them but dont overload today I am pretty busy today' },
+  ]);
+  assert.ok(input);
+  assert.deepEqual(
+    inferPlannerChatPlanRequest(input.messages, input.context),
+    {
+      taskScope: 'overdue',
+      taskIds: [],
+      startDate: null,
+      horizonDays: 7,
+      todayLoad: 'light',
+      includeAlreadyScheduled: false,
+      availableAfter: null,
+      availableBefore: null,
+      additionalTasks: [],
+    },
+  );
+});
+
+test('a follow-up availability boundary is inherited by the active broad plan', () => {
+  const input = chatInput([
+    { role: 'user', content: 'Schedule all of my overdue work' },
+    { role: 'assistant', content: 'I can schedule all of that overdue work.' },
+    { role: 'user', content: 'after 5 pm' },
+  ]);
+  assert.ok(input);
+  assert.deepEqual(
+    inferPlannerChatPlanRequest(input.messages, input.context),
+    {
+      taskScope: 'overdue',
+      taskIds: [],
+      startDate: null,
+      horizonDays: 7,
+      todayLoad: 'normal',
+      includeAlreadyScheduled: false,
+      availableAfter: '17:00',
+      availableBefore: null,
+      additionalTasks: [],
+    },
+  );
+});
+
+test('broad planning accepts a subordinate which clause without narrowing the complete set', () => {
+  const input = chatInput(
+    "Schedule all my overdue work, which means everything due before now, but don't overload today",
+  );
+  assert.ok(input);
+  assert.deepEqual(
+    inferPlannerChatPlanRequest(input.messages, input.context),
+    {
+      taskScope: 'overdue',
+      taskIds: [],
+      startDate: null,
+      horizonDays: 7,
+      todayLoad: 'light',
+      includeAlreadyScheduled: false,
+      availableAfter: null,
+      availableBefore: null,
+      additionalTasks: [],
+    },
+  );
+});
+
+test('the exact overdue-plus-essay request preserves its complete set, availability, and duration', () => {
+  const input = chatInput(
+    "Schedule all of my overdue work plus four hours for my college essay. I'm free after 2:15 PM today.",
+  );
+  assert.ok(input);
+
+  assert.deepEqual(
+    inferPlannerChatPlanRequest(input.messages, input.context),
+    {
+      taskScope: 'overdue',
+      taskIds: [],
+      startDate: '2026-08-27',
+      horizonDays: 1,
+      todayLoad: 'normal',
+      includeAlreadyScheduled: false,
+      availableAfter: '14:15',
+      availableBefore: null,
+      additionalTasks: [{ title: 'College essay', durationSeconds: 14_400 }],
+    },
+  );
+});
+
+test('overdue-overall clarification inherits every active composite planning field', () => {
+  const input = chatInput([
+    {
+      role: 'user',
+      content: "Schedule all of my overdue work plus four hours for my college essay. I'm free after 2:15 PM today.",
+    },
+    {
+      role: 'assistant',
+      content: 'Which assignments do you mean: assignments overdue today, or overdue overall?',
+    },
+    { role: 'user', content: 'No, overdue overall.' },
+  ]);
+  assert.ok(input);
+
+  const inferred = inferPlannerChatPlanRequest(input.messages, input.context);
+  assert.deepEqual(inferred, {
+    taskScope: 'overdue',
+    taskIds: [],
+    startDate: '2026-08-27',
+    horizonDays: 1,
+    todayLoad: 'normal',
+    includeAlreadyScheduled: false,
+    availableAfter: '14:15',
+    availableBefore: null,
+    additionalTasks: [{ title: 'College essay', durationSeconds: 14_400 }],
+  }, 'the correction must inherit the complete prior planning request instead of asking for exact inputs');
+});
+
 test('broad plan inference uses only an active prior mutation for confirmations', () => {
   const infer = messages => {
     const input = chatInput(messages);
@@ -526,6 +703,9 @@ test('broad plan inference uses only an active prior mutation for confirmations'
     horizonDays: 7,
     todayLoad: 'light',
     includeAlreadyScheduled: false,
+    availableAfter: null,
+    availableBefore: null,
+    additionalTasks: [],
   };
 
   assert.deepEqual(infer([
