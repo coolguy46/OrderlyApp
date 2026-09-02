@@ -77,6 +77,7 @@ test('an assignment due tomorrow during school is part of today\'s workload', ()
 
 test('a school-time assignment returns on its real due day once it becomes overdue', () => {
   const assignment = task('today-at-school', '2026-08-27T15:00:00.000Z'); // 8 AM PDT
+  const afterDeadline = new Date('2026-08-27T15:01:00.000Z');
 
   assert.deepEqual(
     selectDashboardTasksForDate(
@@ -91,10 +92,14 @@ test('a school-time assignment returns on its real due day once it becomes overd
     selectDashboardTasksForDate(
       [assignment],
       '2026-08-27',
-      new Date('2026-08-27T15:01:00.000Z'),
+      afterDeadline,
       options,
     ).map(item => item.id),
     ['today-at-school'],
+  );
+  assert.deepEqual(
+    selectDashboardTasksForDate([assignment], '2026-08-26', afterDeadline, options),
+    [],
   );
 });
 

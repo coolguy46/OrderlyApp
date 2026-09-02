@@ -52,6 +52,11 @@ export interface ScheduleState {
   replaceUserSchedules: (userId: string, entries: ScheduleEntry[]) => void;
   hydrateUserSchedules: (userId: string, entries: ScheduleEntry[]) => void;
   retryPendingSchedules: (userId: string) => void;
+  waitForSchedulePersistence: (
+    userId: string,
+    taskIds?: readonly string[],
+    timeoutMs?: number,
+  ) => Promise<boolean>;
   clearTaskSchedules: (userId: string, taskIds?: string[]) => void;
 }
 
@@ -160,7 +165,28 @@ function applyOperation(
 }
 
 const persistenceQueues = new Map<string, Promise<void>>();
+const DEFAULT_SCHEDULE_PERSISTENCE_WAIT_MS = 15_000;
 let onlineRetryInstalled = false;
+
+async function waitForScheduleQueuesBefore(
+  queues: readonly Promise<void>[],
+  deadline: number,
+): Promise<boolean> {
+  const remainingMs = deadline - Date.now();
+  if (remainingMs <= 0) return false;
+
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      Promise.all(queues).then(() => true, () => false),
+      new Promise<boolean>(resolve => {
+        timeout = setTimeout(() => resolve(false), remainingMs);
+      }),
+    ]);
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout);
+  }
+}
 
 function samePersistedSchedule(left: ScheduleEntry | undefined, right: ScheduleEntry | undefined): boolean {
   return JSON.stringify(persistedTaskScheduleUpdate(left || null))
@@ -207,6 +233,78 @@ function queueSchedulePersistence(
     if (persistenceQueues.get(key) === queued) persistenceQueues.delete(key);
   });
   persistenceQueues.set(key, queued);
+}
+
+/**
+ * Wait for selected task schedule mutations to reach Supabase.
+ *
+ * When `taskIds` is omitted, the pending task ids present at invocation are
+ * captured. A resolved `true` means those task ids have no durable outbox
+ * entries left for the same active account/session. Failed writes remain in
+ * the outbox and therefore resolve `false`, as do timeouts and account changes.
+ */
+export async function waitForSchedulePersistence(
+  userId: string,
+  taskIds?: readonly string[],
+  timeoutMs = DEFAULT_SCHEDULE_PERSISTENCE_WAIT_MS,
+): Promise<boolean> {
+  const initial = useScheduleStore.getState();
+  if (initial.activeUserId !== userId) return false;
+
+  const targetTaskIds = [...new Set(
+    (taskIds || Object.keys(initial.pendingByUser[userId] || {}))
+      .filter(taskId => typeof taskId === 'string' && taskId.length > 0),
+  )];
+  if (targetTaskIds.length === 0) return true;
+
+  const expectedGeneration = initial.sessionGeneration;
+  for (const taskId of targetTaskIds) {
+    if (
+      initial.pendingByUser[userId]?.[taskId]
+      && !persistenceQueues.has(schedulePersistenceKey(userId, taskId))
+    ) {
+      queueSchedulePersistence(userId, taskId, expectedGeneration);
+    }
+  }
+
+  const boundedTimeoutMs = Number.isFinite(timeoutMs) && timeoutMs > 0
+    ? Math.trunc(timeoutMs)
+    : DEFAULT_SCHEDULE_PERSISTENCE_WAIT_MS;
+  const deadline = Date.now() + boundedTimeoutMs;
+
+  while (true) {
+    const beforeWait = useScheduleStore.getState();
+    if (
+      beforeWait.activeUserId !== userId
+      || beforeWait.sessionGeneration !== expectedGeneration
+    ) return false;
+
+    const pendingTaskIds = targetTaskIds.filter(
+      taskId => Boolean(beforeWait.pendingByUser[userId]?.[taskId]),
+    );
+    if (pendingTaskIds.length === 0) return true;
+
+    const queues = [...new Set(pendingTaskIds
+      .map(taskId => persistenceQueues.get(schedulePersistenceKey(userId, taskId)))
+      .filter((queue): queue is Promise<void> => Boolean(queue)))];
+    if (queues.length === 0 || !(await waitForScheduleQueuesBefore(queues, deadline))) return false;
+
+    const after = useScheduleStore.getState();
+    if (
+      after.activeUserId !== userId
+      || after.sessionGeneration !== expectedGeneration
+    ) return false;
+    if (targetTaskIds.every(taskId => !after.pendingByUser[userId]?.[taskId])) return true;
+
+    // Revisions created during a save append new per-task queue entries. The
+    // next pass waits for those; a pending id without a queue means its last
+    // persistence attempt failed and must not be reported as saved.
+    const hasFollowUpQueue = targetTaskIds.some(taskId => (
+      Boolean(after.pendingByUser[userId]?.[taskId])
+      && persistenceQueues.has(schedulePersistenceKey(userId, taskId))
+    ));
+    if (!hasFollowUpQueue) return false;
+  }
 }
 
 function retryPendingSchedules(userId: string): void {
@@ -381,6 +479,7 @@ export const useScheduleStore = create<ScheduleState>()(
         retryPendingSchedules(userId);
       },
       retryPendingSchedules,
+      waitForSchedulePersistence,
       clearTaskSchedules: (userId, taskIds) => {
         set(state => {
           const pendingByUser = { ...state.pendingByUser };

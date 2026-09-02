@@ -510,6 +510,8 @@ export interface Database {
           user_id: string;
           client_commitment_id: string;
           title: string;
+          description: string | null;
+          location: string | null;
           kind: 'class' | 'school' | 'sports' | 'work' | 'appointment' | 'personal' | 'other';
           days_of_week: number[];
           start_time: string;
@@ -528,6 +530,8 @@ export interface Database {
           user_id: string;
           client_commitment_id: string;
           title: string;
+          description?: string | null;
+          location?: string | null;
           kind?: 'class' | 'school' | 'sports' | 'work' | 'appointment' | 'personal' | 'other';
           days_of_week: number[];
           start_time: string;

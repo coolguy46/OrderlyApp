@@ -17,13 +17,13 @@ import { TaskCard, TaskForm } from '@/components/tasks';
 import { DashboardSchedule } from './DashboardSchedule';
 import { usePlannerStore } from '@/lib/planner/store';
 import { getDefaultPlannerSettings } from '@/lib/planner/types';
-import { isMonthlyRecurrenceDate, localDateFromIso, taskUntimedDisplayDate } from '@/lib/schedule/selectors';
+import { localDateFromIso } from '@/lib/schedule/selectors';
 import { selectDashboardTasksForDate } from '@/lib/dashboard-tasks';
 import { cn, isExamType } from '@/lib/utils';
 import { civilDateFromStored, formatCivilDate } from '@/lib/civil-date';
 import { examDateInputValue, examDayDistance, examTemporalStatus } from '@/lib/exam-status';
 import { isGoalComplete } from '@/lib/goal-status';
-import { isTaskMissing, isTaskMissingFromPriorDay } from '@/lib/task-status';
+import { hasMissingTaskOnDate, isTaskMissing, isTaskMissingFromPriorDay } from '@/lib/task-status';
 import { useCurrentTime } from '@/lib/use-current-time';
 import { useHydrated } from '@/lib/use-hydrated';
 import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, addDays } from 'date-fns';
@@ -62,15 +62,6 @@ const itemVariants = {
     transition: { type: 'spring' as const, stiffness: 300, damping: 24 }
   }
 };
-
-// Normalize any date value to a 'yyyy-MM-dd' string in local time.
-// Handles ISO strings, date-only strings, and Date objects consistently.
-function toLocalDateStr(d: string | Date, timeZone: string): string | null {
-  if (typeof d === 'string') {
-    return civilDateFromStored(d, timeZone);
-  }
-  return localDateFromIso(d.toISOString(), timeZone);
-}
 
 function localDateFromKey(value: string): Date {
   const [year, month, day] = value.split('-').map(Number);
@@ -174,38 +165,12 @@ export function Dashboard() {
 
   const getEventsForDate = useCallback((date: Date) => {
     const dateStr = format(date, 'yyyy-MM-dd');
-    const dayOfWeek = date.getDay();
-    const dayTasks = tasks.filter((task) => {
-      // Exact due_date match
-      if (task.due_date && taskUntimedDisplayDate(task, taskDisplayOptions) === dateStr) return true;
-
-      // Recurring task expansion
-      if (task.recurrence && task.recurrence !== 'none' && task.status !== 'completed') {
-        const taskStartKey = toLocalDateStr(task.due_date || task.created_at, taskDisplayOptions.timeZone);
-        if (!taskStartKey) return false;
-        if (dateStr < taskStartKey) return false;
-        if (task.due_date && toLocalDateStr(task.due_date, taskDisplayOptions.timeZone) === dateStr) return false;
-
-        if (task.recurrence === 'daily') return true;
-        if (task.recurrence === 'weekly') {
-          if (task.recurrence_days && task.recurrence_days.length > 0) {
-            return task.recurrence_days.includes(dayOfWeek);
-          }
-          const taskStart = new Date(`${taskStartKey}T12:00:00`);
-          return date.getDay() === taskStart.getDay();
-        }
-        if (task.recurrence === 'monthly') {
-          return isMonthlyRecurrenceDate(dateStr, taskStartKey);
-        }
-      }
-
-      return false;
-    });
+    const dayTasks = selectDashboardTasksForDate(tasks, dateStr, now, taskDisplayOptions);
     const dayExams = exams.filter((exam) => {
       return civilDateFromStored(exam.exam_date, taskDisplayOptions.timeZone) === dateStr;
     });
     return { tasks: dayTasks, exams: dayExams };
-  }, [tasks, exams, taskDisplayOptions]);
+  }, [tasks, exams, now, taskDisplayOptions]);
 
   return (
     <motion.div 
@@ -474,8 +439,11 @@ export function Dashboard() {
                   const dayKey = format(day, 'yyyy-MM-dd');
                   const dayEvents = getEventsForDate(day);
                   const hasEvents = dayEvents.tasks.length > 0 || dayEvents.exams.length > 0;
-                  const hasMissingTasks = dayEvents.tasks.some(task =>
-                    isTaskMissing(task, now, taskDisplayOptions.timeZone)
+                  const hasMissingTasks = hasMissingTaskOnDate(
+                    tasks,
+                    dayKey,
+                    now,
+                    taskDisplayOptions.timeZone,
                   );
                   const isCurrentMonth = day.getMonth() === currentDate.getMonth();
                   return (

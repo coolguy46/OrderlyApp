@@ -3,6 +3,7 @@ import {
   localDateFromIso,
   localDateTimeToIso,
 } from './schedule/selectors.ts';
+import type { LocalDate } from './schedule/types.ts';
 
 const TIME_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/;
 
@@ -64,6 +65,30 @@ export function isTaskMissing(
   if (!dueAt) return false;
   const nowMs = typeof now === 'number' ? now : now.getTime();
   return dueAt.getTime() < nowMs;
+}
+
+/** The local deadline date for a task that is currently missing. */
+export function taskMissingDate(
+  task: Task,
+  now: Date | number = Date.now(),
+  timeZone?: string,
+): LocalDate | null {
+  if (task.status === 'completed') return null;
+  const dueAt = taskDueAt(task, timeZone);
+  if (!dueAt) return null;
+  const nowMs = typeof now === 'number' ? now : now.getTime();
+  if (dueAt.getTime() >= nowMs) return null;
+  return localDateFromIso(dueAt.toISOString(), resolvedTimeZone(timeZone));
+}
+
+/** Whether a local calendar date contains at least one unfinished missing task. */
+export function hasMissingTaskOnDate(
+  tasks: readonly Task[],
+  date: LocalDate,
+  now: Date | number = Date.now(),
+  timeZone?: string,
+): boolean {
+  return tasks.some(task => taskMissingDate(task, now, timeZone) === date);
 }
 
 /** Calendar-day distance from `now` to the task deadline in the user's zone. */

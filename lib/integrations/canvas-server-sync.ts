@@ -18,6 +18,10 @@ import {
   isConfirmedCanvasCleanupSnapshot,
 } from '@/lib/integrations/canvas-sync-safety';
 import {
+  buildCanvasManagedTaskValues,
+  CANVAS_TASK_UPSERT_CONFLICT,
+} from '@/lib/integrations/canvas-task-write';
+import {
   isCanvasSyncLeaseMigrationError,
   parseCanvasSyncLease,
   type CanvasSyncLease,
@@ -423,7 +427,7 @@ export async function getCanvasFeedSummary(icalUrl: string): Promise<CanvasFeedS
 
 function canvasTaskChanged(
   existing: Record<string, unknown>,
-  next: Record<string, unknown>
+  next: object
 ): boolean {
   return Object.entries(next).some(([key, value]) => {
     const current = existing[key];
@@ -558,16 +562,13 @@ async function syncCanvasUserWithLease(
       const subjectId = resolvedCourseName
         ? subjectIds.get(resolvedCourseName.toLowerCase()) || existing?.subject_id || null
         : existing?.subject_id || null;
-      const taskValues = {
-        title: `[Canvas] ${assignment.title}`,
-        description: assignment.description || `Course: ${resolvedCourseName || 'Canvas'}`,
-        due_date: dueDate.toISOString(),
-        due_time: dueTimeFor(assignment, dueDate, setting.time_zone || 'UTC'),
-        subject_id: subjectId,
-        external_url: assignment.url || null,
-        course_name: resolvedCourseName,
-        assignment_type: assignment.type || 'assignment',
-      };
+      const taskValues = buildCanvasManagedTaskValues({
+        assignment,
+        dueDate,
+        dueTime: dueTimeFor(assignment, dueDate, setting.time_zone || 'UTC'),
+        courseName: resolvedCourseName,
+        subjectId,
+      });
 
       if (existing) {
         if (canvasTaskChanged(existing, taskValues)) {
@@ -587,7 +588,7 @@ async function syncCanvasUserWithLease(
           source: 'canvas',
           external_id: assignment.id,
         }, {
-          onConflict: 'user_id,source,external_id',
+          onConflict: CANVAS_TASK_UPSERT_CONFLICT,
           ignoreDuplicates: true,
         }).select('id');
         if (error) throw new Error(`Could not import Canvas task: ${error.message}`);

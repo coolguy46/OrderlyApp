@@ -23,7 +23,6 @@ import {
   GraduationCap,
   Plus,
 } from 'lucide-react';
-import { TaskDetailViewer } from '@/components/tasks/TaskDetailViewer';
 import { TaskForm } from '@/components/tasks/TaskForm';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -45,7 +44,7 @@ import type { ScheduleEntry } from '@/lib/schedule/types';
 import { getDefaultPlannerSettings } from '@/lib/planner/types';
 import { usePlannerStore } from '@/lib/planner/store';
 import { cn, isExamType } from '@/lib/utils';
-import { isTaskMissing } from '@/lib/task-status';
+import { hasMissingTaskOnDate, isTaskMissing, taskMissingDate } from '@/lib/task-status';
 import { useCurrentTime } from '@/lib/use-current-time';
 import { useHydrated } from '@/lib/use-hydrated';
 
@@ -74,8 +73,11 @@ function taskOccursOn(
   date: Date,
   scheduleEntry: ScheduleEntry | undefined,
   displayOptions: TaskUntimedDisplayDateOptions,
+  currentTime: Date,
 ): boolean {
   const dateKey = format(date, 'yyyy-MM-dd');
+  const missingDateKey = taskMissingDate(task, currentTime, displayOptions.timeZone);
+  if (missingDateKey) return missingDateKey === dateKey;
   const dueDateKey = taskUntimedDisplayDate(task, displayOptions);
   if (dueDateKey === dateKey) return true;
   const recurrence = scheduleEntry?.recurrence || task.recurrence || 'none';
@@ -225,7 +227,7 @@ export function TaskCalendar() {
   const [currentDateTimeZone, setCurrentDateTimeZone] = useState<string | null>(null);
   const [mode, setMode] = useState<TaskCalendarMode>('month');
   const [taskFormOpen, setTaskFormOpen] = useState(false);
-  const [detailTaskId, setDetailTaskId] = useState<string | null>(null);
+  const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const now = useCurrentTime();
 
   useEffect(() => {
@@ -264,7 +266,7 @@ export function TaskCalendar() {
     () => new Map(scheduleEntries.map(entry => [entry.taskId, entry])),
     [scheduleEntries],
   );
-  const detailTask = detailTaskId ? taskById.get(detailTaskId) || null : null;
+  const editingTask = editingTaskId ? taskById.get(editingTaskId) || null : null;
 
   const visibleDays = useMemo(() => {
     if (!currentDate) return [];
@@ -285,7 +287,7 @@ export function TaskCalendar() {
     for (const day of visibleDays) {
       const key = format(day, 'yyyy-MM-dd');
       const dayTasks = tasks
-        .filter(task => taskOccursOn(task, day, scheduleByTaskId.get(task.id), displayOptions))
+        .filter(task => taskOccursOn(task, day, scheduleByTaskId.get(task.id), displayOptions, now))
         .sort((left, right) => taskTimeSortValue(left, timeZone) - taskTimeSortValue(right, timeZone) || left.title.localeCompare(right.title));
       const dayExams = exams
         .filter(exam => civilDateFromStored(exam.exam_date, timeZone) === key)
@@ -293,13 +295,28 @@ export function TaskCalendar() {
       result.set(key, { tasks: dayTasks, exams: dayExams });
     }
     return result;
-  }, [displayOptions, exams, scheduleByTaskId, tasks, timeZone, visibleDays]);
+  }, [displayOptions, exams, now, scheduleByTaskId, tasks, timeZone, visibleDays]);
 
   const navigate = (direction: -1 | 1) => {
     if (!currentDate) return;
     setCurrentDate(mode === 'month'
       ? (direction < 0 ? subMonths(currentDate, 1) : addMonths(currentDate, 1))
       : (direction < 0 ? subWeeks(currentDate, 1) : addWeeks(currentDate, 1)));
+  };
+
+  const openNewTaskForm = () => {
+    setEditingTaskId(null);
+    setTaskFormOpen(true);
+  };
+
+  const openTaskEditor = (taskId: string) => {
+    setEditingTaskId(taskId);
+    setTaskFormOpen(true);
+  };
+
+  const closeTaskForm = () => {
+    setTaskFormOpen(false);
+    setEditingTaskId(null);
   };
 
   if (!mounted || !currentDate) {
@@ -348,7 +365,7 @@ export function TaskCalendar() {
               </button>
             ))}
           </div>
-          <Button type="button" size="sm" onClick={() => setTaskFormOpen(true)} className="h-8 px-2.5 text-xs">
+          <Button type="button" size="sm" onClick={openNewTaskForm} className="h-8 px-2.5 text-xs">
             <Plus className="h-3.5 w-3.5" />
             <span className="hidden sm:inline">New Task</span>
           </Button>
@@ -376,7 +393,7 @@ export function TaskCalendar() {
                     const visibleTasks = items.tasks.slice(0, 3);
                     const visibleExams = items.exams.slice(0, Math.max(0, 4 - visibleTasks.length));
                     const shown = visibleTasks.length + visibleExams.length;
-                    const hasMissingTasks = items.tasks.some(task => isTaskMissing(task, now, timeZone));
+                    const hasMissingTasks = hasMissingTaskOnDate(tasks, key, now, timeZone);
                     const isPlannerToday = key === todayKey;
                     return (
                       <div
@@ -399,7 +416,7 @@ export function TaskCalendar() {
                         </div>
                         <div className="space-y-1">
                           {visibleTasks.map(task => (
-                            <TaskDeadlineChip key={task.id} task={task} subject={task.subject_id ? subjectById.get(task.subject_id) : undefined} compact displayDateKey={key} timeZone={timeZone} currentTime={now} onClick={() => setDetailTaskId(task.id)} />
+                            <TaskDeadlineChip key={task.id} task={task} subject={task.subject_id ? subjectById.get(task.subject_id) : undefined} compact displayDateKey={key} timeZone={timeZone} currentTime={now} onClick={() => openTaskEditor(task.id)} />
                           ))}
                           {visibleExams.map(exam => (
                             <ExamDeadlineChip key={exam.id} exam={exam} subject={exam.subject_id ? subjectById.get(exam.subject_id) : undefined} compact />
@@ -426,7 +443,7 @@ export function TaskCalendar() {
                   {visibleDays.map(day => {
                     const key = format(day, 'yyyy-MM-dd');
                     const items = itemsByDate.get(key) || { tasks: [], exams: [] };
-                    const hasMissingTasks = items.tasks.some(task => isTaskMissing(task, now, timeZone));
+                    const hasMissingTasks = hasMissingTaskOnDate(tasks, key, now, timeZone);
                     const isPlannerToday = key === todayKey;
                     return (
                       <div key={key} className={cn(
@@ -441,7 +458,7 @@ export function TaskCalendar() {
                         </div>
                         <div className="space-y-1.5">
                           {items.tasks.map(task => (
-                            <TaskDeadlineChip key={task.id} task={task} subject={task.subject_id ? subjectById.get(task.subject_id) : undefined} displayDateKey={key} timeZone={timeZone} currentTime={now} onClick={() => setDetailTaskId(task.id)} />
+                            <TaskDeadlineChip key={task.id} task={task} subject={task.subject_id ? subjectById.get(task.subject_id) : undefined} displayDateKey={key} timeZone={timeZone} currentTime={now} onClick={() => openTaskEditor(task.id)} />
                           ))}
                           {items.exams.map(exam => (
                             <ExamDeadlineChip key={exam.id} exam={exam} subject={exam.subject_id ? subjectById.get(exam.subject_id) : undefined} />
@@ -468,8 +485,11 @@ export function TaskCalendar() {
         <Badge variant="outline" className="gap-1 text-[10px]"><GraduationCap className="h-2.5 w-2.5" /> Exam</Badge>
       </div>
 
-      <TaskForm isOpen={taskFormOpen} onClose={() => setTaskFormOpen(false)} />
-      <TaskDetailViewer task={detailTask} open={Boolean(detailTask)} onOpenChange={open => !open && setDetailTaskId(null)} />
+      <TaskForm
+        isOpen={taskFormOpen}
+        onClose={closeTaskForm}
+        task={editingTask}
+      />
     </div>
   );
 }

@@ -124,6 +124,8 @@ function commitmentFromRow(row: CommitmentRow): RecurringCommitmentInput | null 
   return {
     id: row.client_commitment_id,
     title: row.title,
+    ...(typeof row.description === 'string' ? { description: row.description } : {}),
+    ...(typeof row.location === 'string' ? { location: row.location } : {}),
     kind: row.kind,
     daysOfWeek: row.days_of_week,
     startTime: timeWithoutSeconds(row.start_time),
@@ -275,6 +277,8 @@ export function recurringCommitmentInsert(userId: string, item: RecurringCommitm
     user_id: userId,
     client_commitment_id: item.id,
     title: item.title,
+    description: item.description || null,
+    location: item.location || null,
     kind: item.kind,
     days_of_week: item.daysOfWeek,
     start_time: item.startTime,

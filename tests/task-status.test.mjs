@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { isTaskMissing, taskDueAt } from '../lib/task-status.ts';
+import {
+  hasMissingTaskOnDate,
+  isTaskMissing,
+  taskDueAt,
+  taskMissingDate,
+} from '../lib/task-status.ts';
 
 const timeZone = 'America/Los_Angeles';
 
@@ -66,4 +71,39 @@ test('completed tasks are never missing even after their deadline', () => {
   });
 
   assert.equal(isTaskMissing(completedTask, new Date('2026-08-27T12:00:00.000Z'), timeZone), false);
+  assert.equal(taskMissingDate(completedTask, new Date('2026-08-27T12:00:00.000Z'), timeZone), null);
+  assert.equal(
+    hasMissingTaskOnDate([completedTask], '2026-08-26', new Date('2026-08-27T12:00:00.000Z'), timeZone),
+    false,
+  );
+});
+
+test('missing calendar state belongs to the actual local deadline date', () => {
+  const missingTask = task({
+    source: 'canvas',
+    due_date: '2026-08-27T15:00:00.000Z', // Aug 27 at 8 AM PDT
+  });
+  const completedTask = task({
+    id: 'completed-task',
+    status: 'completed',
+    due_date: '2026-08-26T07:00:00.000Z',
+  });
+  const now = new Date('2026-08-28T18:00:00.000Z');
+
+  assert.equal(taskMissingDate(missingTask, now, timeZone), '2026-08-27');
+  assert.equal(hasMissingTaskOnDate([completedTask, missingTask], '2026-08-26', now, timeZone), false);
+  assert.equal(hasMissingTaskOnDate([completedTask, missingTask], '2026-08-27', now, timeZone), true);
+  assert.equal(hasMissingTaskOnDate([completedTask, missingTask], '2026-08-28', now, timeZone), false);
+});
+
+test('missing calendar date honors the user timezone across a UTC date boundary', () => {
+  const lateTask = task({
+    source: 'canvas',
+    due_date: '2026-08-28T06:00:00.000Z', // Aug 27 at 11 PM PDT
+  });
+  const now = new Date('2026-08-28T06:01:00.000Z');
+
+  assert.equal(taskMissingDate(lateTask, now, timeZone), '2026-08-27');
+  assert.equal(hasMissingTaskOnDate([lateTask], '2026-08-27', now, timeZone), true);
+  assert.equal(hasMissingTaskOnDate([lateTask], '2026-08-28', now, timeZone), false);
 });

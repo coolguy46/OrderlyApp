@@ -39,6 +39,8 @@ CREATE TABLE IF NOT EXISTS recurring_commitments (
   user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
   client_commitment_id TEXT NOT NULL,
   title TEXT NOT NULL CHECK (length(trim(title)) > 0),
+  description TEXT,
+  location TEXT,
   kind TEXT NOT NULL DEFAULT 'other'
     CHECK (kind IN ('class', 'school', 'sports', 'work', 'appointment', 'personal', 'other')),
   days_of_week SMALLINT[] NOT NULL
@@ -172,6 +174,8 @@ CREATE TABLE IF NOT EXISTS plan_adjustments (
 -- needed for lossless cross-device hydration.
 ALTER TABLE recurring_commitments
   ADD COLUMN IF NOT EXISTS client_commitment_id TEXT,
+  ADD COLUMN IF NOT EXISTS description TEXT,
+  ADD COLUMN IF NOT EXISTS location TEXT,
   ADD COLUMN IF NOT EXISTS occurrence_overrides JSONB NOT NULL DEFAULT '{}'::JSONB;
 
 UPDATE recurring_commitments
@@ -480,13 +484,15 @@ BEGIN
     SELECT value FROM jsonb_array_elements(COALESCE(p_snapshot->'commitments', '[]'::JSONB))
   LOOP
     INSERT INTO recurring_commitments (
-      user_id, client_commitment_id, title, kind, days_of_week,
+      user_id, client_commitment_id, title, description, location, kind, days_of_week,
       start_time, end_time, start_date, end_date, time_zone, enabled,
       color, occurrence_overrides
     ) VALUES (
       v_user_id,
       v_item->>'client_commitment_id',
       v_item->>'title',
+      NULLIF(v_item->>'description', ''),
+      NULLIF(v_item->>'location', ''),
       v_item->>'kind',
       ARRAY(
         SELECT value::SMALLINT
@@ -503,6 +509,8 @@ BEGIN
     )
     ON CONFLICT (user_id, client_commitment_id) DO UPDATE SET
       title = EXCLUDED.title,
+      description = EXCLUDED.description,
+      location = EXCLUDED.location,
       kind = EXCLUDED.kind,
       days_of_week = EXCLUDED.days_of_week,
       start_time = EXCLUDED.start_time,

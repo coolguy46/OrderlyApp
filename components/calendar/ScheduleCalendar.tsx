@@ -11,6 +11,7 @@ import {
 } from 'date-fns';
 import { ChevronLeft, ChevronRight, Clock3 } from 'lucide-react';
 import { TaskDetailViewer } from '@/components/tasks/TaskDetailViewer';
+import { TaskForm } from '@/components/tasks/TaskForm';
 import { Button } from '@/components/ui/Button';
 import { WeekTimeGrid, type PlannerBlockView } from '@/components/planner';
 import type { UntimedScheduleItem } from '@/components/schedule/UntimedTaskShelf';
@@ -39,7 +40,7 @@ import { useScheduleStore } from '@/lib/schedule/store';
 import type { LocalDate, ScheduleEntry, ScheduleOccurrence } from '@/lib/schedule/types';
 import { useAppStore } from '@/lib/store';
 import type { RecurringCommitmentInput } from '@/lib/planner/types';
-import { plannerTaskDeadline } from '@/lib/planner/adapters';
+import type { Task } from '@/lib/supabase/types';
 import { toast } from 'sonner';
 
 const WEEK_STARTS_ON = 1 as const;
@@ -90,6 +91,9 @@ function commitmentBlocks(
       return [{
         id: occurrence.id,
         title: commitment.title,
+        description: [commitment.description, commitment.location ? `Location: ${commitment.location}` : null]
+          .filter(Boolean)
+          .join('\n') || null,
         startAt: interval.startAt,
         endAt: interval.endAt,
         color: commitment.color || '#0ea5e9',
@@ -107,20 +111,6 @@ function commitmentBlocks(
 
 function occurrenceDuration(occurrence: ScheduleOccurrence): number {
   return occurrence.durationSeconds || DEFAULT_SCHEDULE_DURATION_SECONDS;
-}
-
-function occurrenceDeadline(occurrence: ScheduleOccurrence, timeZone: string): string | null {
-  if (occurrence.recurrence === 'none') return plannerTaskDeadline(occurrence.task, timeZone);
-  let dueTime = occurrence.task.due_time || '23:59';
-  if (
-    !occurrence.task.due_time
-    && occurrence.task.due_date
-    && occurrence.task.source
-    && occurrence.task.source !== 'manual'
-  ) {
-    dueTime = localTimeFromIso(occurrence.task.due_date, timeZone) || dueTime;
-  }
-  return localDateTimeToIso(occurrence.recurrenceSourceDate, `${dueTime}:00`, timeZone);
 }
 
 function occurrenceBlocks(occurrences: readonly ScheduleOccurrence[]): PlannerBlockView[] {
@@ -191,6 +181,13 @@ export function ScheduleCalendar() {
   const [weekStart, setWeekStart] = useState<Date | null>(null);
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [detailOccurrenceId, setDetailOccurrenceId] = useState<string | null>(null);
+  const [editingTask, setEditingTask] = useState<Task | null>(null);
+  const [editingCommitment, setEditingCommitment] = useState<RecurringCommitmentInput | null>(null);
+  const [creationSlot, setCreationSlot] = useState<{
+    date: string;
+    startTime: string;
+    durationSeconds: number;
+  } | null>(null);
   const [storedEvents, setStoredEvents] = useState<StoredCalendarEvent[]>([]);
 
   useEffect(() => {
@@ -299,6 +296,30 @@ export function ScheduleCalendar() {
   const detailTask = detailOccurrence
     ? taskById.get(detailOccurrence.taskId) || detailOccurrence.task
     : null;
+
+  const openTaskFromOccurrence = useCallback((occurrenceId: string) => {
+    const occurrence = occurrenceById.get(occurrenceId);
+    if (!occurrence) return;
+    const task = taskById.get(occurrence.taskId) || occurrence.task;
+    setDetailOccurrenceId(null);
+    setEditingCommitment(null);
+    setCreationSlot(null);
+    setEditingTask(task);
+  }, [occurrenceById, taskById]);
+
+  const handleBlockClick = useCallback((block: PlannerBlockView) => {
+    if (block.taskId) {
+      openTaskFromOccurrence(block.id);
+      return;
+    }
+    if (!block.commitmentId || block.kind === 'school') return;
+    const commitment = commitmentById.get(block.commitmentId);
+    if (!commitment) return;
+    setDetailOccurrenceId(null);
+    setEditingTask(null);
+    setCreationSlot(null);
+    setEditingCommitment(commitment);
+  }, [commitmentById, openTaskFromOccurrence]);
   const untimedItems = useMemo<UntimedScheduleItem[]>(
     () => occurrences.untimed.map(occurrence => ({
       id: occurrence.id,
@@ -360,13 +381,6 @@ export function ScheduleCalendar() {
       if (persistCommitmentOccurrence(block, nextStart, nextEnd)) toast.success(`${block.title} moved`);
       return;
     }
-    const deadline = occurrenceDeadline(occurrence, timeZone);
-    if (deadline && nextEnd.getTime() > new Date(deadline).getTime()) {
-      toast.error('That would end after the task deadline', {
-        description: `“${occurrence.title}” must be finished by ${format(new Date(deadline), 'MMM d, h:mm a')}.`,
-      });
-      return;
-    }
     const conflict = conflictingBlock(timedBlocks, block.id, nextStart, nextEnd);
     if (conflict) {
       toast.error('That time is already occupied', {
@@ -409,11 +423,6 @@ export function ScheduleCalendar() {
       if (persistCommitmentOccurrence(block, nextStart, nextEnd)) toast.success(`${block.title} updated`);
       return;
     }
-    const deadline = occurrenceDeadline(occurrence, timeZone);
-    if (deadline && nextEnd.getTime() > new Date(deadline).getTime()) {
-      toast.error('That duration would run past the deadline');
-      return;
-    }
     const conflict = conflictingBlock(timedBlocks, block.id, nextStart, nextEnd);
     if (conflict) {
       toast.error('That duration overlaps another item', {
@@ -436,7 +445,7 @@ export function ScheduleCalendar() {
       occurrence.recurrenceSourceDate,
       durationSeconds,
     );
-  }, [entriesByTaskId, occurrenceById, persistCommitmentOccurrence, resizeOccurrence, timedBlocks, timeZone, upsertTaskSchedule, userId]);
+  }, [entriesByTaskId, occurrenceById, persistCommitmentOccurrence, resizeOccurrence, timedBlocks, upsertTaskSchedule, userId]);
 
   const handleScheduleUntimed = useCallback((
     item: UntimedScheduleItem,
@@ -446,13 +455,6 @@ export function ScheduleCalendar() {
     if (!userId) return;
     const occurrence = occurrenceById.get(item.id);
     if (!occurrence) return;
-    const deadline = occurrenceDeadline(occurrence, timeZone);
-    if (deadline && nextEnd.getTime() > new Date(deadline).getTime()) {
-      toast.error('That would end after the task deadline', {
-        description: `“${occurrence.title}” must be finished by ${format(new Date(deadline), 'MMM d, h:mm a')}.`,
-      });
-      return;
-    }
     const conflict = conflictingBlock(timedBlocks, item.id, nextStart, nextEnd);
     if (conflict) {
       toast.error('That time is already occupied', {
@@ -527,6 +529,20 @@ export function ScheduleCalendar() {
     toast.success(`${occurrence.title} moved to untimed`);
   }, [entriesByTaskId, occurrenceById, setOccurrenceOverride, timeZone, upsertTaskSchedule, userId]);
 
+  const handleEmptySlotClick = useCallback((nextStart: Date, nextEnd: Date) => {
+    const date = localDateFromIso(nextStart.toISOString(), timeZone);
+    const startTime = localTimeFromIso(nextStart.toISOString(), timeZone);
+    if (!date || !startTime) return;
+    setDetailOccurrenceId(null);
+    setEditingCommitment(null);
+    setEditingTask(null);
+    setCreationSlot({
+      date,
+      startTime,
+      durationSeconds: Math.max(60, differenceInSeconds(nextEnd, nextStart)),
+    });
+  }, [timeZone]);
+
   if (!weekStart) {
     return <div className="flex min-h-[520px] items-center justify-center text-sm text-muted-foreground">Loading schedule…</div>;
   }
@@ -592,9 +608,10 @@ export function ScheduleCalendar() {
         untimedItems={untimedItems}
         selectedDate={selectedDate || weekStart}
         onSelectedDateChange={setSelectedDate}
-        onUntimedItemClick={item => item.taskId && setDetailOccurrenceId(item.id)}
+        onUntimedItemClick={item => item.taskId && openTaskFromOccurrence(item.id)}
         onUntimedItemSchedule={handleScheduleUntimed}
-        onBlockClick={block => block.taskId && setDetailOccurrenceId(block.id)}
+        onBlockClick={handleBlockClick}
+        onEmptySlotClick={handleEmptySlotClick}
         onBlockMove={handleMove}
         onBlockResize={handleResize}
         onBlockMoveToUntimed={handleMoveToUntimed}
@@ -608,6 +625,32 @@ export function ScheduleCalendar() {
         scheduleOccurrence={detailOccurrence}
         open={Boolean(detailTask)}
         onOpenChange={open => !open && setDetailOccurrenceId(null)}
+        onEdit={task => {
+          setDetailOccurrenceId(null);
+          setCreationSlot(null);
+          setEditingTask(task);
+        }}
+      />
+      <TaskForm
+        isOpen={Boolean(editingTask || editingCommitment || creationSlot)}
+        task={editingTask}
+        commitment={editingCommitment}
+        initialMode="task"
+        initialDate={creationSlot?.date || ''}
+        initialStartTime={creationSlot?.startTime || ''}
+        initialDurationSeconds={creationSlot?.durationSeconds || null}
+        onClose={() => {
+          setEditingTask(null);
+          setEditingCommitment(null);
+          setCreationSlot(null);
+        }}
+        onSaved={() => {
+          if (!editingCommitment?.id.startsWith('calendar-')) return;
+          const legacyId = editingCommitment.id.slice('calendar-'.length);
+          const nextEvents = storedEvents.filter(event => event.id !== legacyId);
+          setStoredEvents(nextEvents);
+          writeStoredCalendarEvents(userId, nextEvents);
+        }}
       />
     </div>
   );

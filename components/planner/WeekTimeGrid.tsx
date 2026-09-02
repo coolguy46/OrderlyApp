@@ -8,6 +8,7 @@ import {
   useState,
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
   type MutableRefObject,
   type PointerEvent as ReactPointerEvent,
 } from 'react';
@@ -48,6 +49,12 @@ import {
 } from '@/lib/schedule/selectors';
 import { cn } from '@/lib/utils';
 import { splitCalendarIntervalByDay } from '@/lib/planner/calendar-segments';
+import {
+  canActivateEmptySlot,
+  DEFAULT_EMPTY_SLOT_DURATION_MINUTES,
+  emptySlotStartMinute,
+  keyboardEmptySlotStartMinute,
+} from './week-time-grid-slot';
 import type { PlannerBlockView } from './types';
 
 const DAYS_IN_PLAN = 7;
@@ -83,6 +90,11 @@ export interface WeekTimeGridProps {
     nextEnd: Date,
   ) => void | Promise<void>;
   onBlockClick?: (block: PlannerBlockView) => void;
+  /** Called when an unoccupied part of a day column is activated. */
+  onEmptySlotClick?: (
+    nextStart: Date,
+    nextEnd: Date,
+  ) => void | Promise<void>;
   onBlockMoveToUntimed?: (
     block: PlannerBlockView,
     targetDate?: string,
@@ -347,15 +359,52 @@ function PositionedBlock({
   );
 }
 
-function DayColumn({ day }: { day: Date }) {
+interface DayColumnProps {
+  day: Date;
+  keyboardStartMinute: () => number;
+  onActivate?: (
+    day: Date,
+    clientY: number,
+    columnTop: number,
+  ) => void;
+}
+
+function DayColumn({ day, keyboardStartMinute, onActivate }: DayColumnProps) {
   const { isOver, setNodeRef } = useDroppable({ id: `planner-day:${format(day, 'yyyy-MM-dd')}` });
+  const interactive = Boolean(onActivate);
+
+  const activate = (
+    event: ReactMouseEvent<HTMLDivElement> | ReactKeyboardEvent<HTMLDivElement>,
+    useKeyboardPosition = false,
+  ) => {
+    if (!onActivate) return;
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const clientY = useKeyboardPosition
+      ? bounds.top + keyboardStartMinute() * PIXELS_PER_MINUTE
+      : 'clientY' in event ? event.clientY : bounds.top;
+    onActivate(day, clientY, bounds.top);
+  };
 
   return (
     <div
       ref={setNodeRef}
       data-planner-day={format(day, 'yyyy-MM-dd')}
+      role={interactive ? 'button' : undefined}
+      tabIndex={interactive ? 0 : undefined}
+      aria-label={interactive ? `Create an item on ${format(day, 'EEEE, MMMM d')}` : undefined}
+      onClick={interactive ? event => {
+        // Keyboard activation is handled below so it receives a stable time.
+        if (event.detail === 0) return;
+        activate(event);
+      } : undefined}
+      onKeyDown={interactive ? event => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        activate(event, true);
+      } : undefined}
       className={cn(
         'relative border-r border-border/50 bg-background/25 transition-colors last:border-r-0',
+        interactive && 'cursor-cell outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary',
         isOver && 'bg-primary/5',
       )}
       style={{ height: GRID_HEIGHT }}
@@ -396,6 +445,7 @@ export function WeekTimeGrid({
   onBlockMove,
   onBlockResize,
   onBlockClick,
+  onEmptySlotClick,
   onBlockMoveToUntimed,
   onRequestFullscreen,
   untimedItems = [],
@@ -517,10 +567,14 @@ export function WeekTimeGrid({
   );
 
   const handleDragStart = useCallback((event: DragStartEvent) => {
+    suppressClickUntil.current = Date.now() + 1_000;
     setActiveDragId(String(event.active.id));
   }, []);
 
-  const handleDragCancel = useCallback(() => setActiveDragId(null), []);
+  const handleDragCancel = useCallback(() => {
+    suppressClickUntil.current = Date.now() + 250;
+    setActiveDragId(null);
+  }, []);
 
   const canAutoScrollPlannerViewport = useCallback(
     (element: Element) => element === scrollRef.current,
@@ -532,6 +586,9 @@ export function WeekTimeGrid({
       const activeId = String(event.active.id);
       const untimedItem = untimedItems.find(item => item.id === activeId);
       const block = validBlocks.find((candidate) => candidate.id === String(event.active.id));
+      // A drag can end over an empty day. Suppress the click synthesized from
+      // that pointer release even when the move is rejected or unchanged.
+      suppressClickUntil.current = Date.now() + 250;
       setActiveDragId(null);
       if (!event.over) return;
 
@@ -600,11 +657,40 @@ export function WeekTimeGrid({
     [days, displayIntervals, invokeMove, onBlockMoveToUntimed, onUntimedItemSchedule, resolvedTimeZone, untimedItems, validBlocks],
   );
 
+  const handleEmptySlotClick = useCallback((
+    day: Date,
+    clientY: number,
+    columnTop: number,
+  ) => {
+    const nowTime = Date.now();
+    if (
+      !editable
+      || !onEmptySlotClick
+      || !canActivateEmptySlot({
+        now: nowTime,
+        suppressUntil: suppressClickUntil.current,
+        dragActive: Boolean(activeDragId),
+        resizeActive: Boolean(resizePreview),
+      })
+    ) return;
+
+    const startMinute = emptySlotStartMinute(clientY, columnTop);
+    const displayStart = addMinutes(startOfDay(day), startMinute);
+    const nextStart = instantFromDisplayDate(displayStart, resolvedTimeZone);
+    if (!nextStart) return;
+    const nextEnd = addMinutes(nextStart, DEFAULT_EMPTY_SLOT_DURATION_MINUTES);
+
+    // Prevent a double-click from opening two creation flows.
+    suppressClickUntil.current = nowTime + 250;
+    void Promise.resolve(onEmptySlotClick(nextStart, nextEnd));
+  }, [activeDragId, editable, onEmptySlotClick, resizePreview, resolvedTimeZone]);
+
   const handleResizeStart = useCallback(
     (event: ReactPointerEvent<HTMLButtonElement>, block: PlannerBlockView) => {
       if (!editable || isFixedBlock(block)) return;
       event.preventDefault();
       event.stopPropagation();
+      suppressClickUntil.current = Date.now() + 1_000;
 
       resizeCleanupRef.current?.();
 
@@ -648,6 +734,7 @@ export function WeekTimeGrid({
       const onPointerCancel = () => {
         cleanup();
         setResizePreview(null);
+        suppressClickUntil.current = Date.now() + 250;
       };
 
       resizeCleanupRef.current = cleanup;
@@ -852,7 +939,14 @@ export function WeekTimeGrid({
                     )}
                     style={{ height: GRID_HEIGHT }}
                   >
-                    <DayColumn day={day} />
+                    <DayColumn
+                      day={day}
+                      keyboardStartMinute={() => keyboardEmptySlotStartMinute(
+                        scrollRef.current?.scrollTop,
+                        initialScrollHour * 60,
+                      )}
+                      onActivate={editable && onEmptySlotClick ? handleEmptySlotClick : undefined}
+                    />
 
                     {today && (
                       <div

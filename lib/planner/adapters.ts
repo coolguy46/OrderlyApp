@@ -395,11 +395,17 @@ export function storedEventsToCommitments(
 const CALENDAR_EVENTS_STORAGE_NAMESPACE = 'orderly-calendar-events';
 const LEGACY_CALENDAR_EVENTS_STORAGE_KEY = 'calendarEvents';
 
+export function storedCalendarEventsStorageKey(
+  userId: string | null | undefined,
+): string | null {
+  return userScopedStorageKey(CALENDAR_EVENTS_STORAGE_NAMESPACE, userId);
+}
+
 export function readStoredCalendarEvents(
   userId: string | null | undefined,
 ): StoredCalendarEvent[] {
   if (typeof window === 'undefined') return [];
-  const storageKey = userScopedStorageKey(CALENDAR_EVENTS_STORAGE_NAMESPACE, userId);
+  const storageKey = storedCalendarEventsStorageKey(userId);
   if (!storageKey) return [];
 
   // The legacy value has no owner metadata. Never guess that it belongs to the
@@ -421,7 +427,7 @@ export function writeStoredCalendarEvents(
   events: readonly StoredCalendarEvent[],
 ): void {
   if (typeof window === 'undefined') return;
-  const storageKey = userScopedStorageKey(CALENDAR_EVENTS_STORAGE_NAMESPACE, userId);
+  const storageKey = storedCalendarEventsStorageKey(userId);
   if (!storageKey) return;
 
   discardUnownedLegacyStorageValue(localStorage, LEGACY_CALENDAR_EVENTS_STORAGE_KEY);

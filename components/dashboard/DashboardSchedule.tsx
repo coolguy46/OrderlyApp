@@ -5,6 +5,7 @@ import { differenceInMinutes, format } from 'date-fns';
 import Link from 'next/link';
 import { CalendarClock, ChevronLeft, ChevronRight, Clock3, ListTodo, LockKeyhole } from 'lucide-react';
 import { TaskDetailViewer } from '@/components/tasks/TaskDetailViewer';
+import { TaskForm } from '@/components/tasks/TaskForm';
 import { Button } from '@/components/ui/Button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import {
@@ -22,15 +23,19 @@ import type { LocalDate, ScheduleOccurrence } from '@/lib/schedule/types';
 import { useAppStore } from '@/lib/store';
 import { cn } from '@/lib/utils';
 import {
-  readStoredCalendarEvents,
   storedEventsToCommitments,
-  type StoredCalendarEvent,
 } from '@/lib/planner/adapters';
+import { useStoredCalendarEvents } from '@/lib/planner/use-stored-calendar-events';
 import { usePlannerStore } from '@/lib/planner/store';
 import type { RecurringCommitmentInput } from '@/lib/planner/types';
 import { buildCommitmentOccurrences } from '@/lib/planner/commitments';
+import {
+  DASHBOARD_SCHEDULE_HOUR_HEIGHT,
+  dashboardScheduleCreationSlot,
+  type DashboardScheduleCreationSlot,
+} from './dashboard-schedule-slot';
 
-const HOUR_HEIGHT = 54;
+const HOUR_HEIGHT = DASHBOARD_SCHEDULE_HOUR_HEIGHT;
 const DAY_HEIGHT = 24 * HOUR_HEIGHT;
 
 function durationLabel(seconds: number | null): string | null {
@@ -103,7 +108,10 @@ export function DashboardSchedule() {
     localDateFromIso(new Date().toISOString(), timeZone) || '1970-01-01'
   ));
   const [detailOccurrenceId, setDetailOccurrenceId] = useState<string | null>(null);
-  const [storedEvents, setStoredEvents] = useState<StoredCalendarEvent[]>([]);
+  const [creationSlot, setCreationSlot] = useState<(
+    DashboardScheduleCreationSlot & { userId: string }
+  ) | null>(null);
+  const { events: storedEvents } = useStoredCalendarEvents(userId);
   const scrollerRef = useRef<HTMLDivElement>(null);
   const selectedDate = localDateToDateCarrier(selectedDateKey) || new Date(1970, 0, 1, 12);
   const dateKey = selectedDateKey;
@@ -118,21 +126,13 @@ export function DashboardSchedule() {
     if (!today) return;
     let cancelled = false;
     queueMicrotask(() => {
-      if (!cancelled) setSelectedDateKey(today);
+      if (cancelled) return;
+      setSelectedDateKey(today);
+      setDetailOccurrenceId(null);
+      setCreationSlot(null);
     });
     return () => { cancelled = true; };
   }, [timeZone, userId]);
-
-  useEffect(() => {
-    const refresh = () => setStoredEvents(readStoredCalendarEvents(userId));
-    refresh();
-    window.addEventListener('storage', refresh);
-    window.addEventListener('orderly-calendar-events-changed', refresh);
-    return () => {
-      window.removeEventListener('storage', refresh);
-      window.removeEventListener('orderly-calendar-events-changed', refresh);
-    };
-  }, [userId]);
 
   const entries = useMemo(
     () => selectScheduleEntriesForUser(entriesByUser, user?.id),
@@ -207,6 +207,9 @@ export function DashboardSchedule() {
               <p className="text-xs text-muted-foreground">
                 {occurrences.timed.length} timed · {occurrences.untimed.length} untimed · {fixedBlocks.length} busy
               </p>
+              <p className="mt-0.5 text-[10px] text-muted-foreground/75">
+                Click an empty time to add a task or event.
+              </p>
             </div>
             <div className="ml-1 flex items-center gap-0.5">
               <Button type="button" variant="ghost" size="icon-sm" className="h-7 w-7" onClick={() => setSelectedDateKey(current => addLocalDays(current, -1))} aria-label="Previous day">
@@ -268,7 +271,21 @@ export function DashboardSchedule() {
                 </span>
               ))}
             </div>
-            <div className="relative">
+            <div
+              className="relative cursor-crosshair"
+              aria-label={`Create a task or event on ${format(selectedDate, 'EEEE, MMMM d')}`}
+              onClick={(event) => {
+                const target = event.target as HTMLElement;
+                if (target.closest('[data-dashboard-schedule-block]')) return;
+                if (!userId) return;
+                setDetailOccurrenceId(null);
+                const bounds = event.currentTarget.getBoundingClientRect();
+                setCreationSlot({
+                  ...dashboardScheduleCreationSlot(dateKey, event.clientY, bounds.top),
+                  userId,
+                });
+              }}
+            >
               {Array.from({ length: 25 }, (_, hour) => (
                 <div key={hour} className="pointer-events-none absolute inset-x-0 border-t border-border/40" style={{ top: hour * HOUR_HEIGHT }} />
               ))}
@@ -284,7 +301,11 @@ export function DashboardSchedule() {
                   <button
                     key={item.id}
                     type="button"
-                    onClick={() => setDetailOccurrenceId(item.id)}
+                    data-dashboard-schedule-block
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setDetailOccurrenceId(item.id);
+                    }}
                     className={cn(
                       'absolute left-2 right-2 overflow-hidden rounded-md border border-l-[3px] px-2 py-1 text-left shadow-sm transition-[filter,transform] hover:brightness-110 active:scale-[0.995]',
                       item.task.status === 'completed' && 'opacity-50',
@@ -315,6 +336,7 @@ export function DashboardSchedule() {
                 return (
                   <div
                     key={item.id}
+                    data-dashboard-schedule-block
                     className={cn(
                       'absolute left-2 right-2 overflow-hidden rounded-md border border-l-[3px] px-2 py-1 text-left shadow-sm',
                       item.locked && 'border-dashed',
@@ -344,7 +366,7 @@ export function DashboardSchedule() {
                 <div className="absolute inset-x-0 top-[38%] flex flex-col items-center justify-center text-center text-muted-foreground/60">
                   <Clock3 className="mb-2 h-6 w-6" />
                   <p className="text-xs">Nothing timed yet</p>
-                  <p className="text-[10px]">Add a start time to a task or use the Assistant.</p>
+                  <p className="text-[10px]">Click an empty time to add a task or event.</p>
                 </div>
               )}
             </div>
@@ -357,6 +379,14 @@ export function DashboardSchedule() {
         scheduleOccurrence={detailOccurrence}
         open={Boolean(detailTask)}
         onOpenChange={open => !open && setDetailOccurrenceId(null)}
+      />
+      <TaskForm
+        isOpen={Boolean(creationSlot && creationSlot.userId === userId)}
+        initialMode="task"
+        initialDate={creationSlot?.userId === userId ? creationSlot.date : ''}
+        initialStartTime={creationSlot?.userId === userId ? creationSlot.startTime : ''}
+        initialDurationSeconds={creationSlot?.userId === userId ? creationSlot.durationSeconds : null}
+        onClose={() => setCreationSlot(null)}
       />
     </Card>
   );

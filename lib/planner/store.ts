@@ -86,6 +86,7 @@ export interface PlannerStoreState {
   recordFeedback: (userId: string, feedback: PlannerFeedbackInput) => PlannerActionResult<PlannerFeedbackRecord>;
   hydrateUserPlannerData: (userId: string, snapshot: PlannerPersistenceSnapshot) => void;
   retryPendingPlannerData: (userId: string) => void;
+  waitForPlannerPersistence: (userId: string, timeoutMs?: number) => Promise<boolean>;
   clearUserPlannerData: (userId: string) => void;
 }
 
@@ -157,10 +158,9 @@ function intervalsOverlap(leftStart: number, leftEnd: number, rightStart: number
 function validateBlock(plan: PlannerPlan, candidate: PlannerBlock, ignoredBlockId: string): string | null {
   const start = new Date(candidate.startAt).getTime();
   const end = new Date(candidate.endAt).getTime();
-  const deadline = new Date(candidate.deadlineAt).getTime();
   const horizonStart = new Date(plan.horizonStart).getTime();
   const horizonEnd = new Date(plan.horizonEnd).getTime();
-  if (![start, end, deadline, horizonStart, horizonEnd].every(Number.isFinite)) return 'The block contains an invalid date.';
+  if (![start, end, horizonStart, horizonEnd].every(Number.isFinite)) return 'The block contains an invalid date.';
 
   const durationMinutes = (end - start) / MINUTE_MS;
   const slotMs = PLANNER_SLOT_MINUTES * MINUTE_MS;
@@ -170,7 +170,10 @@ function validateBlock(plan: PlannerPlan, candidate: PlannerBlock, ignoredBlockI
   }
   if (durationMinutes > plan.settings.maxBlockMinutes) return `Blocks cannot exceed ${plan.settings.maxBlockMinutes} minutes.`;
   if (start < horizonStart || end > horizonEnd) return 'The block must stay inside this plan week.';
-  if (end > deadline) return 'The block cannot end after the exact task or exam deadline.';
+  // A due date describes when work was due; it is not a wall that makes the
+  // work impossible to plan afterward. This is especially important for
+  // overdue Canvas assignments. The engine still ranks before-deadline slots
+  // first, while manual moves remain possible on current and future dates.
   if (localDateAt(start, plan.settings.timeZone) !== localDateAt(end - 1, plan.settings.timeZone)) {
     return 'A block cannot cross into another day.';
   }
@@ -393,7 +396,28 @@ function updateMultiplier(
 }
 
 const plannerPersistenceQueues = new Map<string, Promise<void>>();
+const DEFAULT_PLANNER_PERSISTENCE_WAIT_MS = 15_000;
 let plannerOnlineRetryInstalled = false;
+
+async function waitForPlannerQueueBefore(
+  queue: Promise<void>,
+  deadline: number,
+): Promise<boolean> {
+  const remainingMs = deadline - Date.now();
+  if (remainingMs <= 0) return false;
+
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      queue.then(() => true, () => false),
+      new Promise<boolean>(resolve => {
+        timeout = setTimeout(() => resolve(false), remainingMs);
+      }),
+    ]);
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout);
+  }
+}
 
 function queuePlannerPersistence(userId: string, expectedGeneration: number): void {
   const previous = plannerPersistenceQueues.get(userId) || Promise.resolve();
@@ -455,6 +479,51 @@ function queuePlannerPersistence(userId: string, expectedGeneration: number): vo
     if (plannerPersistenceQueues.get(userId) === queued) plannerPersistenceQueues.delete(userId);
   });
   plannerPersistenceQueues.set(userId, queued);
+}
+
+/**
+ * Wait for the active account's queued planner snapshot to reach Supabase.
+ *
+ * A resolved `true` is a persistence acknowledgement: the account/session is
+ * still current and its durable local outbox no longer contains a planner
+ * revision. A failed request deliberately leaves that revision pending, so a
+ * failure, timeout, or account switch resolves `false` instead of allowing a
+ * caller to claim that the change was saved.
+ */
+export async function waitForPlannerPersistence(
+  userId: string,
+  timeoutMs = DEFAULT_PLANNER_PERSISTENCE_WAIT_MS,
+): Promise<boolean> {
+  const initial = usePlannerStore.getState();
+  if (initial.activeUserId !== userId) return false;
+  if (!initial.pendingRevisionByUser[userId]) return true;
+
+  const expectedGeneration = initial.sessionGeneration;
+  if (!plannerPersistenceQueues.has(userId)) {
+    queuePlannerPersistence(userId, expectedGeneration);
+  }
+
+  const boundedTimeoutMs = Number.isFinite(timeoutMs) && timeoutMs > 0
+    ? Math.trunc(timeoutMs)
+    : DEFAULT_PLANNER_PERSISTENCE_WAIT_MS;
+  const deadline = Date.now() + boundedTimeoutMs;
+
+  while (true) {
+    const queue = plannerPersistenceQueues.get(userId);
+    if (!queue || !(await waitForPlannerQueueBefore(queue, deadline))) return false;
+
+    const after = usePlannerStore.getState();
+    if (
+      after.activeUserId !== userId
+      || after.sessionGeneration !== expectedGeneration
+    ) return false;
+    if (!after.pendingRevisionByUser[userId]) return true;
+
+    // A mutation made while the previous snapshot was saving appends another
+    // queue entry. Wait for it as well; if there is no follow-up queue, the
+    // remaining outbox revision represents a failed persistence attempt.
+    if (!plannerPersistenceQueues.has(userId)) return false;
+  }
 }
 
 function retryPendingPlannerData(userId: string): void {
@@ -919,6 +988,7 @@ export const usePlannerStore = create<PlannerStoreState>()(
       },
 
       retryPendingPlannerData,
+      waitForPlannerPersistence,
 
       clearUserPlannerData: (userId) => {
         set(state => {
