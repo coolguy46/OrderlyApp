@@ -34,7 +34,7 @@
     "test:timer-settings": "node --test --experimental-strip-types tests/timer-settings.test.mjs",
     "test:recent-auth": "node --test --experimental-strip-types tests/recent-auth.test.mjs",
     "test:task-form-save-sequence": "node --test --experimental-strip-types tests/task-form-save-sequence.test.mjs",
-    "test:interaction-safety": "node --test --experimental-strip-types tests/interaction-safety.test.mjs",
+    "test:interaction-safety": "node --test --experimental-strip-types tests/interaction-safety.test.mjs tests/modal-layout.test.mjs",
     "test:csp": "node --test --experimental-strip-types tests/csp.test.mjs",
     "test:migration-contracts": "node --test tests/migration-contracts.test.mjs",
     "test:schedule-persistence": "node --test --experimental-strip-types tests/schedule-persistence.test.mjs",

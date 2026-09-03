@@ -1,6 +1,8 @@
 // Canvas Integration Service
 // This module handles Canvas calendar integration via iCal format
 
+import { externalHtmlToPlainText } from '../safe-content.ts';
+
 export interface CanvasAssignment {
   id: string;
   courseId?: string;
@@ -387,16 +389,19 @@ function convertEventToAssignment(event: ICalEvent, calendarTimeZone?: string): 
     }
   }
   
-  // Prefer HTML description if available, otherwise use plain text
-  // HTML description typically contains richer formatting from Canvas
-  const description = event.htmlDescription || event.description;
+  // Canvas commonly supplies the useful description in X-ALT-DESC. Convert it
+  // at the provider boundary so every downstream consumer receives inert,
+  // readable text instead of persisting or displaying untrusted markup.
+  const description = event.htmlDescription
+    ? externalHtmlToPlainText(event.htmlDescription)
+    : event.description;
   
   return {
     id: event.uid,
     courseId,
     courseName,
     title,
-    description,
+    description: description || undefined,
     dueDate,
     dueDateOnly: parsedDueDate?.dateOnly,
     hasDueTime: parsedDueDate?.hasTime ?? false,

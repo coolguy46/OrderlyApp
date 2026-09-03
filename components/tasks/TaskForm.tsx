@@ -10,6 +10,7 @@ import { Label } from '@/components/ui/label';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogDescription,
   DialogHeader,
@@ -57,6 +58,7 @@ import {
   scheduledEndAt,
 } from '@/lib/schedule/selectors';
 import { saveExistingTaskInOrder } from '@/lib/task-form-save-sequence';
+import { externalHtmlToPlainText } from '@/lib/safe-content';
 
 export type TaskFormMode = 'task' | 'event';
 
@@ -266,7 +268,11 @@ export function TaskForm({
       if (task) {
         setMode('task');
         setTitle(task.title);
-        setDescription(task.description || '');
+        setDescription(
+          task.source === 'canvas' || task.source === 'google_classroom'
+            ? externalHtmlToPlainText(task.description)
+            : task.description || '',
+        );
         setPriority(task.priority);
         setStatus(task.status);
         setSubjectId(task.subject_id || 'none');
@@ -696,9 +702,12 @@ export function TaskForm({
   return (
     <>
       <Dialog open={isOpen} onOpenChange={(open) => !open && closeForm()}>
-        <DialogContent className="max-h-[92vh] overflow-y-auto p-0 sm:max-w-[540px]">
+        <DialogContent
+          className="flex max-h-none flex-col gap-0 overflow-hidden p-0 sm:max-w-[540px] sm:overflow-hidden"
+          style={{ maxHeight: 'min(calc(100dvh - 1rem), 900px)' }}
+        >
         {/* Header */}
-        <div className="px-6 pt-6 pb-4 bg-gradient-to-b from-indigo-500/5 to-transparent">
+        <div className="shrink-0 bg-gradient-to-b from-indigo-500/5 to-transparent px-6 pb-4 pt-6">
           <DialogHeader>
             <div className="flex items-center gap-3">
               <div className={cn(
@@ -731,7 +740,14 @@ export function TaskForm({
           </DialogHeader>
         </div>
         
-        <form onSubmit={handleSubmit} noValidate className="px-6 pb-6 space-y-4">
+        <form onSubmit={handleSubmit} noValidate className="flex min-h-0 flex-1 flex-col">
+          <DialogBody
+            role="region"
+            aria-label={isEventMode ? 'Event details' : 'Task details'}
+            tabIndex={0}
+            className="px-6 pb-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-400"
+          >
+          <div className="space-y-4">
           {!task && !commitment && (
             <div
               role="tablist"
@@ -802,7 +818,7 @@ export function TaskForm({
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               rows={2}
-              className="resize-none bg-muted/30 border-border/50 focus:bg-background"
+              className="h-24 min-h-20 max-h-40 resize-y overflow-y-auto border-border/50 bg-muted/30 field-sizing-fixed focus:bg-background"
             />
           </div>
 
@@ -1363,8 +1379,11 @@ export function TaskForm({
           </>
           )}
 
+          </div>
+          </DialogBody>
+
           {/* Actions */}
-          <div className="flex gap-2 pt-3 border-t border-border/30">
+          <div className="flex shrink-0 gap-2 border-t border-border/30 bg-background/95 px-6 py-4 backdrop-blur-sm">
             {commitment && (
               <Button
                 type="button"

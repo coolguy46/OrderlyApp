@@ -17,6 +17,15 @@ test('imported tasks reuse the normal schedule editor without changing their dea
   assert.doesNotMatch(formSource, /setScheduleError\(['"]That (?:would|duration).*deadline/);
 });
 
+test('legacy imported descriptions are converted to safe readable text for editing', () => {
+  assert.match(formSource, /import \{ externalHtmlToPlainText \} from '@\/lib\/safe-content'/);
+  assert.match(
+    formSource,
+    /task\.source === 'canvas' \|\| task\.source === 'google_classroom'[\s\S]*\? externalHtmlToPlainText\(task\.description\)[\s\S]*: task\.description \|\| ''/,
+  );
+  assert.doesNotMatch(formSource, /dangerouslySetInnerHTML/);
+});
+
 test('an imported task schedule can be updated, removed, and durably confirmed', () => {
   assert.match(formSource, /upsertTaskSchedule\(user\.id, taskId/);
   assert.match(formSource, /removeTaskSchedule\(user\.id, taskId\)/);

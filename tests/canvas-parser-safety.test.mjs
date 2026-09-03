@@ -11,6 +11,7 @@ import {
   isConfirmedCanvasCleanupSnapshot,
   isCompleteCanvasSnapshot,
 } from '../lib/integrations/canvas-sync-safety.ts';
+import { externalHtmlToPlainText } from '../lib/safe-content.ts';
 
 function calendar(eventLines, calendarLines = []) {
   return [
@@ -85,6 +86,38 @@ test('keeps valid timezone and UTC instants exact', () => {
     'DTSTART;VALUE=DATE-TIME:20260825T235900Z',
   ]));
   assert.equal(explicitDateTime.dueDate?.toISOString(), '2026-08-25T23:59:00.000Z');
+});
+
+test('normalizes Canvas rich descriptions before they reach task persistence', () => {
+  const [assignment] = parseICalFile(calendar([
+    'DTSTART;VALUE=DATE:20260904',
+    'DESCRIPTION:Plain fallback that should not win',
+    'X-ALT-DESC;FMTTYPE=text/html:<p><a href="https://drive.google.com/file/d/assignment-1">Open worksheet</a></p><p>Answer every question.&nbsp;</p>',
+  ]));
+
+  assert.equal(
+    assignment.description,
+    'Open worksheet (https://drive.google.com/file/d/assignment-1)\n\nAnswer every question.',
+  );
+});
+
+test('leaves Canvas plain-text descriptions unchanged', () => {
+  const [assignment] = parseICalFile(calendar([
+    'DTSTART;VALUE=DATE:20260904',
+    'DESCRIPTION:Solve 2 < 3 and 5 > 4',
+  ]));
+
+  assert.equal(assignment.description, 'Solve 2 < 3 and 5 > 4');
+});
+
+test('Canvas parser output stays unchanged when TaskForm normalizes a legacy import', () => {
+  const [assignment] = parseICalFile(calendar([
+    'DTSTART;VALUE=DATE:20260904',
+    'X-ALT-DESC;FMTTYPE=text/html:<p>Type &lt;strong&gt; exactly</p>',
+  ]));
+
+  assert.equal(assignment.description, 'Type <strong> exactly');
+  assert.equal(externalHtmlToPlainText(assignment.description), assignment.description);
 });
 
 test('rejects an unsupported TZID rather than silently treating it as UTC', () => {

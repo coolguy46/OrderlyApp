@@ -27,6 +27,7 @@ export { Progress } from './Progress';
 export { 
   Dialog, 
   DialogContent, 
+  DialogBody,
   DialogHeader, 
   DialogFooter, 
   DialogTitle, 

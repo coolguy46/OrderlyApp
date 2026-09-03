@@ -4,6 +4,7 @@ import { cn } from '@/lib/utils';
 import { X } from 'lucide-react';
 import {
   Dialog,
+  DialogBody,
   DialogClose,
   DialogContent,
   DialogHeader,
@@ -41,7 +42,7 @@ export function Modal({ isOpen, onClose, title, children, size = 'md' }: ModalPr
           'sm:max-h-[90dvh] sm:overflow-hidden sm:rounded-2xl',
           sizeClasses[size]
         )}
-        style={{ maxHeight: 'min(90dvh, 900px)' }}
+        style={{ maxHeight: 'min(calc(100dvh - 2rem), 900px)' }}
       >
         <DialogHeader className="shrink-0 flex-row items-center justify-between space-y-0 px-6 pb-4 pt-6 text-left">
           <DialogTitle className={cn('text-xl text-white', !title && 'sr-only')}>
@@ -58,9 +59,14 @@ export function Modal({ isOpen, onClose, title, children, size = 'md' }: ModalPr
           </DialogClose>
         </DialogHeader>
 
-        <div className="min-h-0 overflow-y-auto overscroll-contain px-6 pb-6">
+        <DialogBody
+          role="region"
+          aria-label={title ? `${title} content` : 'Dialog content'}
+          tabIndex={0}
+          className="px-6 pb-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-400"
+        >
           {children}
-        </div>
+        </DialogBody>
       </DialogContent>
     </Dialog>
   );
