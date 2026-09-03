@@ -1,18 +1,39 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
+import { buildContentSecurityPolicy } from '@/lib/security/csp';
 
-/**
- * Refresh Supabase cookies only on authenticated application pages.
- *
- * Public marketing/auth pages and API routes do their own authentication and
- * must not pay for a networked auth lookup before they can render or respond.
- */
+/** Refresh Supabase cookies and attach the CSP nonce on protected app pages. */
 export async function proxy(request: NextRequest) {
-  let supabaseResponse = NextResponse.next({ request });
+  const nonce = Buffer.from(crypto.randomUUID()).toString('base64');
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabasePublishableKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+  const contentSecurityPolicy = buildContentSecurityPolicy({
+    nonce,
+    nodeEnv: process.env.NODE_ENV,
+    supabaseUrl,
+  });
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set('x-nonce', nonce);
+  requestHeaders.set('Content-Security-Policy', contentSecurityPolicy);
+  const createResponse = () => NextResponse.next({
+    request: { headers: requestHeaders },
+  });
+  let supabaseResponse = createResponse();
+
+  const withSecurityPolicy = (response: NextResponse) => {
+    response.headers.set('Content-Security-Policy', contentSecurityPolicy);
+    return response;
+  };
+
+  // Local UI development still renders without auth configuration. The
+  // authenticated client features fail closed through availability checks.
+  if (!supabaseUrl || !supabasePublishableKey) {
+    return withSecurityPolicy(supabaseResponse);
+  }
 
   const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
+    supabaseUrl,
+    supabasePublishableKey,
     {
       cookies: {
         getAll() {
@@ -20,21 +41,19 @@ export async function proxy(request: NextRequest) {
         },
         setAll(cookiesToSet: { name: string; value: string; options?: Record<string, unknown> }[]) {
           cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
-          supabaseResponse = NextResponse.next({ request });
-          cookiesToSet.forEach(({ name, value, options }) => {
-            supabaseResponse.cookies.set(name, value, options);
-          });
+          supabaseResponse = createResponse();
+          cookiesToSet.forEach(({ name, value, options }) =>
+            supabaseResponse.cookies.set(name, value, options)
+          );
         },
       },
     },
   );
 
-  // getClaims verifies modern asymmetric Supabase JWTs locally and refreshes
-  // expired cookie sessions when necessary. It avoids an unconditional Auth
-  // server round trip on every protected navigation.
+  // Verify modern asymmetric JWTs locally and refresh expired sessions only
+  // on authenticated application pages.
   await supabase.auth.getClaims();
-
-  return supabaseResponse;
+  return withSecurityPolicy(supabaseResponse);
 }
 
 export const config = {

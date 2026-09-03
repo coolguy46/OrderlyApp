@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { addDays, differenceInCalendarDays, format, startOfDay } from 'date-fns';
+import { format } from 'date-fns';
 import {
   CalendarClock,
   ChevronLeft,
@@ -28,13 +28,50 @@ import {
 } from '@/components/planner';
 import { usePlannerStore } from '@/lib/planner/store';
 import type { PlannerPlan } from '@/lib/planner/types';
+import {
+  addLocalDays,
+  isLocalDate,
+  localDateFromDateCarrier,
+  localDateFromIso,
+  localDateToDateCarrier,
+} from '@/lib/schedule/selectors';
+import type { LocalDate } from '@/lib/schedule/types';
 import { useAppStore } from '@/lib/store';
 
 const PLAN_DAYS = 7;
 
+function planStartDateKey(plan: PlannerPlan): LocalDate {
+  const date = localDateFromIso(plan.horizonStart, plan.settings.timeZone);
+  if (date) return date;
+  const fallback = plan.horizonStart.slice(0, 10);
+  return isLocalDate(fallback) ? fallback : '1970-01-01';
+}
+
+function planEndDateKey(plan: PlannerPlan): LocalDate {
+  const end = new Date(plan.horizonEnd).getTime();
+  if (Number.isFinite(end)) {
+    const date = localDateFromIso(new Date(end - 1).toISOString(), plan.settings.timeZone);
+    if (date) return date;
+  }
+  return addLocalDays(planStartDateKey(plan), PLAN_DAYS - 1);
+}
+
+function dateCarrier(date: LocalDate): Date {
+  return localDateToDateCarrier(date) || new Date(1970, 0, 1, 12);
+}
+
+function civilDayDifference(date: LocalDate, start: LocalDate): number {
+  const [year, month, day] = date.split('-').map(Number);
+  const [startYear, startMonth, startDay] = start.split('-').map(Number);
+  return Math.round(
+    (Date.UTC(year, month - 1, day) - Date.UTC(startYear, startMonth - 1, startDay))
+      / 86_400_000,
+  );
+}
+
 function planDateRange(plan: PlannerPlan): string {
-  const start = new Date(plan.horizonStart);
-  const end = new Date(new Date(plan.horizonEnd).getTime() - 1);
+  const start = dateCarrier(planStartDateKey(plan));
+  const end = dateCarrier(planEndDateKey(plan));
 
   if (start.getFullYear() === end.getFullYear()) {
     if (start.getMonth() === end.getMonth()) {
@@ -50,11 +87,11 @@ function scheduledTimeLabel(minutes: number): string {
   return `${rounded} ${rounded === 1 ? 'hr' : 'hrs'}`;
 }
 
-function preferredDateForPlan(plan: PlannerPlan): Date {
-  const start = startOfDay(new Date(plan.horizonStart));
-  const end = new Date(plan.horizonEnd);
-  const today = startOfDay(new Date());
-  return today.getTime() >= start.getTime() && today.getTime() < end.getTime()
+function preferredDateForPlan(plan: PlannerPlan, now = new Date()): LocalDate {
+  const start = planStartDateKey(plan);
+  const end = planEndDateKey(plan);
+  const today = localDateFromIso(now.toISOString(), plan.settings.timeZone);
+  return today && today >= start && today <= end
     ? today
     : start;
 }
@@ -66,7 +103,13 @@ export function PlannedCalendar() {
   const userId = user?.id || null;
   const record = userId ? plannerUsers[userId] : null;
   const activePlan = record?.currentPlan || null;
-  const [selectedDate, setSelectedDate] = useState(() => startOfDay(new Date()));
+  const initialTimeZone = activePlan?.settings.timeZone
+    || record?.settings.timeZone
+    || Intl.DateTimeFormat().resolvedOptions().timeZone
+    || 'UTC';
+  const [selectedDateKey, setSelectedDateKey] = useState<LocalDate>(() => (
+    localDateFromIso(new Date().toISOString(), initialTimeZone) || '1970-01-01'
+  ));
   const [fullscreen, setFullscreen] = useState(false);
   const [detailTaskId, setDetailTaskId] = useState<string | null>(null);
 
@@ -82,21 +125,28 @@ export function PlannedCalendar() {
 
   useEffect(() => {
     if (!selectedPlan) return;
-    setSelectedDate(preferredDateForPlan(selectedPlan));
-    setDetailTaskId(null);
-  }, [selectedPlan?.horizonStart, selectedPlan?.id]);
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      setSelectedDateKey(preferredDateForPlan(selectedPlan));
+      setDetailTaskId(null);
+    });
+    return () => { cancelled = true; };
+  }, [selectedPlan]);
 
-  const planStart = selectedPlan ? startOfDay(new Date(selectedPlan.horizonStart)) : null;
-  const selectedDayIndex = planStart
-    ? differenceInCalendarDays(startOfDay(selectedDate), planStart)
+  const planStartKey = selectedPlan ? planStartDateKey(selectedPlan) : null;
+  const selectedDate = dateCarrier(selectedDateKey);
+  const planStartDate = planStartKey ? dateCarrier(planStartKey) : null;
+  const selectedDayIndex = planStartKey
+    ? civilDayDifference(selectedDateKey, planStartKey)
     : 0;
   const blocks = useMemo(
     () => plannerBlockViews(selectedPlan, subjects, tasks),
     [selectedPlan, subjects, tasks],
   );
   const dayTasks = useMemo(
-    () => plannerDayTasks(selectedPlan, selectedDate, tasks, subjects),
-    [selectedDate, selectedPlan, subjects, tasks],
+    () => plannerDayTasks(selectedPlan, selectedDateKey, tasks, subjects),
+    [selectedDateKey, selectedPlan, subjects, tasks],
   );
   const realTasksById = useMemo(
     () => new Map(tasks.map(task => [task.id, task])),
@@ -113,9 +163,14 @@ export function PlannedCalendar() {
   const detailTask = detailTaskId ? realTasksById.get(detailTaskId) || null : null;
 
   const moveSelectedDay = (amount: number) => {
-    if (!planStart) return;
+    if (!planStartKey) return;
     const nextIndex = Math.min(PLAN_DAYS - 1, Math.max(0, selectedDayIndex + amount));
-    setSelectedDate(addDays(planStart, nextIndex));
+    setSelectedDateKey(addLocalDays(planStartKey, nextIndex));
+  };
+
+  const selectDateCarrier = (next: Date) => {
+    const date = localDateFromDateCarrier(next);
+    if (date) setSelectedDateKey(date);
   };
 
   const isRealTask = (view: PlannerDayTaskView): boolean => {
@@ -129,8 +184,10 @@ export function PlannedCalendar() {
   };
 
   const handleBlockClick = (view: PlannerBlockView) => {
-    const start = new Date(view.startAt);
-    if (!Number.isNaN(start.getTime())) setSelectedDate(startOfDay(start));
+    if (!selectedPlan) return;
+    const start = view.startAt instanceof Date ? view.startAt.toISOString() : view.startAt;
+    const date = localDateFromIso(start, selectedPlan.settings.timeZone);
+    if (date) setSelectedDateKey(date);
     if (view.taskId && realTasksById.has(view.taskId)) setDetailTaskId(view.taskId);
   };
 
@@ -238,13 +295,14 @@ export function PlannedCalendar() {
       <div className="grid gap-3 xl:h-[calc(100dvh-13.5rem)] xl:min-h-[620px] xl:grid-cols-[minmax(290px,350px)_minmax(0,1fr)]">
         <div className="h-[520px] min-w-0 xl:h-full">
           <DailyTaskPanel
-            planStart={selectedPlan.horizonStart}
+            planStart={planStartDate || selectedDate}
             selectedDate={selectedDate}
             tasks={dayTasks}
+            timeZone={selectedPlan.settings.timeZone}
             fillHeight
             readOnly
             showCompletionControl={false}
-            onSelectedDateChange={setSelectedDate}
+            onSelectedDateChange={selectDateCarrier}
             onTaskClick={openDayTask}
             isTaskClickable={isRealTask}
           />
@@ -253,11 +311,11 @@ export function PlannedCalendar() {
         <Card className="h-[650px] min-w-0 overflow-hidden border-indigo-500/15 xl:h-full">
           <CardContent className="h-full p-2 sm:p-3">
             <WeekTimeGrid
-              weekStart={selectedPlan.horizonStart}
+              weekStart={planStartDate || selectedDate}
               blocks={blocks}
               editable={false}
               selectedDate={selectedDate}
-              onSelectedDateChange={setSelectedDate}
+              onSelectedDateChange={selectDateCarrier}
               onBlockClick={handleBlockClick}
               showSummaryHeader={false}
               viewportClassName="h-full"
@@ -272,11 +330,11 @@ export function PlannedCalendar() {
       <PlannerFullscreen
         open={fullscreen}
         onOpenChange={setFullscreen}
-        weekStart={selectedPlan.horizonStart}
+        weekStart={planStartDate || selectedDate}
         blocks={blocks}
         editable={false}
         selectedDate={selectedDate}
-        onSelectedDateChange={setSelectedDate}
+        onSelectedDateChange={selectDateCarrier}
         onBlockClick={handleBlockClick}
         timeZone={selectedPlan.settings.timeZone}
         timeZoneLabel={selectedPlan.settings.timeZone}

@@ -10,7 +10,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Separator } from '@/components/ui/separator';
-import { Sparkles, Mail, Lock, User, ArrowRight, Chrome, Check } from 'lucide-react';
+import { Sparkles, Mail, Lock, User, ArrowRight, Chrome, Check, AlertCircle } from 'lucide-react';
 import { useAppStore } from '@/lib/store';
 import { signInWithGoogle } from '@/lib/supabase/services';
 import { errorMessage } from '@/lib/auth/lifecycle';
@@ -34,16 +34,17 @@ export default function RegisterPage() {
   });
   const [acceptTerms, setAcceptTerms] = useState(false);
   const [error, setError] = useState('');
-  const [successMessage, setSuccessMessage] = useState('');
+  const [confirmationRequired, setConfirmationRequired] = useState(false);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFormData({ ...formData, [e.target.id]: e.target.value });
+    if (error) setError('');
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-    setSuccessMessage('');
+    setConfirmationRequired(false);
     
     if (formData.password !== formData.confirmPassword) {
       setError('Passwords do not match');
@@ -61,7 +62,7 @@ export default function RegisterPage() {
       if (result === 'authenticated') {
         router.replace('/');
       } else if (result === 'confirmation-required') {
-        setSuccessMessage('Check your email to confirm your account, then return here to sign in.');
+        setConfirmationRequired(true);
       } else {
         setError('Registration failed. Please try again.');
       }
@@ -164,18 +165,30 @@ export default function RegisterPage() {
             </div>
 
             {error && (
-              <div role="alert" className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
-                {error}
-              </div>
-            )}
-            {successMessage && (
-              <div role="status" className="rounded-lg border border-green-500/30 bg-green-500/10 px-4 py-3 text-sm text-green-300">
-                {successMessage}
+              <div
+                role="alert"
+                aria-live="assertive"
+                className="flex items-start gap-2 rounded-lg border border-red-500/25 bg-red-500/10 p-3 text-sm text-red-300"
+              >
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>{error}</span>
               </div>
             )}
 
             {/* Registration Form */}
-            <form onSubmit={handleSubmit} className="space-y-4">
+            {confirmationRequired ? (
+              <div
+                role="status"
+                aria-live="polite"
+                className="space-y-3 rounded-lg border border-green-500/25 bg-green-500/10 p-4 text-sm text-green-200"
+              >
+                <p>Check your email to confirm your account, then return here to sign in.</p>
+                <Link href="/auth/login" className="inline-flex font-medium text-green-100 underline underline-offset-4">
+                  Return to sign in
+                </Link>
+              </div>
+            ) : (
+              <form onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="name">Full name</Label>
                 <div className="relative">
@@ -273,7 +286,8 @@ export default function RegisterPage() {
                   </>
                 )}
               </Button>
-            </form>
+              </form>
+            )}
           </CardContent>
 
           <CardFooter className="justify-center">

@@ -1,5 +1,5 @@
-import { isSameDay } from 'date-fns';
 import type { PlannerBlock, PlannerPlan } from '@/lib/planner/types';
+import { isLocalDate, localDateFromIso } from '@/lib/schedule/selectors';
 import type { Subject, Task } from '@/lib/supabase/types';
 import type { PlannerBlockView, PlannerDayTaskView } from './types';
 
@@ -123,16 +123,20 @@ export function plannerBlockViews(
 
 export function plannerDayTasks(
   plan: PlannerPlan | null,
-  date: Date,
+  date: string | Date,
   tasks: readonly Task[],
   subjects: readonly Subject[],
 ): PlannerDayTaskView[] {
   if (!plan) return [];
+  const selectedDate = typeof date === 'string'
+    ? (isLocalDate(date) ? date : localDateFromIso(date, plan.settings.timeZone))
+    : localDateFromIso(date.toISOString(), plan.settings.timeZone);
+  if (!selectedDate) return [];
   const taskById = new Map(tasks.map(task => [task.id, task]));
   const subjectById = new Map(subjects.map(subject => [subject.id, subject]));
 
   return plan.blocks
-    .filter(block => isSameDay(new Date(block.startAt), date))
+    .filter(block => localDateFromIso(block.startAt, plan.settings.timeZone) === selectedDate)
     .map(block => {
       const task = block.taskId ? taskById.get(block.taskId) : null;
       const subject = block.subjectId ? subjectById.get(block.subjectId) : null;

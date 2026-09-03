@@ -2,6 +2,8 @@
 
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
+import { persistPlannerUserRecord } from './persistence-client';
+import { mergePlannerHydration, type PlannerPersistenceSnapshot } from './persistence';
 import {
   createEstimateCacheKey,
   feedbackMultiplierKeys,
@@ -56,7 +58,12 @@ export interface PlannerGenerateRequest {
 
 export interface PlannerStoreState {
   activeUserId: string | null;
+  sessionGeneration: number;
   users: Record<string, PlannerUserRecord>;
+  serverRevisionByUser: Record<string, number>;
+  serverMergeRequiredByUser: Record<string, boolean>;
+  pendingRevisionByUser: Record<string, number>;
+  nextRevisionByUser: Record<string, number>;
   setActiveUser: (userId: string | null, timeZone?: string) => void;
   ensureUser: (userId: string, timeZone?: string) => PlannerUserRecord;
   updateSettings: (userId: string, patch: Partial<PlannerSettings>) => PlannerSettings;
@@ -77,6 +84,9 @@ export interface PlannerStoreState {
   cacheEstimate: (userId: string, entry: PlannerEstimateCacheEntry, cacheKey?: string) => void;
   removeCachedEstimate: (userId: string, cacheKey: string) => void;
   recordFeedback: (userId: string, feedback: PlannerFeedbackInput) => PlannerActionResult<PlannerFeedbackRecord>;
+  hydrateUserPlannerData: (userId: string, snapshot: PlannerPersistenceSnapshot) => void;
+  retryPendingPlannerData: (userId: string) => void;
+  waitForPlannerPersistence: (userId: string, timeoutMs?: number) => Promise<boolean>;
   clearUserPlannerData: (userId: string) => void;
 }
 
@@ -160,6 +170,10 @@ function validateBlock(plan: PlannerPlan, candidate: PlannerBlock, ignoredBlockI
   }
   if (durationMinutes > plan.settings.maxBlockMinutes) return `Blocks cannot exceed ${plan.settings.maxBlockMinutes} minutes.`;
   if (start < horizonStart || end > horizonEnd) return 'The block must stay inside this plan week.';
+  // A due date describes when work was due; it is not a wall that makes the
+  // work impossible to plan afterward. This is especially important for
+  // overdue Canvas assignments. The engine still ranks before-deadline slots
+  // first, while manual moves remain possible on current and future dates.
   if (localDateAt(start, plan.settings.timeZone) !== localDateAt(end - 1, plan.settings.timeZone)) {
     return 'A block cannot cross into another day.';
   }
@@ -381,21 +395,190 @@ function updateMultiplier(
   };
 }
 
+const plannerPersistenceQueues = new Map<string, Promise<void>>();
+const DEFAULT_PLANNER_PERSISTENCE_WAIT_MS = 15_000;
+let plannerOnlineRetryInstalled = false;
+
+async function waitForPlannerQueueBefore(
+  queue: Promise<void>,
+  deadline: number,
+): Promise<boolean> {
+  const remainingMs = deadline - Date.now();
+  if (remainingMs <= 0) return false;
+
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      queue.then(() => true, () => false),
+      new Promise<boolean>(resolve => {
+        timeout = setTimeout(() => resolve(false), remainingMs);
+      }),
+    ]);
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout);
+  }
+}
+
+function queuePlannerPersistence(userId: string, expectedGeneration: number): void {
+  const previous = plannerPersistenceQueues.get(userId) || Promise.resolve();
+  const queued = previous.catch(() => undefined).then(async () => {
+    const before = usePlannerStore.getState();
+    const pendingRevision = before.pendingRevisionByUser[userId];
+    const record = before.users[userId];
+    if (
+      !pendingRevision
+      || !record
+      || before.activeUserId !== userId
+      || before.sessionGeneration !== expectedGeneration
+    ) return;
+    try {
+      const persistenceResult = await persistPlannerUserRecord(
+        userId,
+        record,
+        before.serverRevisionByUser[userId] || 0,
+        !before.serverMergeRequiredByUser[userId],
+      );
+      const after = usePlannerStore.getState();
+      if (
+        after.activeUserId !== userId
+        || after.sessionGeneration !== expectedGeneration
+      ) return;
+      usePlannerStore.setState(state => {
+        const pendingRevisionByUser = { ...state.pendingRevisionByUser };
+        const savedMutationIsCurrent = pendingRevisionByUser[userId] === pendingRevision;
+        if (savedMutationIsCurrent) {
+          delete pendingRevisionByUser[userId];
+        }
+        return {
+          users: savedMutationIsCurrent && persistenceResult.mergedSnapshot
+            ? {
+              ...state.users,
+              [userId]: hydratedRecord(mergePlannerHydration(
+                state.users[userId],
+                persistenceResult.mergedSnapshot,
+                false,
+              )),
+            }
+            : state.users,
+          serverRevisionByUser: {
+            ...state.serverRevisionByUser,
+            [userId]: persistenceResult.serverRevision,
+          },
+          serverMergeRequiredByUser: {
+            ...state.serverMergeRequiredByUser,
+            [userId]: Boolean(persistenceResult.mergedSnapshot && !savedMutationIsCurrent),
+          },
+          pendingRevisionByUser,
+        };
+      });
+    } catch (error) {
+      console.warn('Could not persist planner data; keeping it queued locally.', error);
+      return;
+    }
+  }).finally(() => {
+    if (plannerPersistenceQueues.get(userId) === queued) plannerPersistenceQueues.delete(userId);
+  });
+  plannerPersistenceQueues.set(userId, queued);
+}
+
+/**
+ * Wait for the active account's queued planner snapshot to reach Supabase.
+ *
+ * A resolved `true` is a persistence acknowledgement: the account/session is
+ * still current and its durable local outbox no longer contains a planner
+ * revision. A failed request deliberately leaves that revision pending, so a
+ * failure, timeout, or account switch resolves `false` instead of allowing a
+ * caller to claim that the change was saved.
+ */
+export async function waitForPlannerPersistence(
+  userId: string,
+  timeoutMs = DEFAULT_PLANNER_PERSISTENCE_WAIT_MS,
+): Promise<boolean> {
+  const initial = usePlannerStore.getState();
+  if (initial.activeUserId !== userId) return false;
+  if (!initial.pendingRevisionByUser[userId]) return true;
+
+  const expectedGeneration = initial.sessionGeneration;
+  if (!plannerPersistenceQueues.has(userId)) {
+    queuePlannerPersistence(userId, expectedGeneration);
+  }
+
+  const boundedTimeoutMs = Number.isFinite(timeoutMs) && timeoutMs > 0
+    ? Math.trunc(timeoutMs)
+    : DEFAULT_PLANNER_PERSISTENCE_WAIT_MS;
+  const deadline = Date.now() + boundedTimeoutMs;
+
+  while (true) {
+    const queue = plannerPersistenceQueues.get(userId);
+    if (!queue || !(await waitForPlannerQueueBefore(queue, deadline))) return false;
+
+    const after = usePlannerStore.getState();
+    if (
+      after.activeUserId !== userId
+      || after.sessionGeneration !== expectedGeneration
+    ) return false;
+    if (!after.pendingRevisionByUser[userId]) return true;
+
+    // A mutation made while the previous snapshot was saving appends another
+    // queue entry. Wait for it as well; if there is no follow-up queue, the
+    // remaining outbox revision represents a failed persistence attempt.
+    if (!plannerPersistenceQueues.has(userId)) return false;
+  }
+}
+
+function retryPendingPlannerData(userId: string): void {
+  const state = usePlannerStore.getState();
+  if (state.activeUserId !== userId || !state.pendingRevisionByUser[userId]) return;
+  queuePlannerPersistence(userId, state.sessionGeneration);
+}
+
+function installPlannerOnlineRetry(): void {
+  if (plannerOnlineRetryInstalled || typeof window === 'undefined') return;
+  plannerOnlineRetryInstalled = true;
+  window.addEventListener('online', () => {
+    const userId = usePlannerStore.getState().activeUserId;
+    if (userId) retryPendingPlannerData(userId);
+  });
+}
+
+function markPlannerMutation(userId: string): void {
+  const state = usePlannerStore.getState();
+  const revision = (state.nextRevisionByUser[userId] || 0) + 1;
+  usePlannerStore.setState(current => ({
+    nextRevisionByUser: { ...current.nextRevisionByUser, [userId]: revision },
+    pendingRevisionByUser: { ...current.pendingRevisionByUser, [userId]: revision },
+  }));
+  const active = usePlannerStore.getState();
+  if (active.activeUserId === userId) queuePlannerPersistence(userId, active.sessionGeneration);
+}
+
 export const usePlannerStore = create<PlannerStoreState>()(
   persist(
     (set, get) => ({
       activeUserId: null,
+      sessionGeneration: 0,
       users: {},
+      serverRevisionByUser: {},
+      serverMergeRequiredByUser: {},
+      pendingRevisionByUser: {},
+      nextRevisionByUser: {},
 
       setActiveUser: (userId, timeZone) => {
+        const previousUserId = get().activeUserId;
         if (userId && !get().users[userId]) {
           set(state => ({
             activeUserId: userId,
+            sessionGeneration: previousUserId === userId
+              ? state.sessionGeneration
+              : state.sessionGeneration + 1,
             users: { ...state.users, [userId]: createUserRecord(timeZone) },
           }));
-          return;
+        } else if (previousUserId !== userId) {
+          set(state => ({ activeUserId: userId, sessionGeneration: state.sessionGeneration + 1 }));
+        } else {
+          set({ activeUserId: userId });
         }
-        set({ activeUserId: userId });
+        installPlannerOnlineRetry();
       },
 
       ensureUser: (userId, timeZone) => {
@@ -415,6 +598,7 @@ export const usePlannerStore = create<PlannerStoreState>()(
             [userId]: { ...hydratedRecord(state.users[userId]), settings },
           },
         }));
+        markPlannerMutation(userId);
         return settings;
       },
 
@@ -424,6 +608,7 @@ export const usePlannerStore = create<PlannerStoreState>()(
         set(state => ({
           users: { ...state.users, [userId]: { ...hydratedRecord(state.users[userId]), commitments: sorted } },
         }));
+        markPlannerMutation(userId);
       },
 
       upsertCommitment: (userId, commitment) => {
@@ -435,6 +620,7 @@ export const usePlannerStore = create<PlannerStoreState>()(
         set(state => ({
           users: { ...state.users, [userId]: { ...hydratedRecord(state.users[userId]), commitments } },
         }));
+        markPlannerMutation(userId);
       },
 
       removeCommitment: (userId, commitmentId) => {
@@ -448,6 +634,7 @@ export const usePlannerStore = create<PlannerStoreState>()(
             },
           },
         }));
+        markPlannerMutation(userId);
       },
 
       generatePlan: (userId, request) => {
@@ -479,6 +666,7 @@ export const usePlannerStore = create<PlannerStoreState>()(
             },
           },
         }));
+        markPlannerMutation(userId);
         return plan;
       },
 
@@ -493,6 +681,7 @@ export const usePlannerStore = create<PlannerStoreState>()(
             [userId]: { ...hydratedRecord(state.users[userId]), currentPlan: plan, history },
           },
         }));
+        markPlannerMutation(userId);
       },
 
       refreshPlanStaleness: (userId, request) => {
@@ -518,6 +707,7 @@ export const usePlannerStore = create<PlannerStoreState>()(
               },
             },
           }));
+          markPlannerMutation(userId);
         }
         return staleness;
       },
@@ -554,6 +744,7 @@ export const usePlannerStore = create<PlannerStoreState>()(
             },
           },
         }));
+        markPlannerMutation(userId);
         return { ok: true, value: candidate };
       },
 
@@ -621,6 +812,7 @@ export const usePlannerStore = create<PlannerStoreState>()(
             },
           };
         });
+        markPlannerMutation(userId);
         return { ok: true };
       },
 
@@ -638,6 +830,7 @@ export const usePlannerStore = create<PlannerStoreState>()(
             },
           },
         }));
+        markPlannerMutation(userId);
         return { ok: true, value: archived };
       },
 
@@ -658,6 +851,7 @@ export const usePlannerStore = create<PlannerStoreState>()(
             },
           };
         });
+        markPlannerMutation(userId);
         return { ok: true };
       },
 
@@ -677,6 +871,7 @@ export const usePlannerStore = create<PlannerStoreState>()(
             },
           };
         });
+        markPlannerMutation(userId);
         return complete;
       },
 
@@ -685,6 +880,7 @@ export const usePlannerStore = create<PlannerStoreState>()(
         set(state => ({
           users: { ...state.users, [userId]: { ...hydratedRecord(state.users[userId]), messages: [] } },
         }));
+        markPlannerMutation(userId);
       },
 
       cacheEstimate: (userId, entry, cacheKey) => {
@@ -710,6 +906,7 @@ export const usePlannerStore = create<PlannerStoreState>()(
             },
           };
         });
+        markPlannerMutation(userId);
       },
 
       removeCachedEstimate: (userId, cacheKey) => {
@@ -720,6 +917,7 @@ export const usePlannerStore = create<PlannerStoreState>()(
           delete estimateCache[cacheKey];
           return { users: { ...state.users, [userId]: { ...record, estimateCache } } };
         });
+        markPlannerMutation(userId);
       },
 
       recordFeedback: (userId, feedback) => {
@@ -764,28 +962,113 @@ export const usePlannerStore = create<PlannerStoreState>()(
             },
           };
         });
+        markPlannerMutation(userId);
         return { ok: true, value: normalized };
       },
+
+      hydrateUserPlannerData: (userId, snapshot) => {
+        const existing = get().ensureUser(userId, snapshot.settings?.timeZone);
+        const hasPending = Boolean(get().pendingRevisionByUser[userId]);
+        const merged = hydratedRecord(mergePlannerHydration(existing, snapshot, hasPending));
+        set(state => ({
+          users: { ...state.users, [userId]: merged },
+          serverRevisionByUser: hasPending
+            ? state.serverRevisionByUser
+            : { ...state.serverRevisionByUser, [userId]: snapshot.serverRevision },
+          serverMergeRequiredByUser: hasPending
+            ? state.serverMergeRequiredByUser
+            : { ...state.serverMergeRequiredByUser, [userId]: false },
+        }));
+        if (!snapshot.hasServerData && !hasPending) {
+          // Migrate an existing/default local cache into an empty online account.
+          markPlannerMutation(userId);
+        } else {
+          retryPendingPlannerData(userId);
+        }
+      },
+
+      retryPendingPlannerData,
+      waitForPlannerPersistence,
 
       clearUserPlannerData: (userId) => {
         set(state => {
           const users = { ...state.users };
+          const serverRevisionByUser = { ...state.serverRevisionByUser };
+          const serverMergeRequiredByUser = { ...state.serverMergeRequiredByUser };
+          const pendingRevisionByUser = { ...state.pendingRevisionByUser };
+          const nextRevisionByUser = { ...state.nextRevisionByUser };
           delete users[userId];
-          return { users, activeUserId: state.activeUserId === userId ? null : state.activeUserId };
+          delete serverRevisionByUser[userId];
+          delete serverMergeRequiredByUser[userId];
+          delete pendingRevisionByUser[userId];
+          delete nextRevisionByUser[userId];
+          return {
+            users,
+            serverRevisionByUser,
+            serverMergeRequiredByUser,
+            pendingRevisionByUser,
+            nextRevisionByUser,
+            activeUserId: state.activeUserId === userId ? null : state.activeUserId,
+            sessionGeneration: state.activeUserId === userId
+              ? state.sessionGeneration + 1
+              : state.sessionGeneration,
+          };
         });
       },
     }),
     {
       name: 'orderly-planner-storage',
-      version: 1,
+      version: 3,
       storage: createJSONStorage(() => localStorage),
-      partialize: state => ({ activeUserId: state.activeUserId, users: state.users }),
+      partialize: state => ({
+        users: state.users,
+        serverRevisionByUser: state.serverRevisionByUser,
+        serverMergeRequiredByUser: state.serverMergeRequiredByUser,
+        pendingRevisionByUser: state.pendingRevisionByUser,
+        nextRevisionByUser: state.nextRevisionByUser,
+      }),
+      migrate: (persisted, persistedVersion) => {
+        const saved = persisted as Partial<PlannerStoreState> | undefined;
+        const serverRevisionByUser = { ...(saved?.serverRevisionByUser || {}) };
+        const serverMergeRequiredByUser = { ...(saved?.serverMergeRequiredByUser || {}) };
+        const pendingRevisionByUser = { ...(saved?.pendingRevisionByUser || {}) };
+        const nextRevisionByUser = { ...(saved?.nextRevisionByUser || {}) };
+
+        // Planner version one was a per-account local cache. Mark each legacy
+        // record dirty so the first authenticated hydration uploads it before
+        // an empty server snapshot can replace it.
+        if (persistedVersion < 2) {
+          for (const userId of Object.keys(saved?.users || {})) {
+            if (pendingRevisionByUser[userId]) continue;
+            const revision = (nextRevisionByUser[userId] || 0) + 1;
+            nextRevisionByUser[userId] = revision;
+            pendingRevisionByUser[userId] = revision;
+          }
+        }
+        return {
+          ...saved,
+          serverRevisionByUser,
+          serverMergeRequiredByUser,
+          pendingRevisionByUser,
+          nextRevisionByUser,
+        };
+      },
       merge: (persisted, current) => {
         const saved = persisted as Partial<PlannerStoreState> | undefined;
         const users = Object.fromEntries(
           Object.entries(saved?.users || {}).map(([userId, record]) => [userId, hydratedRecord(record)]),
         );
-        return { ...current, ...saved, users };
+        return {
+          ...current,
+          ...saved,
+          activeUserId: null,
+          sessionGeneration: 0,
+          serverRevisionByUser: saved?.serverRevisionByUser || {},
+          serverMergeRequiredByUser: saved?.serverMergeRequiredByUser || {},
+          pendingRevisionByUser: saved?.pendingRevisionByUser || {},
+          nextRevisionByUser: saved?.nextRevisionByUser || {},
+          users,
+        };
       },
     },
   ),

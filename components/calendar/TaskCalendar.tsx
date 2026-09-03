@@ -9,7 +9,6 @@ import {
   endOfWeek,
   format,
   isSameMonth,
-  isToday,
   startOfDay,
   startOfMonth,
   startOfWeek,
@@ -25,7 +24,6 @@ import {
   GraduationCap,
   Plus,
 } from 'lucide-react';
-import { TaskDetailViewer } from '@/components/tasks/TaskDetailViewer';
 import { TaskForm } from '@/components/tasks/TaskForm';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -33,12 +31,15 @@ import { Card, CardContent } from '@/components/ui/Card';
 import { useAppStore } from '@/lib/store';
 import type { Exam, Subject, Task } from '@/lib/supabase/types';
 import {
+  isMonthlyRecurrenceDate,
+  localDateFromIso,
   localTimeFromIso,
   selectScheduleEntriesForUser,
   taskDeadlineDate,
   taskUntimedDisplayDate,
   type TaskUntimedDisplayDateOptions,
 } from '@/lib/schedule/selectors';
+import { civilDateFromStored } from '@/lib/civil-date';
 import { useScheduleStore } from '@/lib/schedule/store';
 import type { ScheduleEntry } from '@/lib/schedule/types';
 import { getDefaultPlannerSettings } from '@/lib/planner/types';
@@ -47,6 +48,7 @@ import { buildCommitmentOccurrences } from '@/lib/planner/commitments';
 import { cn, isExamType } from '@/lib/utils';
 import { hasMissingTaskOnDate, isTaskMissing, taskMissingDate } from '@/lib/task-status';
 import { useCurrentTime } from '@/lib/use-current-time';
+import { useHydrated } from '@/lib/use-hydrated';
 
 type TaskCalendarMode = 'week' | 'month';
 
@@ -66,12 +68,10 @@ interface CalendarEventItem {
 
 const WEEK_STARTS_ON = 1 as const;
 
-function localDateKey(value: string | Date): string | null {
-  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}(?:$|T00:00:00(?:\.000)?Z?$)/.test(value)) {
-    return value.slice(0, 10);
-  }
-  const parsed = value instanceof Date ? value : new Date(value);
-  return Number.isNaN(parsed.getTime()) ? null : format(parsed, 'yyyy-MM-dd');
+function localDateKey(value: string | Date, timeZone: string): string | null {
+  return value instanceof Date
+    ? localDateFromIso(value.toISOString(), timeZone)
+    : civilDateFromStored(value, timeZone);
 }
 
 function localDateFromKey(value: string): Date {
@@ -95,7 +95,9 @@ function taskOccursOn(
   if (recurrence === 'none' || task.status === 'completed') return false;
   if (scheduleEntry?.recurrenceEndDate && dateKey > scheduleEntry.recurrenceEndDate) return false;
 
-  const anchorKey = dueDateKey || scheduleEntry?.scheduledDate || localDateKey(task.created_at);
+  const anchorKey = dueDateKey
+    || scheduleEntry?.scheduledDate
+    || localDateKey(task.created_at, displayOptions.timeZone || 'UTC');
   if (!anchorKey || startOfDay(date) < startOfDay(localDateFromKey(anchorKey))) return false;
   if (recurrence === 'daily') return true;
   if (recurrence === 'weekly') {
@@ -104,8 +106,7 @@ function taskOccursOn(
       ? configuredDays.includes(date.getDay())
       : date.getDay() === localDateFromKey(anchorKey).getDay();
   }
-  return recurrence === 'monthly'
-    && date.getDate() === localDateFromKey(anchorKey).getDate();
+  return recurrence === 'monthly' && isMonthlyRecurrenceDate(dateKey, anchorKey);
 }
 
 function taskTimeLabel(task: Task, timeZone?: string): string | null {
@@ -257,17 +258,13 @@ export function TaskCalendar() {
   const entriesByUser = useScheduleStore(state => state.entriesByUser);
   const plannerUsers = usePlannerStore(state => state.users);
   const setActiveUser = usePlannerStore(state => state.setActiveUser);
-  const [mounted, setMounted] = useState(false);
+  const mounted = useHydrated();
   const [currentDate, setCurrentDate] = useState<Date | null>(null);
+  const [currentDateTimeZone, setCurrentDateTimeZone] = useState<string | null>(null);
   const [mode, setMode] = useState<TaskCalendarMode>('month');
   const [taskFormOpen, setTaskFormOpen] = useState(false);
-  const [detailTaskId, setDetailTaskId] = useState<string | null>(null);
+  const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const now = useCurrentTime();
-
-  useEffect(() => {
-    setCurrentDate(new Date());
-    setMounted(true);
-  }, []);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -275,10 +272,20 @@ export function TaskCalendar() {
   }, [setActiveUser, user?.id]);
 
   const plannerRecord = user?.id ? plannerUsers[user.id] : null;
-  const commitments = plannerRecord?.commitments || [];
+  const commitments = useMemo(
+    () => plannerRecord?.commitments || [],
+    [plannerRecord?.commitments],
+  );
   const fallbackTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
   const plannerSettings = plannerRecord?.settings || getDefaultPlannerSettings(fallbackTimeZone);
   const timeZone = plannerSettings.timeZone;
+  const todayKey = localDateFromIso(now.toISOString(), timeZone);
+
+  if (mounted && todayKey && currentDateTimeZone !== timeZone) {
+    setCurrentDate(localDateFromKey(todayKey));
+    setCurrentDateTimeZone(timeZone);
+  }
+
   const displayOptions = useMemo<TaskUntimedDisplayDateOptions>(() => ({
     timeZone,
     schoolDays: plannerSettings.schoolDays,
@@ -299,7 +306,7 @@ export function TaskCalendar() {
     () => new Map(scheduleEntries.map(entry => [entry.taskId, entry])),
     [scheduleEntries],
   );
-  const detailTask = detailTaskId ? taskById.get(detailTaskId) || null : null;
+  const editingTask = editingTaskId ? taskById.get(editingTaskId) || null : null;
 
   const visibleDays = useMemo(() => {
     if (!currentDate) return [];
@@ -341,7 +348,7 @@ export function TaskCalendar() {
         .filter(task => taskOccursOn(task, day, scheduleByTaskId.get(task.id), displayOptions, now))
         .sort((left, right) => taskTimeSortValue(left, timeZone) - taskTimeSortValue(right, timeZone) || left.title.localeCompare(right.title));
       const dayExams = exams
-        .filter(exam => localDateKey(exam.exam_date) === key)
+        .filter(exam => civilDateFromStored(exam.exam_date, timeZone) === key)
         .sort((left, right) => left.exam_date.localeCompare(right.exam_date));
       const dayEvents = (calendarEvents.get(key) || [])
         .sort((left, right) => left.startTime.localeCompare(right.startTime) || left.title.localeCompare(right.title));
@@ -355,6 +362,21 @@ export function TaskCalendar() {
     setCurrentDate(mode === 'month'
       ? (direction < 0 ? subMonths(currentDate, 1) : addMonths(currentDate, 1))
       : (direction < 0 ? subWeeks(currentDate, 1) : addWeeks(currentDate, 1)));
+  };
+
+  const openNewTaskForm = () => {
+    setEditingTaskId(null);
+    setTaskFormOpen(true);
+  };
+
+  const openTaskEditor = (taskId: string) => {
+    setEditingTaskId(taskId);
+    setTaskFormOpen(true);
+  };
+
+  const closeTaskForm = () => {
+    setTaskFormOpen(false);
+    setEditingTaskId(null);
   };
 
   if (!mounted || !currentDate) {
@@ -372,7 +394,13 @@ export function TaskCalendar() {
           <Button type="button" variant="ghost" size="icon-sm" onClick={() => navigate(-1)} aria-label={`Previous ${mode}`}>
             <ChevronLeft className="h-4 w-4" />
           </Button>
-          <Button type="button" variant="ghost" size="sm" onClick={() => setCurrentDate(new Date())} className="h-8 px-2.5 text-xs">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => todayKey && setCurrentDate(localDateFromKey(todayKey))}
+            className="h-8 px-2.5 text-xs"
+          >
             Today
           </Button>
           <Button type="button" variant="ghost" size="icon-sm" onClick={() => navigate(1)} aria-label={`Next ${mode}`}>
@@ -397,7 +425,7 @@ export function TaskCalendar() {
               </button>
             ))}
           </div>
-          <Button type="button" size="sm" onClick={() => setTaskFormOpen(true)} className="h-8 px-2.5 text-xs">
+          <Button type="button" size="sm" onClick={openNewTaskForm} className="h-8 px-2.5 text-xs">
             <Plus className="h-3.5 w-3.5" />
             <span className="hidden sm:inline">New</span>
           </Button>
@@ -427,20 +455,21 @@ export function TaskCalendar() {
                     const visibleExams = items.exams.slice(0, Math.max(0, 4 - visibleEvents.length - visibleTasks.length));
                     const shown = visibleTasks.length + visibleExams.length + visibleEvents.length;
                     const hasMissingTasks = hasMissingTaskOnDate(tasks, key, now, timeZone);
+                    const isPlannerToday = key === todayKey;
                     return (
                       <div
                         key={key}
                         className={cn(
                           'min-h-[128px] border-b border-r border-border/40 p-1.5 last:border-r-0',
                           !isSameMonth(day, currentDate) && 'bg-muted/[0.08] text-muted-foreground opacity-55',
-                          isToday(day) && 'bg-primary/[0.035]',
+                          isPlannerToday && 'bg-primary/[0.035]',
                           hasMissingTasks && 'bg-red-500/[0.07] ring-1 ring-inset ring-red-500/35',
                         )}
                       >
                         <div className="mb-1 flex items-center justify-between">
                           <span className={cn(
                             'flex h-6 min-w-6 items-center justify-center rounded-full px-1.5 text-xs font-semibold',
-                            isToday(day) && 'bg-primary text-primary-foreground shadow-sm',
+                            isPlannerToday && 'bg-primary text-primary-foreground shadow-sm',
                           )}>
                             {format(day, 'd')}
                           </span>
@@ -449,7 +478,7 @@ export function TaskCalendar() {
                         <div className="space-y-1">
                           {visibleEvents.map(event => <EventChip key={event.id} event={event} compact />)}
                           {visibleTasks.map(task => (
-                            <TaskDeadlineChip key={task.id} task={task} subject={task.subject_id ? subjectById.get(task.subject_id) : undefined} compact displayDateKey={key} timeZone={timeZone} currentTime={now} onClick={() => setDetailTaskId(task.id)} />
+                            <TaskDeadlineChip key={task.id} task={task} subject={task.subject_id ? subjectById.get(task.subject_id) : undefined} compact displayDateKey={key} timeZone={timeZone} currentTime={now} onClick={() => openTaskEditor(task.id)} />
                           ))}
                           {visibleExams.map(exam => (
                             <ExamDeadlineChip key={exam.id} exam={exam} subject={exam.subject_id ? subjectById.get(exam.subject_id) : undefined} compact />
@@ -477,21 +506,22 @@ export function TaskCalendar() {
                     const key = format(day, 'yyyy-MM-dd');
                     const items = itemsByDate.get(key) || { tasks: [], exams: [], events: [] };
                     const hasMissingTasks = hasMissingTaskOnDate(tasks, key, now, timeZone);
+                    const isPlannerToday = key === todayKey;
                     return (
                       <div key={key} className={cn(
                         'min-h-[calc(100dvh-15.5rem)] border-r border-border/45 p-2 last:border-r-0',
-                        isToday(day) && 'bg-primary/[0.035]',
+                        isPlannerToday && 'bg-primary/[0.035]',
                         hasMissingTasks && 'bg-red-500/[0.07] ring-1 ring-inset ring-red-500/35',
                       )}>
                         <div className="mb-2 flex items-center justify-center">
-                          <span className={cn('flex h-7 min-w-7 items-center justify-center rounded-full px-2 text-sm font-semibold', isToday(day) && 'bg-primary text-primary-foreground shadow-sm')}>
+                          <span className={cn('flex h-7 min-w-7 items-center justify-center rounded-full px-2 text-sm font-semibold', isPlannerToday && 'bg-primary text-primary-foreground shadow-sm')}>
                             {format(day, 'd')}
                           </span>
                         </div>
                         <div className="space-y-1.5">
                           {items.events.map(event => <EventChip key={event.id} event={event} />)}
                           {items.tasks.map(task => (
-                            <TaskDeadlineChip key={task.id} task={task} subject={task.subject_id ? subjectById.get(task.subject_id) : undefined} displayDateKey={key} timeZone={timeZone} currentTime={now} onClick={() => setDetailTaskId(task.id)} />
+                            <TaskDeadlineChip key={task.id} task={task} subject={task.subject_id ? subjectById.get(task.subject_id) : undefined} displayDateKey={key} timeZone={timeZone} currentTime={now} onClick={() => openTaskEditor(task.id)} />
                           ))}
                           {items.exams.map(exam => (
                             <ExamDeadlineChip key={exam.id} exam={exam} subject={exam.subject_id ? subjectById.get(exam.subject_id) : undefined} />
@@ -519,8 +549,11 @@ export function TaskCalendar() {
         <Badge variant="outline" className="gap-1 text-[10px]"><CalendarClock className="h-2.5 w-2.5" /> Event</Badge>
       </div>
 
-      <TaskForm isOpen={taskFormOpen} onClose={() => setTaskFormOpen(false)} />
-      <TaskDetailViewer task={detailTask} open={Boolean(detailTask)} onOpenChange={open => !open && setDetailTaskId(null)} />
+      <TaskForm
+        isOpen={taskFormOpen}
+        onClose={closeTaskForm}
+        task={editingTask}
+      />
     </div>
   );
 }

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import {
   buildPlannerChatSystemPrompt,
+  inferPlannerChatExactCorrection,
   inferPlannerChatPlanRequest,
   parsePlannerChatAIJson,
   plannerChatNormalizedCommandsPreserveIntent,
@@ -115,6 +116,25 @@ export async function POST(request: NextRequest) {
   const input = sanitizePlannerChatAIInput(body);
   if (!input) return unavailable('Type a message for Orderly Assistant first.', 400);
 
+  // A task/event correction against the visible exact draft is fully
+  // deterministic. Resolve it before calling DeepSeek so a conversational
+  // follow-up cannot lose another item in the bundle or spend tokens merely
+  // to change one explicit entity type.
+  const correctedDraftCommands = inferPlannerChatExactCorrection(
+    input.messages,
+    input.context,
+  );
+  if (correctedDraftCommands) {
+    return noStoreJson({
+      reply: 'That item is set correctly in your calendar draft, and I kept the other changes.',
+      normalizedCommands: correctedDraftCommands,
+      normalizedCommand: legacyNormalizedCommand(correctedDraftCommands),
+      planRequest: null,
+      usage: null,
+      aiUsed: false,
+    });
+  }
+
   if (process.env.AI_ASSISTANT_ENABLED === 'false') {
     return unavailable('Orderly Assistant is temporarily turned off. Your existing planner still works.', 503);
   }
@@ -159,7 +179,7 @@ export async function POST(request: NextRequest) {
           },
         ],
         temperature: 0,
-        max_tokens: 700,
+        max_tokens: 1_000,
         stream: false,
         response_format: { type: 'json_object' },
         thinking: { type: 'disabled' },

@@ -11,6 +11,7 @@ import type {
 } from './types';
 import { PLANNER_PROMPT_TASK_SOURCE } from './types';
 import { zonedDateTimeToTimestamp } from './engine';
+import { isMonthlyRecurrenceDate } from '@/lib/schedule/selectors';
 
 export interface StoredCalendarEvent {
   id: string;
@@ -372,10 +373,6 @@ function localDayOfWeek(localDate: string): number {
   return new Date(Date.UTC(year, month - 1, day)).getUTCDay();
 }
 
-function localDayOfMonth(localDate: string): number {
-  return Number(localDate.slice(8, 10));
-}
-
 function normalizedRecurrenceDays(days: number[] | null | undefined): number[] {
   return [...new Set((days || [])
     .filter(day => Number.isInteger(day) && day >= 0 && day <= 6))]
@@ -479,7 +476,6 @@ export function tasksToPlannerInputs(
     const weeklyDays = configuredDays.length > 0
       ? configuredDays
       : [localDayOfWeek(anchorDate)];
-    const anchorDayOfMonth = localDayOfMonth(anchorDate);
 
     for (let offset = 0; offset < horizonDays; offset += 1) {
       const occurrenceDate = addLocalDays(firstLocalDate, offset);
@@ -489,7 +485,7 @@ export function tasksToPlannerInputs(
       const occurs = isAnchor
         || recurrence === 'daily'
         || (recurrence === 'weekly' && weeklyDays.includes(localDayOfWeek(occurrenceDate)))
-        || (recurrence === 'monthly' && localDayOfMonth(occurrenceDate) === anchorDayOfMonth);
+        || (recurrence === 'monthly' && isMonthlyRecurrenceDate(occurrenceDate, anchorDate));
       if (!occurs) continue;
 
       const occurrenceId = `${task.id}@${occurrenceDate}`;
@@ -708,8 +704,12 @@ export function writeStoredCalendarEvents(
   if (typeof window === 'undefined') return;
   const ownerUserId = normalizedStorageUserId(userId);
   if (!ownerUserId) return;
-  window.localStorage.setItem(storedCalendarEventsStorageKey(ownerUserId), JSON.stringify(events));
-  window.dispatchEvent(new CustomEvent('orderly-calendar-events-changed', {
-    detail: { userId: ownerUserId },
-  }));
+  try {
+    window.localStorage.setItem(storedCalendarEventsStorageKey(ownerUserId), JSON.stringify(events));
+    window.dispatchEvent(new CustomEvent('orderly-calendar-events-changed', {
+      detail: { userId: ownerUserId },
+    }));
+  } catch {
+    // Keep the in-memory calendar usable when browser storage is unavailable.
+  }
 }

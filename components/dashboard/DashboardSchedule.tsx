@@ -1,20 +1,25 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { addDays, differenceInMinutes, format, startOfDay } from 'date-fns';
+import { differenceInMinutes, format } from 'date-fns';
 import Link from 'next/link';
 import { CalendarClock, ChevronLeft, ChevronRight, Clock3, ListTodo, LockKeyhole } from 'lucide-react';
 import { TaskDetailViewer } from '@/components/tasks/TaskDetailViewer';
+import { TaskForm } from '@/components/tasks/TaskForm';
 import { Button } from '@/components/ui/Button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import {
   addLocalDays,
   buildScheduleOccurrences,
+  formatIsoTime,
+  localDateFromIso,
+  localDateToDateCarrier,
   localDateTimeToIso,
+  localMinuteOfDayFromIso,
   selectScheduleEntriesForUser,
 } from '@/lib/schedule/selectors';
 import { useScheduleStore } from '@/lib/schedule/store';
-import type { ScheduleOccurrence } from '@/lib/schedule/types';
+import type { LocalDate, ScheduleOccurrence } from '@/lib/schedule/types';
 import { useAppStore } from '@/lib/store';
 import { cn } from '@/lib/utils';
 import {
@@ -24,8 +29,13 @@ import { useStoredCalendarEvents } from '@/lib/planner/use-stored-calendar-event
 import { usePlannerStore } from '@/lib/planner/store';
 import type { RecurringCommitmentInput } from '@/lib/planner/types';
 import { buildCommitmentOccurrences } from '@/lib/planner/commitments';
+import {
+  DASHBOARD_SCHEDULE_HOUR_HEIGHT,
+  dashboardScheduleCreationSlot,
+  type DashboardScheduleCreationSlot,
+} from './dashboard-schedule-slot';
 
-const HOUR_HEIGHT = 54;
+const HOUR_HEIGHT = DASHBOARD_SCHEDULE_HOUR_HEIGHT;
 const DAY_HEIGHT = 24 * HOUR_HEIGHT;
 
 function durationLabel(seconds: number | null): string | null {
@@ -41,11 +51,11 @@ function taskColor(item: ScheduleOccurrence): string {
   return item.color || (item.task.priority === 'high' ? '#ef4444' : item.task.priority === 'low' ? '#22c55e' : '#6366f1');
 }
 
-function timeLabel(item: ScheduleOccurrence): string {
+function timeLabel(item: ScheduleOccurrence, timeZone: string): string {
   if (!item.startAt) return '';
-  const start = new Date(item.startAt);
-  const end = item.endAt ? new Date(item.endAt) : null;
-  return `${format(start, 'h:mm a')}${end ? `–${format(end, 'h:mm a')}` : ''}`;
+  const start = formatIsoTime(item.startAt, timeZone);
+  const end = item.endAt ? formatIsoTime(item.endAt, timeZone) : null;
+  return `${start || ''}${end ? `–${end}` : ''}`;
 }
 
 interface DashboardFixedBlock {
@@ -89,22 +99,40 @@ export function DashboardSchedule() {
   const entriesByUser = useScheduleStore(state => state.entriesByUser);
   const plannerUsers = usePlannerStore(state => state.users);
   const setActiveUser = usePlannerStore(state => state.setActiveUser);
-  const [selectedDate, setSelectedDate] = useState(() => startOfDay(new Date()));
-  const [detailOccurrenceId, setDetailOccurrenceId] = useState<string | null>(null);
-  const scrollerRef = useRef<HTMLDivElement>(null);
   const userId = user?.id || null;
-  const { events: storedEvents } = useStoredCalendarEvents(userId);
   const plannerRecord = userId ? plannerUsers[userId] : null;
   const timeZone = plannerRecord?.settings.timeZone
     || Intl.DateTimeFormat().resolvedOptions().timeZone
     || 'UTC';
-  const dateKey = format(selectedDate, 'yyyy-MM-dd');
+  const [selectedDateKey, setSelectedDateKey] = useState<LocalDate>(() => (
+    localDateFromIso(new Date().toISOString(), timeZone) || '1970-01-01'
+  ));
+  const [detailOccurrenceId, setDetailOccurrenceId] = useState<string | null>(null);
+  const [creationSlot, setCreationSlot] = useState<(
+    DashboardScheduleCreationSlot & { userId: string }
+  ) | null>(null);
+  const { events: storedEvents } = useStoredCalendarEvents(userId);
+  const scrollerRef = useRef<HTMLDivElement>(null);
+  const selectedDate = localDateToDateCarrier(selectedDateKey) || new Date(1970, 0, 1, 12);
+  const dateKey = selectedDateKey;
 
   useEffect(() => {
     if (!userId) return;
     setActiveUser(userId, Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
   }, [setActiveUser, userId]);
 
+  useEffect(() => {
+    const today = localDateFromIso(new Date().toISOString(), timeZone);
+    if (!today) return;
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      setSelectedDateKey(today);
+      setDetailOccurrenceId(null);
+      setCreationSlot(null);
+    });
+    return () => { cancelled = true; };
+  }, [timeZone, userId]);
   const entries = useMemo(
     () => selectScheduleEntriesForUser(entriesByUser, user?.id),
     [entriesByUser, user?.id],
@@ -178,13 +206,27 @@ export function DashboardSchedule() {
               <p className="text-xs text-muted-foreground">
                 {occurrences.timed.length} timed · {occurrences.untimed.length} untimed · {fixedBlocks.length} busy
               </p>
+              <p className="mt-0.5 text-[10px] text-muted-foreground/75">
+                Click an empty time to add a task or event.
+              </p>
             </div>
             <div className="ml-1 flex items-center gap-0.5">
-              <Button type="button" variant="ghost" size="icon-sm" className="h-7 w-7" onClick={() => setSelectedDate(current => addDays(current, -1))} aria-label="Previous day">
+              <Button type="button" variant="ghost" size="icon-sm" className="h-7 w-7" onClick={() => setSelectedDateKey(current => addLocalDays(current, -1))} aria-label="Previous day">
                 <ChevronLeft className="h-3.5 w-3.5" />
               </Button>
-              <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-[11px]" onClick={() => setSelectedDate(startOfDay(new Date()))}>Today</Button>
-              <Button type="button" variant="ghost" size="icon-sm" className="h-7 w-7" onClick={() => setSelectedDate(current => addDays(current, 1))} aria-label="Next day">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2 text-[11px]"
+                onClick={() => {
+                  const today = localDateFromIso(new Date().toISOString(), timeZone);
+                  if (today) setSelectedDateKey(today);
+                }}
+              >
+                Today
+              </Button>
+              <Button type="button" variant="ghost" size="icon-sm" className="h-7 w-7" onClick={() => setSelectedDateKey(current => addLocalDays(current, 1))} aria-label="Next day">
                 <ChevronRight className="h-3.5 w-3.5" />
               </Button>
             </div>
@@ -228,7 +270,21 @@ export function DashboardSchedule() {
                 </span>
               ))}
             </div>
-            <div className="relative">
+            <div
+              className="relative cursor-crosshair"
+              aria-label={`Create a task or event on ${format(selectedDate, 'EEEE, MMMM d')}`}
+              onClick={(event) => {
+                const target = event.target as HTMLElement;
+                if (target.closest('[data-dashboard-schedule-block]')) return;
+                if (!userId) return;
+                setDetailOccurrenceId(null);
+                const bounds = event.currentTarget.getBoundingClientRect();
+                setCreationSlot({
+                  ...dashboardScheduleCreationSlot(dateKey, event.clientY, bounds.top),
+                  userId,
+                });
+              }}
+            >
               {Array.from({ length: 25 }, (_, hour) => (
                 <div key={hour} className="pointer-events-none absolute inset-x-0 border-t border-border/40" style={{ top: hour * HOUR_HEIGHT }} />
               ))}
@@ -236,14 +292,19 @@ export function DashboardSchedule() {
                 if (!item.startAt) return null;
                 const start = new Date(item.startAt);
                 const end = item.endAt ? new Date(item.endAt) : new Date(start.getTime() + 30 * 60_000);
-                const startMinute = start.getHours() * 60 + start.getMinutes();
+                const startMinute = localMinuteOfDayFromIso(item.startAt, timeZone);
+                if (startMinute === null) return null;
                 const duration = Math.max(15, differenceInMinutes(end, start));
                 const color = taskColor(item);
                 return (
                   <button
                     key={item.id}
                     type="button"
-                    onClick={() => setDetailOccurrenceId(item.id)}
+                    data-dashboard-schedule-block
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setDetailOccurrenceId(item.id);
+                    }}
                     className={cn(
                       'absolute left-2 right-2 overflow-hidden rounded-md border border-l-[3px] px-2 py-1 text-left shadow-sm transition-[filter,transform] hover:brightness-110 active:scale-[0.995]',
                       item.task.status === 'completed' && 'opacity-50',
@@ -258,7 +319,7 @@ export function DashboardSchedule() {
                     }}
                   >
                     <p className="truncate text-[11px] font-semibold">{item.title}</p>
-                    <p className="truncate text-[9px] text-muted-foreground">{timeLabel(item)}</p>
+                    <p className="truncate text-[9px] text-muted-foreground">{timeLabel(item, timeZone)}</p>
                   </button>
                 );
               })}
@@ -266,11 +327,15 @@ export function DashboardSchedule() {
               {fixedBlocks.map(item => {
                 const start = new Date(item.startAt);
                 const end = new Date(item.endAt);
-                const startMinute = start.getHours() * 60 + start.getMinutes();
+                const startMinute = localMinuteOfDayFromIso(item.startAt, timeZone);
+                if (startMinute === null) return null;
                 const duration = Math.max(15, differenceInMinutes(end, start));
+                const startLabel = formatIsoTime(item.startAt, timeZone) || '';
+                const endLabel = formatIsoTime(item.endAt, timeZone) || '';
                 return (
                   <div
                     key={item.id}
+                    data-dashboard-schedule-block
                     className={cn(
                       'absolute left-2 right-2 overflow-hidden rounded-md border border-l-[3px] px-2 py-1 text-left shadow-sm',
                       item.locked && 'border-dashed',
@@ -283,14 +348,14 @@ export function DashboardSchedule() {
                       backgroundColor: `${item.color}18`,
                       zIndex: 5,
                     }}
-                    aria-label={`${item.title}, ${format(start, 'h:mm a')}–${format(end, 'h:mm a')}, busy`}
+                    aria-label={`${item.title}, ${startLabel}–${endLabel}, busy`}
                   >
                     <p className="flex min-w-0 items-center gap-1 truncate text-[11px] font-semibold">
                       {item.locked && <LockKeyhole className="h-3 w-3 shrink-0 text-muted-foreground" />}
                       <span className="truncate">{item.title}</span>
                     </p>
                     <p className="truncate text-[9px] text-muted-foreground">
-                      {format(start, 'h:mm a')}–{format(end, 'h:mm a')}
+                      {startLabel}–{endLabel}
                     </p>
                   </div>
                 );
@@ -300,7 +365,7 @@ export function DashboardSchedule() {
                 <div className="absolute inset-x-0 top-[38%] flex flex-col items-center justify-center text-center text-muted-foreground/60">
                   <Clock3 className="mb-2 h-6 w-6" />
                   <p className="text-xs">Nothing timed yet</p>
-                  <p className="text-[10px]">Add a start time to a task or use the Assistant.</p>
+                  <p className="text-[10px]">Click an empty time to add a task or event.</p>
                 </div>
               )}
             </div>
@@ -313,6 +378,14 @@ export function DashboardSchedule() {
         scheduleOccurrence={detailOccurrence}
         open={Boolean(detailTask)}
         onOpenChange={open => !open && setDetailOccurrenceId(null)}
+      />
+      <TaskForm
+        isOpen={Boolean(creationSlot && creationSlot.userId === userId)}
+        initialMode="task"
+        initialDate={creationSlot?.userId === userId ? creationSlot.date : ''}
+        initialStartTime={creationSlot?.userId === userId ? creationSlot.startTime : ''}
+        initialDurationSeconds={creationSlot?.userId === userId ? creationSlot.durationSeconds : null}
+        onClose={() => setCreationSlot(null)}
       />
     </Card>
   );

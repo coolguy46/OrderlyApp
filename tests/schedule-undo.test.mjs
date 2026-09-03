@@ -40,7 +40,6 @@ test('Undo restores its own entries without replacing unrelated newer entries', 
   assert.equal(restored.entries.find(item => item.taskId === 'planned')?.startAt, before[0].startAt);
   assert.equal(restored.entries.find(item => item.taskId === 'unrelated')?.startAt, newerUnrelated.startAt);
 });
-
 test('Undo preserves a newer edit to the same entry while an async cleanup is pending', () => {
   const before = [entry('planned', '2026-08-29T17:00:00.000Z', 'before')];
   const applied = [entry('planned', '2026-08-29T19:00:00.000Z', 'assistant')];

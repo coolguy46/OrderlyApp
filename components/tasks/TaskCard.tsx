@@ -15,11 +15,12 @@ import {
 } from '@/components/ui';
 import { SubjectBadge } from '@/components/ui';
 import { TaskDetailViewer } from './TaskDetailViewer';
-import { formatDate, cn, isExamType } from '@/lib/utils';
+import { cn, isExamType } from '@/lib/utils';
+import { formatCivilDate } from '@/lib/civil-date';
+import { safeExternalUrl } from '@/lib/safe-content';
 import { isTaskMissing, taskDueDayDistance } from '@/lib/task-status';
 import { useScheduleStore } from '@/lib/schedule/store';
-import { formatDurationInput, scheduledEndAt, selectScheduleEntry } from '@/lib/schedule/selectors';
-import { format } from 'date-fns';
+import { formatDurationInput, formatIsoTime, scheduledEndAt, selectScheduleEntry } from '@/lib/schedule/selectors';
 import { motion } from 'framer-motion';
 import Link from 'next/link';
 import {
@@ -35,7 +36,6 @@ import {
   ExternalLink,
   GraduationCap,
   AlertTriangle,
-  ArrowRight,
   Zap,
   Repeat,
 } from 'lucide-react';
@@ -46,16 +46,17 @@ interface TaskCardProps {
   compact?: boolean;
   index?: number;
   currentTime?: Date;
-  timeZone?: string;
+  timeZone: string;
 }
 
-export const TaskCard = memo(function TaskCard({ task, onEdit, compact = false, index = 0, currentTime, timeZone }: TaskCardProps) {
+export const TaskCard = memo(function TaskCard({ task, onEdit, compact = false, currentTime, timeZone }: TaskCardProps) {
   const { completeTask, deleteTask, updateTask, subjects } = useAppStore();
   const scheduleEntry = useScheduleStore((state) =>
     selectScheduleEntry(state.entriesByUser, task.user_id, task.id)
   );
   const [showViewer, setShowViewer] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
   const subject = subjects.find((s) => s.id === task.subject_id);
   const now = currentTime || new Date();
   const daysUntil = taskDueDayDistance(task, now, timeZone);
@@ -66,18 +67,19 @@ export const TaskCard = memo(function TaskCard({ task, onEdit, compact = false, 
   const isExamTask = isExamType(task.title, task.assignment_type);
   const isInProgress = task.status === 'in_progress';
   const isRecurring = task.recurrence && task.recurrence !== 'none';
+  const externalUrl = safeExternalUrl(task.external_url);
 
   const scheduledLabel = (() => {
     if (!scheduleEntry) return null;
     const dateLabel = scheduleEntry.scheduledDate
-      ? format(new Date(`${scheduleEntry.scheduledDate}T12:00:00`), 'MMM d')
+      ? formatCivilDate(scheduleEntry.scheduledDate, timeZone, { month: 'short', day: 'numeric' })
       : null;
     if (scheduleEntry.startAt) {
-      const start = new Date(scheduleEntry.startAt);
-      if (Number.isNaN(start.getTime())) return dateLabel;
+      const startLabel = formatIsoTime(scheduleEntry.startAt, timeZone);
+      if (!startLabel) return dateLabel;
       const endIso = scheduledEndAt(scheduleEntry.startAt, scheduleEntry.durationSeconds);
-      const end = endIso ? new Date(endIso) : null;
-      return `${dateLabel ? `${dateLabel} · ` : ''}${format(start, 'h:mm a')}${end ? `–${format(end, 'h:mm a')}` : ''}`;
+      const endLabel = endIso ? formatIsoTime(endIso, timeZone) : null;
+      return `${dateLabel ? `${dateLabel} · ` : ''}${startLabel}${endLabel ? `–${endLabel}` : ''}`;
     }
     const duration = formatDurationInput(scheduleEntry.durationSeconds);
     return [dateLabel ? `${dateLabel} · Untimed` : 'Untimed', duration || null]
@@ -94,10 +96,16 @@ export const TaskCard = memo(function TaskCard({ task, onEdit, compact = false, 
   };
 
   const handleComplete = async () => {
-    if (isCompleted) {
-      await updateTask(task.id, { status: 'pending', completed_at: null });
-    } else {
-      await completeTask(task.id);
+    if (isUpdatingStatus) return;
+    setIsUpdatingStatus(true);
+    try {
+      if (isCompleted) {
+        await updateTask(task.id, { status: 'pending', completed_at: null });
+      } else {
+        await completeTask(task.id);
+      }
+    } finally {
+      setIsUpdatingStatus(false);
     }
   };
 
@@ -130,7 +138,11 @@ export const TaskCard = memo(function TaskCard({ task, onEdit, compact = false, 
     if (daysUntil === 0) return { text: 'Due today', urgent: false, warning: true };
     if (daysUntil === 1) return { text: 'Tomorrow', urgent: false, warning: true };
     if (daysUntil <= 3) return { text: `${daysUntil} days left`, urgent: false, warning: true };
-    return { text: formatDate(task.due_date), urgent: false, warning: false };
+    return {
+      text: formatCivilDate(task.due_date, timeZone) || 'Date unavailable',
+      urgent: false,
+      warning: false,
+    };
   };
 
   const dueInfo = getDueDateDisplay();
@@ -174,7 +186,11 @@ export const TaskCard = memo(function TaskCard({ task, onEdit, compact = false, 
           onClick={() => setShowViewer(true)}
         >
           <motion.button
-            onClick={(e) => { e.stopPropagation(); handleComplete(); }}
+            type="button"
+            onClick={(e) => { e.stopPropagation(); void handleComplete(); }}
+            disabled={isUpdatingStatus}
+            aria-busy={isUpdatingStatus}
+            aria-label={isCompleted ? `Mark ${task.title} as active` : `Mark ${task.title} as completed`}
             className="flex-shrink-0 text-muted-foreground hover:text-green-500 transition-colors"
             whileTap={{ scale: 0.85 }}
           >
@@ -190,14 +206,22 @@ export const TaskCard = memo(function TaskCard({ task, onEdit, compact = false, 
               <Circle className={cn('w-4 h-4', isOverdue && 'text-red-400')} />
             )}
           </motion.button>
-          <div className="flex-1 min-w-0">
-            <p className={cn(
-              'text-xs font-medium truncate',
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              setShowViewer(true);
+            }}
+            className="flex-1 min-w-0 text-left"
+            aria-label={`Open task: ${task.title}`}
+          >
+            <span className={cn(
+              'block text-xs font-medium truncate',
               isCompleted && 'line-through text-muted-foreground'
             )}>
               {task.title}
-            </p>
-          </div>
+            </span>
+          </button>
           {dueInfo && (
             <span className={cn(
               'text-[10px] shrink-0',
@@ -272,7 +296,11 @@ export const TaskCard = memo(function TaskCard({ task, onEdit, compact = false, 
           <div className="flex items-start gap-3.5">
             {/* Checkbox */}
             <motion.button
+              type="button"
               onClick={handleComplete}
+              disabled={isUpdatingStatus}
+              aria-busy={isUpdatingStatus}
+              aria-label={isCompleted ? `Mark ${task.title} as active` : `Mark ${task.title} as completed`}
               className={cn(
                 'mt-0.5 flex-shrink-0 transition-colors',
                 isCompleted ? 'text-green-500' : 'text-muted-foreground/50 hover:text-green-500'
@@ -352,6 +380,7 @@ export const TaskCard = memo(function TaskCard({ task, onEdit, compact = false, 
                           size="icon-sm"
                           className="h-7 w-7 text-indigo-400 hover:text-indigo-300 hover:bg-indigo-500/10"
                           onClick={handleStartProgress}
+                          aria-label={`Start ${task.title}`}
                         >
                           <Play className="w-3.5 h-3.5" />
                         </Button>
@@ -363,6 +392,7 @@ export const TaskCard = memo(function TaskCard({ task, onEdit, compact = false, 
                         size="icon-sm"
                         className="h-7 w-7 hover:bg-muted"
                         onClick={() => onEdit?.(task)}
+                        aria-label={`Edit ${task.title}`}
                       >
                         <Edit3 className="w-3.5 h-3.5" />
                       </Button>
@@ -376,6 +406,7 @@ export const TaskCard = memo(function TaskCard({ task, onEdit, compact = false, 
                         variant="ghost" 
                         size="icon-sm"
                         className="h-8 w-8 sm:h-7 sm:w-7 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity"
+                        aria-label={`More actions for ${task.title}`}
                       >
                         <MoreHorizontal className="w-4 h-4" />
                       </Button>
@@ -389,8 +420,8 @@ export const TaskCard = memo(function TaskCard({ task, onEdit, compact = false, 
                         <Edit3 className="w-4 h-4 mr-2" />
                         Edit
                       </DropdownMenuItem>
-                      {task.external_url && (
-                        <DropdownMenuItem onClick={() => window.open(task.external_url!, '_blank')}>
+                      {externalUrl && (
+                        <DropdownMenuItem onClick={() => window.open(externalUrl, '_blank', 'noopener,noreferrer')}>
                           <ExternalLink className="w-4 h-4 mr-2" />
                           Open in {task.source === 'canvas' ? 'Canvas' : 'Browser'}
                         </DropdownMenuItem>

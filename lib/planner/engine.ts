@@ -26,7 +26,6 @@ import {
 import { buildCommitmentOccurrences } from './commitments';
 
 const MINUTE_MS = 60_000;
-const DAY_MS = 24 * 60 * MINUTE_MS;
 
 interface Interval {
   start: number;
@@ -87,11 +86,6 @@ function roundToSlot(minutes: number, slotMinutes = PLANNER_SLOT_MINUTES): numbe
 function ceilToSlot(timestamp: number, slotMinutes = PLANNER_SLOT_MINUTES): number {
   const slotMs = slotMinutes * MINUTE_MS;
   return Math.ceil(timestamp / slotMs) * slotMs;
-}
-
-function floorToSlot(timestamp: number, slotMinutes = PLANNER_SLOT_MINUTES): number {
-  const slotMs = slotMinutes * MINUTE_MS;
-  return Math.floor(timestamp / slotMs) * slotMs;
 }
 
 function normalizeDays(days: readonly number[]): number[] {

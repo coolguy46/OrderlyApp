@@ -6,7 +6,6 @@ import {
   LayoutDashboard,
   CheckSquare,
   Timer,
-  Calendar,
   MoreHorizontal,
   GraduationCap,
 } from 'lucide-react';

@@ -11,6 +11,7 @@ import {
 } from 'date-fns';
 import { ArchiveRestore, ChevronLeft, ChevronRight, Clock3 } from 'lucide-react';
 import { TaskDetailViewer } from '@/components/tasks/TaskDetailViewer';
+import { TaskForm } from '@/components/tasks/TaskForm';
 import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { WeekTimeGrid, type PlannerBlockView } from '@/components/planner';
@@ -18,6 +19,7 @@ import type { UntimedScheduleItem } from '@/components/schedule/UntimedTaskShelf
 import { usePlannerStore } from '@/lib/planner/store';
 import {
   getLegacyCalendarEventsRecoveryInfo,
+  plannerTaskDeadline,
   recoverLegacyCalendarEvents,
   storedEventsToCommitments,
   type LegacyCalendarEventsRecoveryInfo,
@@ -42,7 +44,8 @@ import { useScheduleStore } from '@/lib/schedule/store';
 import type { LocalDate, ScheduleEntry, ScheduleOccurrence } from '@/lib/schedule/types';
 import { useAppStore } from '@/lib/store';
 import type { RecurringCommitmentInput } from '@/lib/planner/types';
-import { plannerTaskDeadline } from '@/lib/planner/adapters';
+import type { Task } from '@/lib/supabase/types';
+import { useHydrated } from '@/lib/use-hydrated';
 import { toast } from 'sonner';
 
 const WEEK_STARTS_ON = 1 as const;
@@ -93,6 +96,9 @@ function commitmentBlocks(
       return [{
         id: occurrence.id,
         title: commitment.title,
+        description: [commitment.description, commitment.location ? `Location: ${commitment.location}` : null]
+          .filter(Boolean)
+          .join('\n') || null,
         startAt: interval.startAt,
         endAt: interval.endAt,
         color: commitment.color || '#0ea5e9',
@@ -183,6 +189,7 @@ function occurrenceInput(entry: ScheduleEntry | undefined, occurrence: ScheduleO
 export function ScheduleCalendar() {
   const { user, tasks, subjects } = useAppStore();
   const userId = user?.id || null;
+  const hydrated = useHydrated();
   const plannerUsers = usePlannerStore(state => state.users);
   const setActiveUser = usePlannerStore(state => state.setActiveUser);
   const upsertCommitment = usePlannerStore(state => state.upsertCommitment);
@@ -194,37 +201,45 @@ export function ScheduleCalendar() {
   const [weekStart, setWeekStart] = useState<Date | null>(null);
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [detailOccurrenceId, setDetailOccurrenceId] = useState<string | null>(null);
-  const [legacyRecoveryOpen, setLegacyRecoveryOpen] = useState(false);
+  const [legacyRecoveryOpenForUser, setLegacyRecoveryOpenForUser] = useState<string | null>(null);
   const [legacyRecoverySnapshot, setLegacyRecoverySnapshot] = useState<{
     userId: string | null;
     info: LegacyCalendarEventsRecoveryInfo | null;
   }>({ userId: null, info: null });
   const { events: storedEvents, setEvents: setStoredEvents } = useStoredCalendarEvents(userId);
+  const initialLegacyRecovery = useMemo(
+    () => hydrated && userId ? getLegacyCalendarEventsRecoveryInfo(userId) : null,
+    [hydrated, userId],
+  );
   const legacyRecovery = legacyRecoverySnapshot.userId === userId
     ? legacyRecoverySnapshot.info
-    : null;
-
-  useEffect(() => {
-    setLegacyRecoveryOpen(false);
-    setLegacyRecoverySnapshot({
-      userId,
-      info: userId ? getLegacyCalendarEventsRecoveryInfo(userId) : null,
-    });
-  }, [userId]);
+    : initialLegacyRecovery;
+  const legacyRecoveryOpen = Boolean(userId && legacyRecoveryOpenForUser === userId);
+  const [editingTask, setEditingTask] = useState<Task | null>(null);
+  const [editingCommitment, setEditingCommitment] = useState<RecurringCommitmentInput | null>(null);
+  const [creationSlot, setCreationSlot] = useState<{
+    date: string;
+    startTime: string;
+    durationSeconds: number;
+  } | null>(null);
 
   useEffect(() => {
     if (!userId) return;
     setActiveUser(userId, Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
   }, [setActiveUser, userId]);
-
   const plannerRecord = userId ? plannerUsers[userId] : null;
   const timeZone = plannerRecord?.settings.timeZone
     || Intl.DateTimeFormat().resolvedOptions().timeZone
     || 'UTC';
   useEffect(() => {
     const today = dateCarrierInTimeZone(timeZone);
-    setWeekStart(startOfWeek(today, { weekStartsOn: WEEK_STARTS_ON }));
-    setSelectedDate(today);
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      setWeekStart(startOfWeek(today, { weekStartsOn: WEEK_STARTS_ON }));
+      setSelectedDate(today);
+    });
+    return () => { cancelled = true; };
   }, [timeZone]);
   const entries = useMemo(
     () => selectScheduleEntriesForUser(entriesByUser, userId),
@@ -302,6 +317,30 @@ export function ScheduleCalendar() {
   const detailTask = detailOccurrence
     ? taskById.get(detailOccurrence.taskId) || detailOccurrence.task
     : null;
+
+  const openTaskFromOccurrence = useCallback((occurrenceId: string) => {
+    const occurrence = occurrenceById.get(occurrenceId);
+    if (!occurrence) return;
+    const task = taskById.get(occurrence.taskId) || occurrence.task;
+    setDetailOccurrenceId(null);
+    setEditingCommitment(null);
+    setCreationSlot(null);
+    setEditingTask(task);
+  }, [occurrenceById, taskById]);
+
+  const handleBlockClick = useCallback((block: PlannerBlockView) => {
+    if (block.taskId) {
+      openTaskFromOccurrence(block.id);
+      return;
+    }
+    if (!block.commitmentId || block.kind === 'school') return;
+    const commitment = commitmentById.get(block.commitmentId);
+    if (!commitment) return;
+    setDetailOccurrenceId(null);
+    setEditingTask(null);
+    setCreationSlot(null);
+    setEditingCommitment(commitment);
+  }, [commitmentById, openTaskFromOccurrence]);
   const untimedItems = useMemo<UntimedScheduleItem[]>(
     () => occurrences.untimed.map(occurrence => ({
       id: occurrence.id,
@@ -347,7 +386,7 @@ export function ScheduleCalendar() {
       upsertCommitment(userId, updated);
     }
     return true;
-  }, [commitmentById, storedEvents, timeZone, upsertCommitment, userId]);
+  }, [commitmentById, setStoredEvents, storedEvents, timeZone, upsertCommitment, userId]);
 
   const handleMove = useCallback((block: PlannerBlockView, nextStart: Date, nextEnd: Date) => {
     if (!userId) return;
@@ -529,6 +568,20 @@ export function ScheduleCalendar() {
     toast.success(`${occurrence.title} moved to untimed`);
   }, [entriesByTaskId, occurrenceById, setOccurrenceOverride, timeZone, upsertTaskSchedule, userId]);
 
+  const handleEmptySlotClick = useCallback((nextStart: Date, nextEnd: Date) => {
+    const date = localDateFromIso(nextStart.toISOString(), timeZone);
+    const startTime = localTimeFromIso(nextStart.toISOString(), timeZone);
+    if (!date || !startTime) return;
+    setDetailOccurrenceId(null);
+    setEditingCommitment(null);
+    setEditingTask(null);
+    setCreationSlot({
+      date,
+      startTime,
+      durationSeconds: Math.max(60, differenceInSeconds(nextEnd, nextStart)),
+    });
+  }, [timeZone]);
+
   if (!weekStart) {
     return <div className="flex min-h-[520px] items-center justify-center text-sm text-muted-foreground">Loading schedule…</div>;
   }
@@ -618,7 +671,14 @@ export function ScheduleCalendar() {
               <p className="text-xs text-muted-foreground">A previous Orderly version saved items for this account on this browser.</p>
             </div>
           </div>
-          <Button type="button" variant="outline" size="sm" onClick={() => setLegacyRecoveryOpen(true)}>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              if (userId) setLegacyRecoveryOpenForUser(userId);
+            }}
+          >
             Review recovery
           </Button>
         </div>
@@ -635,9 +695,10 @@ export function ScheduleCalendar() {
         untimedItems={untimedItems}
         selectedDate={selectedDate || weekStart}
         onSelectedDateChange={setSelectedDate}
-        onUntimedItemClick={item => item.taskId && setDetailOccurrenceId(item.id)}
+        onUntimedItemClick={item => item.taskId && openTaskFromOccurrence(item.id)}
         onUntimedItemSchedule={handleScheduleUntimed}
-        onBlockClick={block => block.taskId && setDetailOccurrenceId(block.id)}
+        onBlockClick={handleBlockClick}
+        onEmptySlotClick={handleEmptySlotClick}
         onBlockMove={handleMove}
         onBlockResize={handleResize}
         onBlockMoveToUntimed={handleMoveToUntimed}
@@ -651,11 +712,37 @@ export function ScheduleCalendar() {
         scheduleOccurrence={detailOccurrence}
         open={Boolean(detailTask)}
         onOpenChange={open => !open && setDetailOccurrenceId(null)}
+        onEdit={task => {
+          setDetailOccurrenceId(null);
+          setCreationSlot(null);
+          setEditingTask(task);
+        }}
+      />
+      <TaskForm
+        isOpen={Boolean(editingTask || editingCommitment || creationSlot)}
+        task={editingTask}
+        commitment={editingCommitment}
+        initialMode="task"
+        initialDate={creationSlot?.date || ''}
+        initialStartTime={creationSlot?.startTime || ''}
+        initialDurationSeconds={creationSlot?.durationSeconds || null}
+        onClose={() => {
+          setEditingTask(null);
+          setEditingCommitment(null);
+          setCreationSlot(null);
+        }}
+        onSaved={() => {
+          if (!editingCommitment?.id.startsWith('calendar-')) return;
+          const legacyId = editingCommitment.id.slice('calendar-'.length);
+          const nextEvents = storedEvents.filter(event => event.id !== legacyId);
+          setStoredEvents(nextEvents);
+          writeStoredCalendarEvents(userId, nextEvents);
+        }}
       />
 
       <ConfirmDialog
         open={legacyRecoveryOpen}
-        onOpenChange={setLegacyRecoveryOpen}
+        onOpenChange={open => setLegacyRecoveryOpenForUser(open ? userId : null)}
         title="Recover older calendar items?"
         description={`Copy ${legacyRecovery?.eventCount || 0} calendar item${legacyRecovery?.eventCount === 1 ? '' : 's'} previously saved for ${user?.email || 'this account'} into its account-scoped calendar. The original browser backup will be kept.`}
         confirmLabel="Recover items"

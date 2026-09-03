@@ -8,7 +8,6 @@ export interface AssistantTaskQueryInput {
   timeZone: string;
   tasks: readonly Task[];
 }
-
 export interface AssistantTaskQueryResult {
   reply: string;
   taskIds: string[];

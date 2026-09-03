@@ -94,13 +94,11 @@ export function CircularProgress({
   const [offset, setOffset] = useState(circumference);
 
   useEffect(() => {
-    if (animated) {
-      const timer = setTimeout(() => setOffset(targetOffset), 150);
-      return () => clearTimeout(timer);
-    } else {
-      setOffset(targetOffset);
-    }
+    if (!animated) return;
+    const timer = setTimeout(() => setOffset(targetOffset), 150);
+    return () => clearTimeout(timer);
   }, [targetOffset, circumference, animated]);
+  const displayedOffset = animated ? offset : targetOffset;
 
   const colorClasses: Record<string, string> = {
     indigo: 'stroke-indigo-500',
@@ -138,7 +136,7 @@ export function CircularProgress({
           className={cn('transition-all duration-1000 ease-out', strokeClass)}
           style={{
             strokeDasharray: circumference,
-            strokeDashoffset: offset,
+            strokeDashoffset: displayedOffset,
             ...(isCustomColor ? { stroke: color } : {}),
           }}
         />

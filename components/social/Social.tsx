@@ -1,19 +1,16 @@
 'use client';
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { useAppStore } from '@/lib/store';
-import { searchUsersByEmail } from '@/lib/supabase/services';
-import type { Profile } from '@/lib/supabase/types';
+import { searchUsersByEmail, type FriendSearchResult } from '@/lib/supabase/services';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, Button, Input } from '@/components/ui';
 import { motion, AnimatePresence } from 'framer-motion';
 import { formatDuration, cn } from '@/lib/utils';
 import {
   Users,
   UserX,
-  Trophy,
   Medal,
   Crown,
-  Flame,
   Clock,
   Target,
   Search,
@@ -34,15 +31,17 @@ export function Social() {
     removeFriend,
   } = useAppStore();
 
-  const [activeTab, setActiveTab] = useState<'friends' | 'competitions' | 'leaderboard'>('friends');
+  const [activeTab, setActiveTab] = useState<'friends' | 'leaderboard'>('friends');
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<Profile[]>([]);
+  const [searchResults, setSearchResults] = useState<FriendSearchResult[]>([]);
+  const [searchResultsQuery, setSearchResultsQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
   const [pendingSendIds, setPendingSendIds] = useState<Set<string>>(new Set());
+  const searchGenerationRef = useRef(0);
 
   useEffect(() => {
     loadFriends();
-  }, []);
+  }, [loadFriends]);
 
   // Friends categorized
   const acceptedFriends = useMemo(
@@ -82,7 +81,6 @@ export function Social() {
       {
         name: user?.full_name || 'You',
         studyTime: user?.total_study_time || 0,
-        streak: user?.current_streak || 0,
         tasksCompleted: user?.tasks_completed || 0,
         initial: (user?.full_name?.[0] || 'U').toUpperCase(),
         isYou: true,
@@ -90,7 +88,6 @@ export function Social() {
       ...acceptedFriends.map((f) => ({
         name: f.profile.full_name || f.profile.email || 'Unknown',
         studyTime: f.profile.total_study_time || 0,
-        streak: f.profile.current_streak || 0,
         tasksCompleted: f.profile.tasks_completed || 0,
         initial: (f.profile.full_name?.[0] || f.profile.email?.[0] || '?').toUpperCase(),
         isYou: false,
@@ -99,27 +96,61 @@ export function Social() {
     return entries;
   }, [user, acceptedFriends]);
 
-  // Debounced search for new users when query is 3+ chars
+  // Debounced exact-email lookup. Partial directory search would expose other
+  // students' identities to enumeration.
   useEffect(() => {
-    if (searchQuery.length < 3 || !user) {
-      setSearchResults([]);
-      return;
+    const requestGeneration = ++searchGenerationRef.current;
+    const normalizedQuery = searchQuery.trim().toLowerCase();
+    if (normalizedQuery.length < 5 || !user) {
+      queueMicrotask(() => {
+        if (searchGenerationRef.current !== requestGeneration) return;
+        setSearchResults([]);
+        setSearchResultsQuery('');
+        setIsSearching(false);
+      });
+      return () => {
+        if (searchGenerationRef.current === requestGeneration) {
+          searchGenerationRef.current += 1;
+        }
+      };
     }
+
+    const requestUserId = user.id;
+    const isCurrentRequest = () => (
+      searchGenerationRef.current === requestGeneration
+      && useAppStore.getState().user?.id === requestUserId
+    );
 
     const timer = setTimeout(async () => {
       setIsSearching(true);
       try {
-        const results = await searchUsersByEmail(searchQuery, user.id);
+        const results = await searchUsersByEmail(normalizedQuery, requestUserId);
+        if (!isCurrentRequest()) return;
         setSearchResults(results.filter((r) => !existingRelationIds.has(r.id)));
+        setSearchResultsQuery(normalizedQuery);
       } catch {
+        if (!isCurrentRequest()) return;
         setSearchResults([]);
+        setSearchResultsQuery(normalizedQuery);
       } finally {
-        setIsSearching(false);
+        if (isCurrentRequest()) setIsSearching(false);
       }
     }, 300);
 
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(timer);
+      if (searchGenerationRef.current === requestGeneration) {
+        searchGenerationRef.current += 1;
+      }
+    };
   }, [searchQuery, user, existingRelationIds]);
+
+  const normalizedSearchQuery = searchQuery.trim().toLowerCase();
+  const visibleSearchResults = searchResultsQuery === normalizedSearchQuery
+    ? searchResults
+    : [];
+  const showSearchProgress = normalizedSearchQuery.length >= 5
+    && (isSearching || searchResultsQuery !== normalizedSearchQuery);
 
   const handleSendRequest = async (friendId: string) => {
     setPendingSendIds((prev) => new Set(prev).add(friendId));
@@ -140,7 +171,6 @@ export function Social() {
       <div className="flex items-center gap-1 bg-muted/50 rounded-xl p-1 w-fit">
         {[
           { id: 'friends' as const, label: 'Friends', icon: Users },
-          { id: 'competitions' as const, label: 'Competitions', icon: Trophy },
           { id: 'leaderboard' as const, label: 'Leaderboard', icon: Medal },
         ].map((tab) => (
           <button
@@ -181,24 +211,25 @@ export function Social() {
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
               <Input
                 type="text"
-                placeholder="Search friends or find new people by name or email..."
+                aria-label="Find a friend by email address"
+                placeholder="Find a new friend by their exact email address..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="pl-10"
               />
-              {isSearching && (
+              {showSearchProgress && (
                 <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground animate-spin" />
               )}
             </div>
 
-            {/* Add People Results (shown when searching 3+ chars) */}
-            {searchQuery.length >= 3 && (searchResults.length > 0 || isSearching) && (
+            {/* Add People Results (shown for a complete-looking email query) */}
+            {normalizedSearchQuery.length >= 5 && (visibleSearchResults.length > 0 || showSearchProgress) && (
               <Card className="border-primary/30">
                 <CardContent className="p-4 space-y-2">
                   <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
                     Add People
                   </p>
-                  {searchResults.map((result) => (
+                  {visibleSearchResults.map((result) => (
                     <div
                       key={result.id}
                       className="flex items-center gap-3 p-3 bg-muted/50 rounded-xl"
@@ -230,7 +261,7 @@ export function Social() {
                       </Button>
                     </div>
                   ))}
-                  {!isSearching && searchResults.length === 0 && (
+                  {!showSearchProgress && visibleSearchResults.length === 0 && (
                     <p className="text-sm text-muted-foreground text-center py-2">
                       No new users found matching &ldquo;{searchQuery}&rdquo;
                     </p>
@@ -280,6 +311,7 @@ export function Social() {
                           <Button
                             size="sm"
                             variant="ghost"
+                            aria-label={`Decline friend request from ${req.profile.full_name || req.profile.email}`}
                             onClick={() => respondToFriendRequest(req.id, false)}
                           >
                             <X className="w-3.5 h-3.5" />
@@ -346,10 +378,6 @@ export function Social() {
                             {formatDuration(friend.profile.total_study_time || 0)}
                           </span>
                           <span className="flex items-center gap-1">
-                            <Flame className="w-3 h-3 text-orange-500" />
-                            {friend.profile.current_streak || 0}
-                          </span>
-                          <span className="flex items-center gap-1">
                             <Target className="w-3 h-3 text-green-500" />
                             {friend.profile.tasks_completed || 0}
                           </span>
@@ -360,7 +388,8 @@ export function Social() {
                         variant="ghost"
                         size="icon-sm"
                         onClick={() => removeFriend(friend.id)}
-                        className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive"
+                        className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity text-muted-foreground hover:text-destructive"
+                        aria-label={`Remove ${friend.profile.full_name || friend.profile.email} from friends`}
                         title="Remove friend"
                       >
                         <UserX className="w-4 h-4" />
@@ -384,28 +413,6 @@ export function Social() {
                 </Card>
               )
             )}
-          </motion.div>
-        )}
-
-        {/* ======================== COMPETITIONS TAB ======================== */}
-        {activeTab === 'competitions' && (
-          <motion.div
-            key="competitions"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -20 }}
-            className="space-y-4"
-          >
-            <Card>
-              <CardContent className="flex flex-col items-center justify-center py-16 text-center">
-                <Trophy className="w-14 h-14 text-muted-foreground/30 mb-4" />
-                <h3 className="text-lg font-medium text-foreground mb-1">Competitions Coming Soon</h3>
-                <p className="text-sm text-muted-foreground max-w-sm">
-                  Challenge your friends to study time battles, task completion races, and more.
-                  Stay tuned!
-                </p>
-              </CardContent>
-            </Card>
           </motion.div>
         )}
 
@@ -519,7 +526,7 @@ export function Social() {
 
                   {/* Full list */}
                   <div className="space-y-2 mt-4">
-                    {leaderboard.map((participant, index) => {
+                    {leaderboard.length >= 3 && leaderboard.map((participant, index) => {
                       // Skip top 3 if podium is shown
                       if (leaderboard.length >= 3 && index < 3) return null;
                       return (
@@ -545,8 +552,8 @@ export function Social() {
                                 {formatDuration(participant.studyTime)}
                               </span>
                               <span className="flex items-center gap-1">
-                                <Flame className="w-3 h-3 text-orange-500" />
-                                {participant.streak} day streak
+                                <Target className="w-3 h-3 text-green-500" />
+                                {participant.tasksCompleted} tasks
                               </span>
                             </div>
                           </div>
@@ -579,8 +586,8 @@ export function Social() {
                                 {formatDuration(participant.studyTime)}
                               </span>
                               <span className="flex items-center gap-1">
-                                <Flame className="w-3 h-3 text-orange-500" />
-                                {participant.streak} day streak
+                                <Target className="w-3 h-3 text-green-500" />
+                                {participant.tasksCompleted} tasks
                               </span>
                             </div>
                           </div>

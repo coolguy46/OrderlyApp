@@ -2,24 +2,39 @@
 import {
   supabase,
   isSupabaseAvailable,
+  requireSupabaseAvailable,
   supabasePublishableKey,
   supabaseUrl,
 } from './client';
 import type { 
+  Database,
+  Json,
   Profile, 
   Subject, 
   Task, 
   Goal, 
   StudySession, 
+  NewStudySession,
   Exam,
-  Friendship,
 } from './types';
 import { AUTH_ACTION_TIMEOUT_MS, authCallbackUrl, withTimeout } from '@/lib/auth/lifecycle';
 import { deleteOwnedTaskWithToken } from './task-compensation';
+import {
+  hasCompletedSetupMetadata,
+  setupCompletionMetadataUpdate,
+} from '@/lib/setup-completion';
 
-// Use the supabase client with any to bypass strict typing issues
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const db = supabase as any;
+type SubjectInsert = Database['public']['Tables']['subjects']['Insert'];
+type SubjectUpdate = Database['public']['Tables']['subjects']['Update'];
+type TaskInsert = Database['public']['Tables']['tasks']['Insert'];
+type TaskUpdate = Database['public']['Tables']['tasks']['Update'];
+type GoalUpdate = Database['public']['Tables']['goals']['Update'];
+type ExamUpdate = Database['public']['Tables']['exams']['Update'];
+
+// Keep one local alias so service calls remain concise while retaining the
+// generated database contract. Avoiding an `any` escape hatch means schema
+// drift is caught by type checking instead of surfacing at runtime.
+const db = supabase;
 
 export interface ReadOptions {
   /** Startup hydration uses this so a failed query cannot look like empty data. */
@@ -38,12 +53,14 @@ function readFailure<T>(
 }
 
 /** Returns true if the error is a harmless request abort (e.g. React Strict Mode). */
-function isAbortError(e: any): boolean {
+function isAbortError(e: unknown): boolean {
+  if (!e || typeof e !== 'object') return false;
+  const error = e as { name?: string; message?: string; code?: string };
   return (
-    e?.name === 'AbortError' ||
-    e?.message?.includes('signal') ||
-    e?.message?.includes('aborted') ||
-    e?.code === 'PGRST_REQUEST_ABORTED'
+    error.name === 'AbortError' ||
+    error.message?.includes('signal') ||
+    error.message?.includes('aborted') ||
+    error.code === 'PGRST_REQUEST_ABORTED'
   );
 }
 
@@ -64,7 +81,9 @@ export async function getProfile(userId: string, options?: ReadOptions): Promise
   return data as Profile | null;
 }
 
-export async function updateProfile(userId: string, updates: Partial<Profile>): Promise<Profile | null> {
+export type EditableProfileFields = Pick<Profile, 'full_name' | 'avatar_url'>;
+
+export async function updateProfile(userId: string, updates: Partial<EditableProfileFields>): Promise<Profile | null> {
   
   
   const { data, error } = await db
@@ -79,6 +98,41 @@ export async function updateProfile(userId: string, updates: Partial<Profile>): 
     return null;
   }
   return data as Profile | null;
+}
+
+/** Read durable setup completion from the currently authenticated account. */
+export async function getSetupCompletion(userId: string): Promise<boolean> {
+  requireSupabaseAvailable();
+
+  const { data: { user }, error } = await db.auth.getUser();
+  if (error) throw error;
+  if (!user || user.id !== userId) {
+    throw new Error('The authenticated account changed while setup was loading.');
+  }
+
+  return hasCompletedSetupMetadata(user.user_metadata);
+}
+
+/**
+ * Persist setup completion in Supabase Auth metadata. This is account-scoped,
+ * survives logout and other browsers, and requires no database migration.
+ */
+export async function markSetupComplete(userId: string): Promise<boolean> {
+  requireSupabaseAvailable();
+
+  const { data: { user }, error: readError } = await db.auth.getUser();
+  if (readError) throw readError;
+  if (!user || user.id !== userId) {
+    throw new Error('The authenticated account changed while setup was being saved.');
+  }
+  if (hasCompletedSetupMetadata(user.user_metadata)) return true;
+
+  const { data, error } = await db.auth.updateUser({
+    data: setupCompletionMetadataUpdate(),
+  });
+  if (error) throw error;
+
+  return data.user?.id === userId && hasCompletedSetupMetadata(data.user.user_metadata);
 }
 
 // ============== SUBJECT SERVICES ==============
@@ -98,7 +152,7 @@ export async function getSubjects(userId: string, options?: ReadOptions): Promis
   return (data || []) as Subject[];
 }
 
-export async function createSubject(subject: Omit<Subject, 'id' | 'created_at'>): Promise<Subject | null> {
+export async function createSubject(subject: SubjectInsert): Promise<Subject | null> {
   
   
   const { data, error } = await db
@@ -114,7 +168,7 @@ export async function createSubject(subject: Omit<Subject, 'id' | 'created_at'>)
   return data as Subject | null;
 }
 
-export async function updateSubject(id: string, updates: Partial<Subject>): Promise<Subject | null> {
+export async function updateSubject(id: string, updates: SubjectUpdate): Promise<Subject | null> {
   
   
   const { data, error } = await db
@@ -163,11 +217,11 @@ export async function getTasks(userId: string, options?: ReadOptions): Promise<T
   return (data || []) as Task[];
 }
 
-type CreateTaskInput = Omit<Task, 'id' | 'created_at' | 'updated_at'> & { id?: string };
-
-export async function createTask(task: CreateTaskInput): Promise<Task | null> {
+export async function createTask(task: TaskInsert): Promise<Task | null> {
   // Strip undefined values and only send fields that have values
-  const cleanTask: Record<string, unknown> = {
+  const cleanTask: TaskInsert = {
+    user_id: task.user_id,
+    title: task.title,
     // The browser owns the ID so an interrupted response can still be
     // compensated precisely. Upserting this stable ID also makes a retried
     // request idempotent instead of creating a second remote row.
@@ -175,7 +229,7 @@ export async function createTask(task: CreateTaskInput): Promise<Task | null> {
   };
   for (const [key, value] of Object.entries(task)) {
     if (value !== undefined) {
-      cleanTask[key] = value;
+      Object.assign(cleanTask, { [key]: value });
     }
   }
   
@@ -192,7 +246,7 @@ export async function createTask(task: CreateTaskInput): Promise<Task | null> {
   return data as Task | null;
 }
 
-export async function updateTask(id: string, updates: Partial<Task>): Promise<Task | null> {
+export async function updateTask(id: string, updates: TaskUpdate): Promise<Task | null> {
   
   
   const { data, error } = await db
@@ -247,28 +301,63 @@ export async function deleteTaskWithAccessToken(
   });
 }
 
-export async function completeTask(id: string): Promise<Task | null> {
-  
-  
-  const { data, error } = await db
-    .from('tasks')
-    .update({
-      status: 'completed',
-      completed_at: new Date().toISOString(),
-    })
-    .eq('id', id)
-    .select()
-    .single();
-  
+export type TaskSuccessorInput = Pick<
+  Task,
+  | 'title'
+  | 'description'
+  | 'priority'
+  | 'subject_id'
+  | 'due_date'
+  | 'due_time'
+  | 'recurrence'
+  | 'recurrence_days'
+>;
+
+export interface TaskCompletionResult {
+  changed: boolean;
+  completedTask: Task;
+  successorTask: Task | null;
+}
+
+/**
+ * Complete a task and, when requested, create its next occurrence in one
+ * database transaction. This prevents a transient insert failure from leaving
+ * a repeating series completed with no successor, and the row lock prevents
+ * two tabs from forking the series.
+ */
+export async function completeTask(
+  id: string,
+  successor: TaskSuccessorInput | null = null,
+): Promise<TaskCompletionResult | null> {
+  const { data, error } = await db.rpc('complete_task_with_successor', {
+    p_task_id: id,
+    p_successor: successor,
+  });
   if (error) {
     console.error('Error completing task:', error);
     return null;
   }
-  return data as Task | null;
+  if (!data || typeof data !== 'object') return null;
+
+  const payload = data as {
+    changed?: boolean;
+    completed?: Task;
+    successor?: Task | null;
+  };
+  if (!payload.completed) return null;
+  return {
+    changed: payload.changed === true,
+    completedTask: payload.completed,
+    successorTask: payload.successor || null,
+  };
 }
 
 // Get task by external ID (for Canvas integration)
-export async function getTaskByExternalId(userId: string, source: string, externalId: string): Promise<Task | null> {
+export async function getTaskByExternalId(
+  userId: string,
+  source: NonNullable<Task['source']>,
+  externalId: string,
+): Promise<Task | null> {
   
   
   const { data, error } = await db
@@ -305,9 +394,10 @@ export async function removeOrphanedCanvasTasks(userId: string, currentCanvasIds
   if (!existingTasks || existingTasks.length === 0) return 0;
   
   // Find tasks that are no longer in Canvas
-  const orphanedTaskIds = (existingTasks as any[])
-    .filter((task: any) => task.external_id && !currentCanvasIds.includes(task.external_id))
-    .map((task: any) => task.id);
+  const typedTasks = existingTasks as Array<{ id: string; external_id: string | null }>;
+  const orphanedTaskIds = typedTasks
+    .filter((task) => task.external_id && !currentCanvasIds.includes(task.external_id))
+    .map((task) => task.id);
   
   if (orphanedTaskIds.length === 0) return 0;
   
@@ -378,7 +468,7 @@ export async function createGoal(goal: Omit<Goal, 'id' | 'created_at' | 'updated
   return data as Goal | null;
 }
 
-export async function updateGoal(id: string, updates: Partial<Goal>): Promise<Goal | null> {
+export async function updateGoal(id: string, updates: GoalUpdate): Promise<Goal | null> {
   
   
   const { data, error } = await db
@@ -427,14 +517,20 @@ export async function getStudySessions(userId: string, options?: ReadOptions): P
   return (data || []) as StudySession[];
 }
 
-export async function createStudySession(session: Omit<StudySession, 'id' | 'created_at'>): Promise<StudySession | null> {
-  
-  
-  const { data, error } = await db
-    .from('study_sessions')
-    .insert(session)
-    .select()
-    .single();
+export async function createStudySession(session: NewStudySession): Promise<StudySession | null> {
+  if (!Number.isInteger(session.duration_minutes)
+      || session.duration_minutes < 1
+      || session.duration_minutes > 1440) {
+    console.error('Study session duration must be a whole number from 1 to 1440 minutes.');
+    return null;
+  }
+
+  // A caller-provided id makes retries idempotent when the first response is
+  // lost after PostgreSQL committed the insert.
+  const mutation = session.id
+    ? db.from('study_sessions').upsert(session, { onConflict: 'id' })
+    : db.from('study_sessions').insert(session);
+  const { data, error } = await mutation.select().single();
   
   if (error) {
     console.error('Error creating study session:', error);
@@ -476,7 +572,7 @@ export async function createExam(exam: Omit<Exam, 'id' | 'created_at' | 'updated
   return data as Exam | null;
 }
 
-export async function updateExam(id: string, updates: Partial<Exam>): Promise<Exam | null> {
+export async function updateExam(id: string, updates: ExamUpdate): Promise<Exam | null> {
   
   
   const { data, error } = await db
@@ -516,6 +612,7 @@ export interface CanvasSettings {
   ical_url: string;
   last_sync_at: string | null;
   last_background_sync_at: string | null;
+  course_count: number;
   sync_enabled: boolean;
   auto_import_assignments: boolean;
   auto_sync_interval?: number;
@@ -567,14 +664,15 @@ export async function upsertCanvasSettings(userId: string, settings: {
   }
   if (updated) return updated as CanvasSettings;
 
-  if (!settings.ical_url) {
+  const icalUrl = settings.ical_url;
+  if (!icalUrl) {
     console.error('Cannot create Canvas settings without an iCal URL.');
     return null;
   }
 
   const { data: inserted, error: insertError } = await db
     .from('canvas_settings')
-    .insert({ user_id: userId, ...settings })
+    .insert({ user_id: userId, ...settings, ical_url: icalUrl })
     .select('*')
     .single();
 
@@ -699,6 +797,7 @@ export interface TimerState {
   sound_enabled: boolean;
   pomodoro_started: boolean;
   stopwatch_started: boolean;
+  pending_session: import('@/lib/timer-session-recovery').PendingStudySession | null;
   updated_at: string;
 }
 
@@ -711,16 +810,25 @@ export async function getTimerState(userId: string): Promise<TimerState | null> 
 
   if (error && error.code !== 'PGRST116') {
     console.error('Error fetching timer state:', error);
+    throw error;
   }
   return (data as TimerState | null) || null;
 }
 
 export async function upsertTimerState(userId: string, state: Omit<TimerState, 'id' | 'user_id' | 'updated_at'>): Promise<TimerState | null> {
+  const pendingSession: Json | null = state.pending_session
+    ? {
+        session: { ...state.pending_session.session },
+        outcome: { ...state.pending_session.outcome },
+        createdAt: state.pending_session.createdAt,
+      }
+    : null;
   const { data, error } = await db
     .from('timer_states')
     .upsert({
       user_id: userId,
       ...state,
+      pending_session: pendingSession,
       updated_at: new Date().toISOString(),
     }, { onConflict: 'user_id' })
     .select()
@@ -734,12 +842,11 @@ export async function upsertTimerState(userId: string, state: Omit<TimerState, '
 }
 
 export async function deleteTimerState(userId: string): Promise<boolean> {
-  const { error } = await db
-    .from('timer_states')
-    .delete()
-    .eq('user_id', userId);
+  const { data, error } = await db.rpc('clear_own_timer_state', {
+    expected_user_id: userId,
+  });
 
-  if (error) {
+  if (error || data !== true) {
     console.error('Error deleting timer state:', error);
     return false;
   }
@@ -756,44 +863,38 @@ export interface FriendWithProfile {
   direction: 'sent' | 'received';
 }
 
+export type FriendSearchResult = Pick<Profile, 'id' | 'email' | 'full_name' | 'avatar_url'>;
+
 export async function getFriends(userId: string, options?: ReadOptions): Promise<FriendWithProfile[]> {
-  // Get friendships where user is either the sender or receiver
-  const { data: sent, error: sentError } = await db
-    .from('friendships')
-    .select('id, status, created_at, friend_id')
-    .eq('user_id', userId);
+  if (!userId) return [];
 
-  const { data: received, error: recvError } = await db
-    .from('friendships')
-    .select('id, status, created_at, user_id')
-    .eq('friend_id', userId);
-
-  if (sentError || recvError) {
-    return readFailure('Error fetching friendships:', sentError || recvError, [], options);
+  const { data, error } = await db.rpc('get_friendships_with_profiles');
+  if (error) {
+    return readFailure('Error fetching friendships:', error, [], options);
   }
 
-  const results: FriendWithProfile[] = [];
-
-  // Fetch profiles for sent friend requests
-  for (const f of (sent || [])) {
-    const profile = await getProfile(f.friend_id);
-    if (profile) {
-      results.push({ id: f.id, status: f.status, created_at: f.created_at, profile, direction: 'sent' });
-    }
-  }
-
-  // Fetch profiles for received friend requests
-  for (const f of (received || [])) {
-    const profile = await getProfile(f.user_id);
-    if (profile) {
-      results.push({ id: f.id, status: f.status, created_at: f.created_at, profile, direction: 'received' });
-    }
-  }
-
-  return results;
+  return (data || []).map((row: Record<string, unknown>) => ({
+    id: String(row.friendship_id),
+    status: row.friendship_status as FriendWithProfile['status'],
+    created_at: String(row.friendship_created_at),
+    direction: row.direction as FriendWithProfile['direction'],
+    profile: {
+      id: String(row.profile_id),
+      email: String(row.profile_email),
+      full_name: row.profile_full_name as string | null,
+      avatar_url: row.profile_avatar_url as string | null,
+      total_study_time: Number(row.profile_total_study_time) || 0,
+      tasks_completed: Number(row.profile_tasks_completed) || 0,
+      current_streak: Number(row.profile_current_streak) || 0,
+      longest_streak: Number(row.profile_longest_streak) || 0,
+      created_at: String(row.profile_created_at),
+      updated_at: String(row.profile_updated_at),
+    },
+  }));
 }
 
 export async function sendFriendRequest(userId: string, friendId: string): Promise<boolean> {
+  if (!userId || !friendId || userId === friendId) return false;
   const { error } = await db
     .from('friendships')
     .insert({ user_id: userId, friend_id: friendId, status: 'pending' });
@@ -806,12 +907,19 @@ export async function sendFriendRequest(userId: string, friendId: string): Promi
 }
 
 export async function respondToFriendRequest(friendshipId: string, accept: boolean): Promise<boolean> {
-  const { error } = await db
+  const { data: { user }, error: authError } = await db.auth.getUser();
+  if (authError || !user) return false;
+
+  const { data, error } = await db
     .from('friendships')
     .update({ status: accept ? 'accepted' : 'rejected', updated_at: new Date().toISOString() })
-    .eq('id', friendshipId);
+    .eq('id', friendshipId)
+    .eq('friend_id', user.id)
+    .eq('status', 'pending')
+    .select('id')
+    .maybeSingle();
 
-  if (error) {
+  if (error || !data) {
     console.error('Error responding to friend request:', error);
     return false;
   }
@@ -819,31 +927,36 @@ export async function respondToFriendRequest(friendshipId: string, accept: boole
 }
 
 export async function removeFriend(friendshipId: string): Promise<boolean> {
-  const { error } = await db
+  const { data: { user }, error: authError } = await db.auth.getUser();
+  if (authError || !user) return false;
+
+  const { data, error } = await db
     .from('friendships')
     .delete()
-    .eq('id', friendshipId);
+    .eq('id', friendshipId)
+    .or(`user_id.eq.${user.id},friend_id.eq.${user.id}`)
+    .select('id')
+    .maybeSingle();
 
-  if (error) {
+  if (error || !data) {
     console.error('Error removing friend:', error);
     return false;
   }
   return true;
 }
 
-export async function searchUsersByEmail(query: string, currentUserId: string): Promise<Profile[]> {
+export async function searchUsersByEmail(query: string, currentUserId: string): Promise<FriendSearchResult[]> {
+  const normalizedQuery = query.trim();
+  if (normalizedQuery.length < 5 || !currentUserId) return [];
+
   const { data, error } = await db
-    .from('profiles')
-    .select('*')
-    .or(`email.ilike.%${query}%,full_name.ilike.%${query}%`)
-    .neq('id', currentUserId)
-    .limit(10);
+    .rpc('search_profiles_for_friendship', { search_query: normalizedQuery });
 
   if (error) {
     console.error('Error searching users:', error);
     return [];
   }
-  return (data || []) as Profile[];
+  return (data || []) as FriendSearchResult[];
 }
 
 // ============== AUTH HELPERS ==============
@@ -860,7 +973,7 @@ export async function getCurrentUser() {
 }
 
 export async function signIn(email: string, password: string) {
-  
+  requireSupabaseAvailable();
   
   const { data, error } = await db.auth.signInWithPassword({
     email,
@@ -874,7 +987,7 @@ export async function signIn(email: string, password: string) {
 }
 
 export async function signUp(email: string, password: string, fullName?: string) {
-  
+  requireSupabaseAvailable();
   
   const { data, error } = await db.auth.signUp({
     email,
@@ -893,7 +1006,7 @@ export async function signUp(email: string, password: string, fullName?: string)
 }
 
 export async function signOut() {
-  
+  requireSupabaseAvailable();
   
   const { error } = await db.auth.signOut();
   if (error) {
@@ -902,6 +1015,7 @@ export async function signOut() {
 }
 
 export async function signInWithGoogle() {
+  requireSupabaseAvailable();
   const currentOrigin = typeof window !== 'undefined' ? window.location.origin : '';
   const { data, error } = await withTimeout(
     db.auth.signInWithOAuth({
@@ -921,26 +1035,18 @@ export async function signInWithGoogle() {
 }
 
 export async function resetPassword(email: string) {
-  
-  
+  requireSupabaseAvailable();
+  const origin = typeof window !== 'undefined' ? window.location.origin : '';
   const { error } = await db.auth.resetPasswordForEmail(email, {
-    redirectTo: `${typeof window !== 'undefined' ? window.location.origin : ''}/auth/reset-password`,
+    // Recovery links use the same PKCE exchange as OAuth. The callback stores
+    // an API-scoped encrypted recovery capability before forwarding to the
+    // password form; it does not create a normal authenticated app session.
+    redirectTo: `${origin}/auth/callback?next=${encodeURIComponent('/auth/reset-password')}`,
   });
   
   if (error) {
     throw error;
   }
-}
-
-// Subscribe to auth state changes
-export function onAuthStateChange(callback: (user: any) => void) {
-  if (!isSupabaseAvailable()) {
-    return { data: { subscription: { unsubscribe: () => {} } } };
-  }
-  
-  return db.auth.onAuthStateChange((event: any, session: any) => {
-    callback(session?.user || null);
-  });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -961,12 +1067,9 @@ import type {
   SatActProgress,
 } from '@/lib/supabase/types';
 
-// Supabase client alias used throughout the new service functions
-const supabaseClient = supabase;
-
 // ── Resume Items ─────────────────────────────────────────────
 export async function getResumeItems(userId: string): Promise<ResumeItem[]> {
-  const { data, error } = await (supabaseClient as any)
+  const { data, error } = await db
     .from('resume_items')
     .select('*')
     .eq('user_id', userId)
@@ -983,7 +1086,7 @@ export async function upsertResumeItem(
   item: Omit<ResumeItem, 'id' | 'user_id' | 'created_at' | 'updated_at'> & { id?: string }
 ): Promise<ResumeItem | null> {
   const payload = { ...item, user_id: userId };
-  const { data, error } = await (supabaseClient as any)
+  const { data, error } = await db
     .from('resume_items')
     .upsert(payload, { onConflict: 'id' })
     .select()
@@ -996,7 +1099,7 @@ export async function upsertResumeItem(
 }
 
 export async function deleteResumeItem(id: string): Promise<boolean> {
-  const { error } = await (supabaseClient as any).from('resume_items').delete().eq('id', id);
+  const { error } = await db.from('resume_items').delete().eq('id', id);
   if (error) {
     if (isAbortError(error)) return false;
     console.error('deleteResumeItem::', error); return false;
@@ -1006,7 +1109,7 @@ export async function deleteResumeItem(id: string): Promise<boolean> {
 
 // ── College Courses (GPA) ────────────────────────────────────
 export async function getCollegeCourses(userId: string): Promise<CollegeCourse[]> {
-  const { data, error } = await (supabaseClient as any)
+  const { data, error } = await db
     .from('college_courses')
     .select('*')
     .eq('user_id', userId)
@@ -1021,7 +1124,7 @@ export async function getCollegeCourses(userId: string): Promise<CollegeCourse[]
 export async function createCollegeCourse(
   course: Omit<CollegeCourse, 'id' | 'created_at'>
 ): Promise<CollegeCourse | null> {
-  const { data, error } = await (supabaseClient as any)
+  const { data, error } = await db
     .from('college_courses')
     .insert(course)
     .select()
@@ -1037,7 +1140,7 @@ export async function updateCollegeCourse(
   id: string,
   updates: Partial<Omit<CollegeCourse, 'id' | 'user_id' | 'created_at'>>
 ): Promise<CollegeCourse | null> {
-  const { data, error } = await (supabaseClient as any)
+  const { data, error } = await db
     .from('college_courses')
     .update(updates)
     .eq('id', id)
@@ -1051,7 +1154,7 @@ export async function updateCollegeCourse(
 }
 
 export async function deleteCollegeCourse(id: string): Promise<boolean> {
-  const { error } = await (supabaseClient as any).from('college_courses').delete().eq('id', id);
+  const { error } = await db.from('college_courses').delete().eq('id', id);
   if (error) {
     if (isAbortError(error)) return false;
     console.error('deleteCollegeCourse::', error); return false;
@@ -1061,7 +1164,7 @@ export async function deleteCollegeCourse(id: string): Promise<boolean> {
 
 // ── Extracurriculars ─────────────────────────────────────────
 export async function getExtracurriculars(userId: string): Promise<Extracurricular[]> {
-  const { data, error } = await (supabaseClient as any)
+  const { data, error } = await db
     .from('extracurriculars')
     .select('*')
     .eq('user_id', userId)
@@ -1076,7 +1179,7 @@ export async function getExtracurriculars(userId: string): Promise<Extracurricul
 export async function createExtracurricular(
   ec: Omit<Extracurricular, 'id' | 'created_at' | 'updated_at'>
 ): Promise<Extracurricular | null> {
-  const { data, error } = await (supabaseClient as any)
+  const { data, error } = await db
     .from('extracurriculars')
     .insert(ec)
     .select()
@@ -1092,7 +1195,7 @@ export async function updateExtracurricular(
   id: string,
   updates: Partial<Omit<Extracurricular, 'id' | 'user_id' | 'created_at' | 'updated_at'>>
 ): Promise<Extracurricular | null> {
-  const { data, error } = await (supabaseClient as any)
+  const { data, error } = await db
     .from('extracurriculars')
     .update(updates)
     .eq('id', id)
@@ -1106,7 +1209,7 @@ export async function updateExtracurricular(
 }
 
 export async function deleteExtracurricular(id: string): Promise<boolean> {
-  const { error } = await (supabaseClient as any).from('extracurriculars').delete().eq('id', id);
+  const { error } = await db.from('extracurriculars').delete().eq('id', id);
   if (error) {
     if (isAbortError(error)) return false;
     console.error('deleteExtracurricular::', error); return false;
@@ -1116,7 +1219,7 @@ export async function deleteExtracurricular(id: string): Promise<boolean> {
 
 // ── College Applications ─────────────────────────────────────
 export async function getCollegeApplications(userId: string): Promise<CollegeApplication[]> {
-  const { data, error } = await (supabaseClient as any)
+  const { data, error } = await db
     .from('college_applications')
     .select('*')
     .eq('user_id', userId)
@@ -1131,7 +1234,7 @@ export async function getCollegeApplications(userId: string): Promise<CollegeApp
 export async function createCollegeApplication(
   app: Omit<CollegeApplication, 'id' | 'created_at' | 'updated_at'>
 ): Promise<CollegeApplication | null> {
-  const { data, error } = await (supabaseClient as any)
+  const { data, error } = await db
     .from('college_applications')
     .insert(app)
     .select()
@@ -1147,7 +1250,7 @@ export async function updateCollegeApplication(
   id: string,
   updates: Partial<Omit<CollegeApplication, 'id' | 'user_id' | 'created_at' | 'updated_at'>>
 ): Promise<CollegeApplication | null> {
-  const { data, error } = await (supabaseClient as any)
+  const { data, error } = await db
     .from('college_applications')
     .update(updates)
     .eq('id', id)
@@ -1161,7 +1264,7 @@ export async function updateCollegeApplication(
 }
 
 export async function deleteCollegeApplication(id: string): Promise<boolean> {
-  const { error } = await (supabaseClient as any).from('college_applications').delete().eq('id', id);
+  const { error } = await db.from('college_applications').delete().eq('id', id);
   if (error) {
     if (isAbortError(error)) return false;
     console.error('deleteCollegeApplication::', error); return false;
@@ -1171,7 +1274,7 @@ export async function deleteCollegeApplication(id: string): Promise<boolean> {
 
 // ── Test Scores ──────────────────────────────────────────────
 export async function getTestScores(userId: string): Promise<TestScore[]> {
-  const { data, error } = await (supabaseClient as any)
+  const { data, error } = await db
     .from('test_scores')
     .select('*')
     .eq('user_id', userId)
@@ -1186,7 +1289,7 @@ export async function getTestScores(userId: string): Promise<TestScore[]> {
 export async function createTestScore(
   score: Omit<TestScore, 'id' | 'created_at'>
 ): Promise<TestScore | null> {
-  const { data, error } = await (supabaseClient as any)
+  const { data, error } = await db
     .from('test_scores')
     .insert(score)
     .select()
@@ -1199,7 +1302,7 @@ export async function createTestScore(
 }
 
 export async function deleteTestScore(id: string): Promise<boolean> {
-  const { error } = await (supabaseClient as any).from('test_scores').delete().eq('id', id);
+  const { error } = await db.from('test_scores').delete().eq('id', id);
   if (error) {
     if (isAbortError(error)) return false;
     console.error('deleteTestScore::', error); return false;
@@ -1209,7 +1312,7 @@ export async function deleteTestScore(id: string): Promise<boolean> {
 
 // ── Recommendations ──────────────────────────────────────────
 export async function getRecommendations(userId: string): Promise<Recommendation[]> {
-  const { data, error } = await (supabaseClient as any)
+  const { data, error } = await db
     .from('recommendations')
     .select('*')
     .eq('user_id', userId)
@@ -1224,7 +1327,7 @@ export async function getRecommendations(userId: string): Promise<Recommendation
 export async function createRecommendation(
   rec: Omit<Recommendation, 'id' | 'created_at' | 'updated_at'>
 ): Promise<Recommendation | null> {
-  const { data, error } = await (supabaseClient as any)
+  const { data, error } = await db
     .from('recommendations')
     .insert(rec)
     .select()
@@ -1240,7 +1343,7 @@ export async function updateRecommendation(
   id: string,
   updates: Partial<Omit<Recommendation, 'id' | 'user_id' | 'created_at' | 'updated_at'>>
 ): Promise<Recommendation | null> {
-  const { data, error } = await (supabaseClient as any)
+  const { data, error } = await db
     .from('recommendations')
     .update(updates)
     .eq('id', id)
@@ -1254,7 +1357,7 @@ export async function updateRecommendation(
 }
 
 export async function deleteRecommendation(id: string): Promise<boolean> {
-  const { error } = await (supabaseClient as any).from('recommendations').delete().eq('id', id);
+  const { error } = await db.from('recommendations').delete().eq('id', id);
   if (error) {
     if (isAbortError(error)) return false;
     console.error('deleteRecommendation::', error); return false;
@@ -1264,7 +1367,7 @@ export async function deleteRecommendation(id: string): Promise<boolean> {
 
 // ── Study Sets ───────────────────────────────────────────────
 export async function getStudySets(userId: string): Promise<StudySet[]> {
-  const { data, error } = await (supabaseClient as any)
+  const { data, error } = await db
     .from('study_sets')
     .select('*')
     .eq('user_id', userId)
@@ -1274,13 +1377,14 @@ export async function getStudySets(userId: string): Promise<StudySet[]> {
     console.error('getStudySets::', error); return [];
   }
   // cast jsonb → string[]
-  return (data ?? []).map((s: any) => ({ ...s, linked_task_ids: s.linked_task_ids ?? [] }));
+  return ((data ?? []) as Array<StudySet & { linked_task_ids?: string[] | null }>)
+    .map((studySet) => ({ ...studySet, linked_task_ids: studySet.linked_task_ids ?? [] }));
 }
 
 export async function createStudySet(
   set: Omit<StudySet, 'id' | 'created_at' | 'updated_at'>
 ): Promise<StudySet | null> {
-  const { data, error } = await (supabaseClient as any)
+  const { data, error } = await db
     .from('study_sets')
     .insert(set)
     .select()
@@ -1296,7 +1400,7 @@ export async function updateStudySet(
   id: string,
   updates: Partial<Omit<StudySet, 'id' | 'user_id' | 'created_at' | 'updated_at'>>
 ): Promise<StudySet | null> {
-  const { data, error } = await (supabaseClient as any)
+  const { data, error } = await db
     .from('study_sets')
     .update(updates)
     .eq('id', id)
@@ -1310,7 +1414,7 @@ export async function updateStudySet(
 }
 
 export async function deleteStudySet(id: string): Promise<boolean> {
-  const { error } = await (supabaseClient as any).from('study_sets').delete().eq('id', id);
+  const { error } = await db.from('study_sets').delete().eq('id', id);
   if (error) {
     if (isAbortError(error)) return false;
     console.error('deleteStudySet::', error); return false;
@@ -1320,7 +1424,7 @@ export async function deleteStudySet(id: string): Promise<boolean> {
 
 // ── Flashcards ───────────────────────────────────────────────
 export async function getFlashcards(studySetId: string): Promise<Flashcard[]> {
-  const { data, error } = await (supabaseClient as any)
+  const { data, error } = await db
     .from('flashcards')
     .select('*')
     .eq('study_set_id', studySetId)
@@ -1335,7 +1439,7 @@ export async function getFlashcards(studySetId: string): Promise<Flashcard[]> {
 export async function createFlashcard(
   card: Omit<Flashcard, 'id' | 'created_at'>
 ): Promise<Flashcard | null> {
-  const { data, error } = await (supabaseClient as any)
+  const { data, error } = await db
     .from('flashcards')
     .insert(card)
     .select()
@@ -1348,7 +1452,7 @@ export async function createFlashcard(
 }
 
 export async function deleteFlashcard(id: string): Promise<boolean> {
-  const { error } = await (supabaseClient as any).from('flashcards').delete().eq('id', id);
+  const { error } = await db.from('flashcards').delete().eq('id', id);
   if (error) {
     if (isAbortError(error)) return false;
     console.error('deleteFlashcard::', error); return false;
@@ -1358,7 +1462,7 @@ export async function deleteFlashcard(id: string): Promise<boolean> {
 
 // ── MCQ Questions ────────────────────────────────────────────
 export async function getMCQQuestions(studySetId: string): Promise<MCQQuestion[]> {
-  const { data, error } = await (supabaseClient as any)
+  const { data, error } = await db
     .from('mcq_questions')
     .select('*')
     .eq('study_set_id', studySetId)
@@ -1367,13 +1471,14 @@ export async function getMCQQuestions(studySetId: string): Promise<MCQQuestion[]
     if (isAbortError(error)) return [];
     console.error('getMCQQuestions::', error); return [];
   }
-  return (data ?? []).map((q: any) => ({ ...q, options: q.options ?? [] }));
+  return ((data ?? []) as Array<MCQQuestion & { options?: string[] | null }>)
+    .map((question) => ({ ...question, options: question.options ?? [] }));
 }
 
 export async function createMCQQuestion(
   q: Omit<MCQQuestion, 'id' | 'created_at'>
 ): Promise<MCQQuestion | null> {
-  const { data, error } = await (supabaseClient as any)
+  const { data, error } = await db
     .from('mcq_questions')
     .insert(q)
     .select()
@@ -1386,7 +1491,7 @@ export async function createMCQQuestion(
 }
 
 export async function deleteMCQQuestion(id: string): Promise<boolean> {
-  const { error } = await (supabaseClient as any).from('mcq_questions').delete().eq('id', id);
+  const { error } = await db.from('mcq_questions').delete().eq('id', id);
   if (error) {
     if (isAbortError(error)) return false;
     console.error('deleteMCQQuestion::', error); return false;
@@ -1396,7 +1501,7 @@ export async function deleteMCQQuestion(id: string): Promise<boolean> {
 
 // ── Study Set Files (metadata) ───────────────────────────────
 export async function getStudySetFiles(studySetId: string): Promise<StudySetFile[]> {
-  const { data, error } = await (supabaseClient as any)
+  const { data, error } = await db
     .from('study_set_files')
     .select('*')
     .eq('study_set_id', studySetId)
@@ -1411,7 +1516,7 @@ export async function getStudySetFiles(studySetId: string): Promise<StudySetFile
 export async function createStudySetFile(
   file: Omit<StudySetFile, 'id' | 'created_at'>
 ): Promise<StudySetFile | null> {
-  const { data, error } = await (supabaseClient as any)
+  const { data, error } = await db
     .from('study_set_files')
     .insert(file)
     .select()
@@ -1425,8 +1530,8 @@ export async function createStudySetFile(
 
 export async function deleteStudySetFile(id: string, storagePath: string): Promise<boolean> {
   // Remove file from Storage first
-  await (supabaseClient as any).storage.from('study-materials').remove([storagePath]);
-  const { error } = await (supabaseClient as any).from('study_set_files').delete().eq('id', id);
+  await db.storage.from('study-materials').remove([storagePath]);
+  const { error } = await db.from('study_set_files').delete().eq('id', id);
   if (error) {
     if (isAbortError(error)) return false;
     console.error('deleteStudySetFile::', error); return false;
@@ -1434,7 +1539,7 @@ export async function deleteStudySetFile(id: string, storagePath: string): Promi
   return true;
 }
 
-/** Upload a file to the study-materials bucket and return its public URL */
+/** Upload a private study file and return a short-lived signed URL. */
 export async function uploadStudyFile(
   userId: string,
   studySetId: string,
@@ -1443,19 +1548,26 @@ export async function uploadStudyFile(
   const ext = file.name.split('.').pop();
   const path = `${userId}/${studySetId}/${crypto.randomUUID()}.${ext}`;
 
-  const { error: uploadError } = await (supabaseClient as any).storage
+  const { error: uploadError } = await db.storage
     .from('study-materials')
     .upload(path, file, { upsert: false });
 
   if (uploadError) { console.error('uploadStudyFile:', uploadError); return null; }
 
-  const { data } = (supabaseClient as any).storage.from('study-materials').getPublicUrl(path);
-  return { path, url: data.publicUrl };
+  const { data, error: signedUrlError } = await db.storage
+    .from('study-materials')
+    .createSignedUrl(path, 60 * 60);
+  if (signedUrlError || !data?.signedUrl) {
+    await db.storage.from('study-materials').remove([path]);
+    console.error('uploadStudyFile: could not create signed URL');
+    return null;
+  }
+  return { path, url: data.signedUrl };
 }
 
 // ── SAT/ACT Progress ─────────────────────────────────────────
 export async function getSatActProgress(userId: string): Promise<SatActProgress[]> {
-  const { data, error } = await (supabaseClient as any)
+  const { data, error } = await db
     .from('sat_act_progress')
     .select('*')
     .eq('user_id', userId);
@@ -1473,7 +1585,7 @@ export async function upsertSatActProgress(
   progressPct: number,
   targetScore?: string
 ): Promise<SatActProgress | null> {
-  const { data, error } = await (supabaseClient as any)
+  const { data, error } = await db
     .from('sat_act_progress')
     .upsert({
       user_id: userId,

@@ -3,7 +3,6 @@ import type { ScheduleEntry } from './types';
 function entryMap(entries: readonly ScheduleEntry[]): Map<string, ScheduleEntry> {
   return new Map(entries.map(entry => [entry.taskId, entry]));
 }
-
 function entriesMatch(
   left: ScheduleEntry | undefined,
   right: ScheduleEntry | undefined,

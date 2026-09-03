@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
+import { localDateFromDateCarrier, localDateFromIso } from '@/lib/schedule/selectors';
 import { cn } from '@/lib/utils';
 import type { PlannerDayTaskView } from './types';
 
@@ -32,6 +33,7 @@ export interface DailyTaskPanelProps {
   tasks: PlannerDayTaskView[];
   className?: string;
   loading?: boolean;
+  timeZone?: string;
   /** Lets the panel use the height supplied by a parent workspace. */
   fillHeight?: boolean;
   readOnly?: boolean;
@@ -69,7 +71,7 @@ function plainText(value?: string | null): string {
 function sourceLabel(source?: string | null): string | null {
   if (!source || source === 'manual') return null;
   if (source.toLowerCase() === 'canvas') return 'Canvas';
-  if (source.toLowerCase().includes('google')) return 'Google Classroom';
+  if (source.toLowerCase().includes('google')) return 'Imported LMS';
   return source.replace(/_/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
@@ -87,6 +89,7 @@ export function DailyTaskPanel({
   tasks,
   className,
   loading = false,
+  timeZone,
   fillHeight = false,
   readOnly = false,
   showCompletionControl = true,
@@ -97,6 +100,7 @@ export function DailyTaskPanel({
 }: DailyTaskPanelProps) {
   const firstDay = useMemo(() => startOfDay(asDate(planStart)), [planStart]);
   const currentDay = useMemo(() => startOfDay(asDate(selectedDate)), [selectedDate]);
+  const currentDateKey = localDateFromDateCarrier(currentDay);
   const dayIndex = differenceInCalendarDays(currentDay, firstDay);
   const canGoPrevious = dayIndex > 0;
   const canGoNext = dayIndex < PLAN_DAYS - 1;
@@ -104,9 +108,12 @@ export function DailyTaskPanel({
   const sortedTasks = useMemo(
     () =>
       [...tasks]
-        .filter((task) => isSameDay(asDate(task.startAt), currentDay))
+        .filter((task) => {
+          if (!timeZone || !currentDateKey) return isSameDay(asDate(task.startAt), currentDay);
+          return localDateFromIso(asDate(task.startAt).toISOString(), timeZone) === currentDateKey;
+        })
         .sort((a, b) => asDate(a.startAt).getTime() - asDate(b.startAt).getTime()),
-    [currentDay, tasks],
+    [currentDateKey, currentDay, tasks, timeZone],
   );
 
   const moveDay = (amount: number) => {

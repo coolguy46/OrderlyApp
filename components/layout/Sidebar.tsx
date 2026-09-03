@@ -18,6 +18,7 @@ import {
   Settings,
 } from 'lucide-react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 
 const navItems = [
@@ -67,7 +68,7 @@ export function Sidebar({ mobile, onNavigate }: SidebarProps = {}) {
             whileTap={{ scale: 0.95 }}
             transition={{ type: 'spring', stiffness: 400, damping: 15 }}
           >
-            <img src="/logo.svg" alt="Orderly Logo" className="w-10 h-10" />
+            <Image src="/logo.svg" alt="Orderly Logo" width={40} height={40} className="w-10 h-10" priority />
           </motion.div>
           <AnimatePresence>
             {effectiveOpen && (
@@ -88,7 +89,9 @@ export function Sidebar({ mobile, onNavigate }: SidebarProps = {}) {
       <ScrollArea className="flex-1 py-6">
         <nav className="px-3 space-y-1.5">
           {navItems.map((item) => {
-            const isActive = pathname === item.href;
+            const isActive = item.href === '/'
+              ? pathname === '/'
+              : pathname === item.href || pathname.startsWith(`${item.href}/`);
             return (
               <Link key={item.href} href={item.href} onClick={onNavigate}>
                 <motion.div
@@ -192,7 +195,7 @@ export function Sidebar({ mobile, onNavigate }: SidebarProps = {}) {
                   <div className="flex items-center gap-1 mt-0.5">
                     <span className="inline-flex items-center gap-1 text-[10px] font-medium text-indigo-400 bg-indigo-500/10 px-1.5 py-0.5 rounded-full">
                       <Sparkles className="w-2.5 h-2.5" />
-                      {user?.current_streak || 0} day streak
+                      {user?.tasks_completed || 0} tasks completed
                     </span>
                   </div>
                 </motion.div>

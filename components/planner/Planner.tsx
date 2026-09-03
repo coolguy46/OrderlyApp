@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   addDays,
+  differenceInSeconds,
   format,
   isSameDay,
   startOfDay,
@@ -55,6 +56,7 @@ import {
   plannerMutationIsCurrent,
 } from '@/lib/planner/assistant-mutation';
 import {
+  describeScheduleCommandDraft,
   interpretDirectScheduleRequest,
   interpretScheduleCommand,
   interpretScheduleCommands,
@@ -86,6 +88,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { cn } from '@/lib/utils';
 import { WeekTimeGrid, type PlannerBlockView } from '@/components/planner';
 import { AssistantChat } from '@/components/planner/assistant/AssistantChat';
+import { TaskForm } from '@/components/tasks/TaskForm';
 import type { UntimedScheduleItem } from '@/components/schedule/UntimedTaskShelf';
 
 interface ConversationMessage {
@@ -450,10 +453,20 @@ function commitmentRenderData(
       if (!startAt || !endAt) continue;
       const id = occurrence.id;
       const school = commitment.kind === 'school';
-      busy.push({ id, title: commitment.title, startAt, endAt });
+      busy.push({
+        id,
+        title: commitment.title,
+        startAt,
+        endAt,
+        commitmentId: school ? null : commitment.id,
+        occurrenceDate: school ? null : occurrence.sourceDate,
+      });
       blocks.push({
         id,
         title: commitment.title,
+        description: [commitment.description, commitment.location ? `Location: ${commitment.location}` : null]
+          .filter(Boolean)
+          .join('\n') || null,
         startAt,
         endAt,
         color: commitment.color || '#64748b',
@@ -548,9 +561,10 @@ function previewReply(preview: ScheduleCommandPreview): string {
 
 function scheduledPlacementStarts(preview: ScheduleCommandPreview): string[] {
   return preview.actions.flatMap(action => {
-    if (action.type === 'create_task' || action.type === 'create_event') {
+    if (action.type === 'create_task' || action.type === 'create_event' || action.type === 'update_event') {
       return action.schedule.startAt ? [action.schedule.startAt] : [];
     }
+    if (action.type === 'remove_event') return [];
     return action.operations.flatMap(operation => {
       if (operation.type === 'upsert') return operation.input.startAt ? [operation.input.startAt] : [];
       if (operation.type === 'override') return operation.override.startAt ? [operation.override.startAt] : [];
@@ -644,6 +658,7 @@ export function Planner() {
   const plannerUsers = usePlannerStore(state => state.users);
   const upsertCommitment = usePlannerStore(state => state.upsertCommitment);
   const removeCommitment = usePlannerStore(state => state.removeCommitment);
+  const waitForPlannerPersistence = usePlannerStore(state => state.waitForPlannerPersistence);
   const entriesByUser = useScheduleStore(state => state.entriesByUser);
   const applyScheduleBatch = useScheduleStore(state => state.applyScheduleBatch);
   const replaceUserSchedules = useScheduleStore(state => state.replaceUserSchedules);
@@ -651,6 +666,7 @@ export function Planner() {
   const resizeOccurrence = useScheduleStore(state => state.resizeOccurrence);
   const upsertTaskSchedule = useScheduleStore(state => state.upsertTaskSchedule);
   const setOccurrenceOverride = useScheduleStore(state => state.setOccurrenceOverride);
+  const waitForSchedulePersistence = useScheduleStore(state => state.waitForSchedulePersistence);
 
   const userId = user?.id || null;
   const browserTimeZone = useMemo(
@@ -674,6 +690,7 @@ export function Planner() {
   const [previewAnchorDate, setPreviewAnchorDate] = useState<LocalDate | null>(null);
   const [previewValidatedLocalDate, setPreviewValidatedLocalDate] = useState<LocalDate | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [applying, setApplying] = useState(false);
   const [undoState, setUndoState] = useState<UndoState | null>(null);
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
@@ -683,6 +700,13 @@ export function Planner() {
   const [calendarOpen, setCalendarOpen] = useState(true);
   const [calendarExpanded, setCalendarExpanded] = useState(false);
   const [taskDetailsOpen, setTaskDetailsOpen] = useState(false);
+  const [editingTask, setEditingTask] = useState<Task | null>(null);
+  const [editingCommitment, setEditingCommitment] = useState<RecurringCommitmentInput | null>(null);
+  const [creationSlot, setCreationSlot] = useState<{
+    date: string;
+    startTime: string;
+    durationSeconds: number;
+  } | null>(null);
   const commandInputRef = useRef<HTMLTextAreaElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const chatAbortRef = useRef<AbortController | null>(null);
@@ -693,7 +717,6 @@ export function Planner() {
   const activeUserIdRef = useRef<string | null>(userId);
   const chatHydratedUserRef = useRef<string | null>(null);
   const draftHydratedUserRef = useRef<string | null>(null);
-  activeUserIdRef.current = userId;
 
   const installUndoState = useCallback((next: UndoState) => {
     const previous = activeUndoRef.current;
@@ -715,8 +738,13 @@ export function Planner() {
 
   useEffect(() => {
     const today = dateCarrierInTimeZone(timeZone);
-    setWeekStart(startOfWeek(today, { weekStartsOn: 1 }));
-    setSelectedDate(today);
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      setWeekStart(startOfWeek(today, { weekStartsOn: 1 }));
+      setSelectedDate(today);
+    });
+    return () => { cancelled = true; };
   }, [timeZone]);
 
   useEffect(() => () => {
@@ -732,6 +760,8 @@ export function Planner() {
   }, [finalizeTaskCreations]);
 
   useEffect(() => {
+    let cancelled = false;
+    activeUserIdRef.current = userId;
     chatRequestIdRef.current += 1;
     mutationGenerationRef.current += 1;
     chatAbortRef.current?.abort();
@@ -745,20 +775,28 @@ export function Planner() {
       finalizeTaskCreations(previousUndo.createdTaskIds);
     }
     activeUndoRef.current = null;
-    setUndoState(null);
-    setUsage(null);
-    setIsThinking(false);
-    setApplying(false);
-    setPreview(null);
-    setPreviewPlanRequest(null);
-    setPreviewPlanNow(null);
-    setPreviewAnchorDate(null);
-    setPreviewValidatedLocalDate(null);
-    setSelectedTaskId(null);
-    setCommand('');
-    setMessages(restored);
-    setChatOwnerUserId(userId);
-    chatHydratedUserRef.current = userId;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      setUndoState(null);
+      setUsage(null);
+      setIsThinking(false);
+      setApplying(false);
+      setPreview(null);
+      setPreviewPlanRequest(null);
+      setPreviewPlanNow(null);
+      setPreviewAnchorDate(null);
+      setPreviewValidatedLocalDate(null);
+      setSelectedTaskId(null);
+      setSelectedEventId(null);
+      setEditingTask(null);
+      setEditingCommitment(null);
+      setCreationSlot(null);
+      setCommand('');
+      setMessages(restored);
+      setChatOwnerUserId(userId);
+      chatHydratedUserRef.current = userId;
+    });
+    return () => { cancelled = true; };
   }, [finalizeTaskCreations, userId]);
 
   useEffect(() => {
@@ -871,6 +909,7 @@ export function Planner() {
     [...occurrences.timed, ...occurrences.untimed]
       .map(occurrence => [occurrence.id, occurrence] as const),
   ), [occurrences.timed, occurrences.untimed]);
+  const taskById = useMemo(() => new Map(tasks.map(task => [task.id, task])), [tasks]);
   const untimedItems = useMemo(() => occurrences.untimed.map(occurrence => ({
     id: occurrence.id,
     taskId: occurrence.taskId,
@@ -889,10 +928,11 @@ export function Planner() {
     occurrences: [...commandOccurrences.timed, ...commandOccurrences.untimed],
     busy: [...commandCommitments.busy, ...commandEvents.busy],
     selectedTaskId,
+    selectedEventId,
     selectedDate: localDate(selectedDate),
     availableStartTime: plannerSettings.weekendAvailableStart,
     availableEndTime: plannerSettings.bedtime,
-  }), [commandCommitments.busy, commandEvents.busy, commandOccurrences.timed, commandOccurrences.untimed, entries, pendingTasks, plannerSettings.bedtime, plannerSettings.weekendAvailableStart, selectedDate, selectedTaskId, timeZone]);
+  }), [commandCommitments.busy, commandEvents.busy, commandOccurrences.timed, commandOccurrences.untimed, entries, pendingTasks, plannerSettings.bedtime, plannerSettings.weekendAvailableStart, selectedDate, selectedEventId, selectedTaskId, timeZone]);
 
   // Keep the provider payload intentionally small, but make truncation
   // relevance-aware so selected, overdue, and imminent work cannot be hidden
@@ -948,13 +988,17 @@ export function Planner() {
           selectedDate: storedDraft.anchorDate,
         });
     if (restored.status === 'ready' && restored.actions.length > 0) {
-      setPreview(restored);
-      setPreviewPlanRequest(storedDraft.kind === 'task_plan' ? storedDraft.request : null);
-      setPreviewPlanNow(storedDraft.plannedAt);
-      setPreviewAnchorDate(storedDraft.kind === 'commands' ? storedDraft.anchorDate : null);
-      setPreviewValidatedLocalDate(storedDraft.validatedLocalDate);
-      setCalendarOpen(true);
-      return;
+      let cancelled = false;
+      queueMicrotask(() => {
+        if (cancelled) return;
+        setPreview(restored);
+        setPreviewPlanRequest(storedDraft.kind === 'task_plan' ? storedDraft.request : null);
+        setPreviewPlanNow(storedDraft.plannedAt);
+        setPreviewAnchorDate(storedDraft.kind === 'commands' ? storedDraft.anchorDate : null);
+        setPreviewValidatedLocalDate(storedDraft.validatedLocalDate);
+        setCalendarOpen(true);
+      });
+      return () => { cancelled = true; };
     }
     try {
       window.sessionStorage.removeItem(assistantDraftStorageKey(userId));
@@ -1017,8 +1061,50 @@ export function Planner() {
     if (!isSameDay(start, weekStart)) setWeekStart(start);
   }, [weekStart]);
 
+  const handleEmptySlotClick = useCallback((nextStart: Date, nextEnd: Date) => {
+    const date = localDateFromIso(nextStart.toISOString(), timeZone);
+    const startTime = localTimeFromIso(nextStart.toISOString(), timeZone);
+    if (!date || !startTime) return;
+    setEditingTask(null);
+    setEditingCommitment(null);
+    setCreationSlot({
+      date,
+      startTime,
+      durationSeconds: Math.max(60, differenceInSeconds(nextEnd, nextStart)),
+    });
+    setSelectedDate(localDateCarrier(date));
+  }, [timeZone]);
+
+  const handleBlockClick = useCallback((block: PlannerBlockView) => {
+    if (block.taskId) {
+      const occurrence = occurrenceById.get(block.id);
+      const task = occurrence
+        ? taskById.get(occurrence.taskId) || occurrence.task
+        : taskById.get(block.taskId);
+      if (!task) return;
+      setEditingCommitment(null);
+      setCreationSlot(null);
+      setEditingTask(task);
+      return;
+    }
+
+    if (!block.commitmentId || block.kind === 'school') return;
+    const commitment = commitmentById.get(block.commitmentId);
+    if (!commitment) return;
+    setEditingTask(null);
+    setCreationSlot(null);
+    setEditingCommitment(commitment);
+  }, [commitmentById, occurrenceById, taskById]);
+
+  const closeTaskForm = useCallback(() => {
+    setEditingTask(null);
+    setEditingCommitment(null);
+    setCreationSlot(null);
+  }, []);
+
   const prepareCommand = useCallback((value: string, taskId: string | null = null) => {
     setSelectedTaskId(taskId);
+    setSelectedEventId(null);
     setCommand(value);
     window.requestAnimationFrame(() => {
       commandInputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -1050,7 +1136,7 @@ export function Planner() {
         setWeekStart(startOfWeek(nextDate, { weekStartsOn: 1 }));
       }
       setCalendarOpen(true);
-      return `I placed ${nextPreview.actions.length === 1 ? 'the change' : `${nextPreview.actions.length} changes`} on your calendar as one draft.\n\n${nextPreview.summary}\n\nSelect **Save changes** above the calendar to confirm everything.`;
+      return `${describeScheduleCommandDraft(nextPreview, timeZone)}\n\nReview it on the calendar, then select **Save changes** to apply it.`;
     }
 
     // A question or clarification must not erase a different unsaved draft.
@@ -1111,6 +1197,7 @@ export function Planner() {
       ...context,
       now: new Date().toISOString(),
       selectedTaskId: taskId,
+      selectedEventId,
     };
 
     const queryTerms = normalized.toLocaleLowerCase().match(/[a-z0-9]{3,}/g) || [];
@@ -1134,6 +1221,21 @@ export function Planner() {
       scheduledTotal: pendingTasks.filter(task => scheduledTaskIds.has(task.id)).length,
       includedTotal: Math.min(30, providerTasks.length),
     };
+    // Send only the currently visible exact draft for conversational
+    // corrections/confirmations. Broad plans carry richer constraints in
+    // previewPlanRequest and must not be flattened into this smaller shape.
+    const activeExactDraft = preview?.status === 'ready'
+      && preview.actions.length > 0
+      && previewPlanRequest === null
+      ? {
+          kind: 'exact_commands' as const,
+          summary: preview.summary,
+          taskScope: null,
+          taskIds: [],
+          normalizedCommands: preview.commands,
+          createdAt: previewPlanNow,
+        }
+      : null;
     // This local context lets the deterministic intent resolver understand
     // relative clocks and named work before either the read-only query path or
     // the external provider can reinterpret the request.
@@ -1155,6 +1257,7 @@ export function Planner() {
       exams: [],
       occurrences: [],
       busy: [],
+      activeDraft: activeExactDraft,
     };
 
     // Mutations take precedence over factual keyword matching. This matters
@@ -1340,6 +1443,7 @@ export function Planner() {
               startAt: interval.startAt,
               endAt: interval.endAt,
             })),
+            activeDraft: browserIntentContext.activeDraft,
           },
         }),
       });
@@ -1454,7 +1558,7 @@ export function Planner() {
         setIsThinking(false);
       }
     }
-  }, [assistantContextTasks, chatOwnerUserId, command, context, entries, exams, isThinking, messages, pendingTasks, plannerRecord?.estimateCache, plannerRecord?.feedbackMultipliers, plannerSettings, presentCommandPreview, presentTaskPlanPreview, selectedDate, selectedTaskId, subjects, tasks, timeZone, userId]);
+  }, [assistantContextTasks, chatOwnerUserId, command, context, entries, exams, isThinking, messages, pendingTasks, plannerRecord, plannerSettings, presentCommandPreview, presentTaskPlanPreview, preview, previewPlanNow, previewPlanRequest, selectedDate, selectedEventId, selectedTaskId, subjects, tasks, timeZone, userId]);
 
   const applyPreview = useCallback(async () => {
     if (!userId || !preview || preview.status !== 'ready' || preview.actions.length === 0) return;
@@ -1520,6 +1624,8 @@ export function Planner() {
     const before = currentScheduleEntries(userId);
     const createdTaskIds: string[] = [];
     const createdCommitmentIds: string[] = [];
+    const affectedScheduleTaskIds = new Set<string>();
+    const commitmentSnapshots = new Map<string, RecurringCommitmentInput>();
     const operationUserId = userId;
     const operationGeneration = mutationGenerationRef.current + 1;
     mutationGenerationRef.current = operationGeneration;
@@ -1540,6 +1646,9 @@ export function Planner() {
       );
       finalizeTaskCreations(cleanup.deletedTaskIds);
       for (const id of createdCommitmentIds) removeCommitment(operationUserId, id);
+      for (const commitment of commitmentSnapshots.values()) {
+        upsertCommitment(operationUserId, cloneCommitment(commitment));
+      }
       const currentEntries = selectScheduleEntriesForUser(
         useScheduleStore.getState().entriesByUser,
         operationUserId,
@@ -1563,6 +1672,7 @@ export function Planner() {
         }
         if (action.type === 'schedule_batch') {
           applyScheduleBatch(operationUserId, action.operations);
+          for (const operation of action.operations) affectedScheduleTaskIds.add(operation.taskId);
           continue;
         }
         if (action.type === 'create_event') {
@@ -1576,6 +1686,46 @@ export function Planner() {
           if (!commitment) throw new Error('The event could not be created.');
           upsertCommitment(operationUserId, commitment);
           createdCommitmentIds.push(commitmentId);
+          setSelectedEventId(commitmentId);
+          continue;
+        }
+        if (action.type === 'update_event') {
+          const commitment = commitmentById.get(action.commitmentId);
+          const startAt = action.schedule.startAt;
+          const durationSeconds = action.schedule.durationSeconds;
+          if (!commitment || commitment.kind === 'school' || !startAt || !durationSeconds) {
+            throw new Error('That event could not be updated.');
+          }
+          const endAt = new Date(new Date(startAt).getTime() + durationSeconds * 1_000);
+          const eventTimeZone = commitment.timeZone || timeZone;
+          const scheduledDate = localDateFromIso(startAt, eventTimeZone);
+          const startTime = localTimeFromIso(startAt, eventTimeZone);
+          const endTime = localTimeFromIso(endAt.toISOString(), eventTimeZone);
+          if (!scheduledDate || !startTime || !endTime) throw new Error('That event time is invalid.');
+          if (!commitmentSnapshots.has(commitment.id)) {
+            commitmentSnapshots.set(commitment.id, cloneCommitment(commitment));
+          }
+          upsertCommitment(operationUserId, withCommitmentOccurrenceOverride(
+            commitment,
+            action.occurrenceDate,
+            { scheduledDate, startTime, endTime },
+          ));
+          setSelectedEventId(commitment.id);
+          continue;
+        }
+        if (action.type === 'remove_event') {
+          const commitment = commitmentById.get(action.commitmentId);
+          if (!commitment || commitment.kind === 'school') throw new Error('That event could not be removed.');
+          if (!commitmentSnapshots.has(commitment.id)) {
+            commitmentSnapshots.set(commitment.id, cloneCommitment(commitment));
+          }
+          if (action.wholeSeries) removeCommitment(operationUserId, commitment.id);
+          else upsertCommitment(operationUserId, withCommitmentOccurrenceOverride(
+            commitment,
+            action.occurrenceDate,
+            { skipped: true },
+          ));
+          setSelectedEventId(action.wholeSeries ? null : commitment.id);
           continue;
         }
         const created = await addTask({
@@ -1596,6 +1746,7 @@ export function Planner() {
         }, { reversible: true });
         if (!created) throw new Error('The task could not be created.');
         createdTaskIds.push(created.id);
+        affectedScheduleTaskIds.add(created.id);
         if (!operationIsCurrent()) {
           await rollbackCreatedResources();
           return;
@@ -1606,11 +1757,27 @@ export function Planner() {
         await rollbackCreatedResources();
         return;
       }
+      const [schedulePersisted, plannerPersisted] = await Promise.all([
+        affectedScheduleTaskIds.size > 0
+          ? waitForSchedulePersistence(operationUserId, [...affectedScheduleTaskIds])
+          : Promise.resolve(true),
+        createdCommitmentIds.length > 0 || commitmentSnapshots.size > 0
+          ? waitForPlannerPersistence(operationUserId)
+          : Promise.resolve(true),
+      ]);
+      if (!operationIsCurrent()) {
+        await rollbackCreatedResources();
+        return;
+      }
+      if (!schedulePersisted || !plannerPersisted) {
+        throw new Error('Orderly could not confirm that every calendar change reached the database. Nothing was reported as saved.');
+      }
       installUndoState({
         userId: operationUserId,
         entries: before,
         createdTaskIds,
         createdCommitmentIds,
+        commitmentSnapshots: [...commitmentSnapshots.values()].map(cloneCommitment),
         label: freshPreview.summary,
       });
       setMessages(previous => [...previous, {
@@ -1655,12 +1822,17 @@ export function Planner() {
         }].slice(-CHAT_DISPLAY_LIMIT));
         toast.error('Update failed; task cleanup still needs to be retried');
       } else {
+        setMessages(previous => [...previous, {
+          id: `assistant-save-error-${Date.now()}`,
+          role: 'assistant' as const,
+          content: `${errorMessage} I did not mark the change as saved; you can retry it from the calendar draft.`,
+        }].slice(-CHAT_DISPLAY_LIMIT));
         toast.error(errorMessage);
       }
     } finally {
       if (operationIsCurrent()) setApplying(false);
     }
-  }, [addTask, applyScheduleBatch, context, deleteTask, entries, finalizeTaskCreations, installUndoState, plannerRecord?.estimateCache, plannerRecord?.feedbackMultipliers, plannerSettings, preview, previewAnchorDate, previewPlanNow, previewPlanRequest, previewValidatedLocalDate, removeCommitment, replaceUserSchedules, selectedTaskId, tasks, timeZone, upsertCommitment, userId]);
+  }, [addTask, applyScheduleBatch, commitmentById, context, deleteTask, entries, finalizeTaskCreations, installUndoState, plannerRecord?.estimateCache, plannerRecord?.feedbackMultipliers, plannerSettings, preview, previewAnchorDate, previewPlanRequest, previewValidatedLocalDate, removeCommitment, replaceUserSchedules, selectedTaskId, tasks, timeZone, upsertCommitment, userId, waitForPlannerPersistence, waitForSchedulePersistence]);
 
   const undo = useCallback(async () => {
     if (!userId || !undoState || undoState.userId !== userId) return;
@@ -1819,7 +1991,7 @@ export function Planner() {
       });
     }
     return true;
-  }, [commitmentById, entries, installUndoState, setStoredEvents, storedEvents, timeZone, upsertCommitment, userId]);
+  }, [commitmentById, installUndoState, setStoredEvents, storedEvents, timeZone, upsertCommitment, userId]);
 
   const handleMove = useCallback((block: PlannerBlockView, nextStart: Date, nextEnd: Date) => {
     if (!userId || applying) return;
@@ -1999,6 +2171,7 @@ export function Planner() {
     setPreviewAnchorDate(null);
     setPreviewValidatedLocalDate(null);
     setSelectedTaskId(null);
+    setSelectedEventId(null);
     window.requestAnimationFrame(() => commandInputRef.current?.focus());
   }, [stopThinking, userId]);
 
@@ -2183,6 +2356,8 @@ export function Planner() {
                 timeZoneLabel={timeZone.split('/').pop()?.replace('_', ' ') || 'Local'}
                 selectedDate={selectedDate}
                 onSelectedDateChange={selectDay}
+                onEmptySlotClick={handleEmptySlotClick}
+                onBlockClick={handleBlockClick}
                 onBlockMove={handleMove}
                 onBlockResize={handleResize}
                 onBlockMoveToUntimed={handleMoveToUntimed}
@@ -2267,6 +2442,28 @@ export function Planner() {
         )}
         </div>
       )}
+
+      <TaskForm
+        isOpen={Boolean(editingTask || editingCommitment || creationSlot)}
+        task={editingTask}
+        commitment={editingCommitment}
+        initialMode="task"
+        initialDate={creationSlot?.date || ''}
+        initialStartTime={creationSlot?.startTime || ''}
+        initialDurationSeconds={creationSlot?.durationSeconds || null}
+        onClose={closeTaskForm}
+        onSaved={() => {
+          if (!editingCommitment?.id.startsWith('calendar-')) return;
+          const legacyId = editingCommitment.id.slice('calendar-'.length);
+          const nextEvents = storedEvents.filter(event => event.id !== legacyId);
+          try {
+            writeStoredCalendarEvents(userId, nextEvents);
+            setStoredEvents(nextEvents);
+          } catch {
+            toast.error('The calendar event was saved, but its old copy could not be removed');
+          }
+        }}
+      />
     </div>
   );
 }

@@ -12,5 +12,13 @@ test('planner migration keeps deadlines advisory for existing and fresh schemas'
   assert.match(sql, /end_at<=deadline_at/);
   assert.match(sql, /deadline_at>=end_at/);
   assert.match(sql, /ALTER TABLE public\.planner_blocks DROP CONSTRAINT %I/);
-  assert.doesNotMatch(sql, /\b(?:DELETE\s+FROM|TRUNCATE|DROP\s+TABLE)\b/i);
+
+  // The persistence RPC legitimately reconciles deleted client records later
+  // in this migration. Scope the data-loss guard to the legacy-deadline repair
+  // itself so those unrelated DELETE statements do not create a false failure.
+  const deadlineRepair = sql.slice(
+    sql.indexOf('-- Older installs treated the assignment deadline'),
+    sql.indexOf('CREATE TABLE IF NOT EXISTS planner_feedback'),
+  );
+  assert.doesNotMatch(deadlineRepair, /\b(?:DELETE\s+FROM|TRUNCATE|DROP\s+TABLE)\b/i);
 });

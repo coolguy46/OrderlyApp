@@ -15,6 +15,7 @@ const runtimeSources = [
   'lib/planner/commitments.ts',
   'lib/planner/engine.ts',
   'lib/planner/adapters.ts',
+  'lib/user-scoped-storage.ts',
   'lib/schedule/types.ts',
   'lib/schedule/selectors.ts',
   'lib/planner/assistant-planner.ts',
@@ -38,13 +39,9 @@ for (const relativePath of runtimeSources) {
     .filter(diagnostic => diagnostic.category === ts.DiagnosticCategory.Error);
   assert.equal(errors.length, 0, errors.map(diagnostic => diagnostic.messageText).join('\n'));
 
-  let output = transpiled.outputText;
-  if (relativePath === 'lib/planner/assistant-planner.ts') {
-    output = output.replace(
-      'require("@/lib/schedule/selectors")',
-      'require("../schedule/selectors")',
-    );
-  }
+  const output = transpiled.outputText
+    .replace('require("@/lib/schedule/selectors")', 'require("../schedule/selectors")')
+    .replace('require("@/lib/user-scoped-storage")', 'require("../user-scoped-storage")');
   await mkdir(dirname(outputPath), { recursive: true });
   await writeFile(outputPath, output);
 }

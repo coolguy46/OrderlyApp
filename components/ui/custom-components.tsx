@@ -1,7 +1,6 @@
 'use client';
 
 import { cn } from '@/lib/utils';
-import { Badge } from './Badge';
 import { Card, CardContent } from './Card';
 import { ReactNode } from 'react';
 

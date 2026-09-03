@@ -5,6 +5,7 @@ import {
   isUnverifiedCalendarOutcome,
   recoverExplicitRangeFromFalseSchoolConflict,
 } from '../lib/schedule/assistant-command-fallback.ts';
+import { findScheduleClockRange } from '../lib/schedule/command-text.ts';
 
 test('prose-only model calendar outcomes are never treated as verified facts', () => {
   assert.equal(isUnverifiedCalendarOutcome('I can\'t add it at 10–11 PM because that time overlaps school.'), true);
@@ -29,7 +30,14 @@ function readyPreview(command) {
   };
 }
 
-test('the intended local PM range maps to the correct instants', () => {
+test('an explicit PM range keeps both meridiems and maps to the intended local date', () => {
+  const range = findScheduleClockRange('create a task for tonight from 10 pm to 11 pm');
+
+  assert.ok(range);
+  assert.equal(range.startHour, '10');
+  assert.equal(range.startPeriod?.toLowerCase(), 'pm');
+  assert.equal(range.endHour, '11');
+  assert.equal(range.endPeriod?.toLowerCase(), 'pm');
   assert.equal(
     localDateTimeToIso('2026-08-28', '22:00:00', 'America/Los_Angeles'),
     '2026-08-29T05:00:00.000Z',
@@ -43,12 +51,14 @@ test('the intended local PM range maps to the correct instants', () => {
 test('recovers the user clock range when the AI rewrite creates a false school conflict', () => {
   const request = 'create a task for tonight from 10 pm to 11 pm to work on my common app';
   const normalized = 'Schedule Common App today at 10 pm for 11 hours';
+  const interpreted = [];
 
   const recovery = recoverExplicitRangeFromFalseSchoolConflict({
     messages: [{ role: 'user', content: request }],
     normalizedCommand: normalized,
     normalizedPreview: normalizedSchoolConflict,
     interpret(command) {
+      interpreted.push(command);
       return command === request ? readyPreview(command) : normalizedSchoolConflict;
     },
   });
@@ -56,15 +66,17 @@ test('recovers the user clock range when the AI rewrite creates a false school c
   assert.equal(recovery.recovered, true);
   assert.equal(recovery.command, request);
   assert.equal(recovery.preview.status, 'ready');
+  assert.deepEqual(interpreted, [request]);
 });
 
-test('a follow-up correction retries the immediately preceding explicit range', () => {
+test('a follow-up correction can retry the immediately preceding explicit range', () => {
   const original = 'create a task tonight from 10 pm to 11 pm for my common app';
+  const correction = 'that cannot overlap because school ends at 3:30 pm';
   const recovery = recoverExplicitRangeFromFalseSchoolConflict({
     messages: [
       { role: 'user', content: original },
       { role: 'assistant', content: normalizedSchoolConflict.summary },
-      { role: 'user', content: 'that cannot overlap because school ends at 3:30 pm' },
+      { role: 'user', content: correction },
     ],
     normalizedCommand: 'Schedule Common App today at 10 am for 1 hour',
     normalizedPreview: normalizedSchoolConflict,
@@ -93,10 +105,12 @@ test('does not bypass a real school collision', () => {
 });
 
 test('does not use an old clock range beyond the latest two user messages', () => {
-  let calls = 0;
+  const oldRequest = 'create a task tonight from 10 pm to 11 pm';
+  let interpretCalls = 0;
+
   const recovery = recoverExplicitRangeFromFalseSchoolConflict({
     messages: [
-      { role: 'user', content: 'create a task tonight from 10 pm to 11 pm' },
+      { role: 'user', content: oldRequest },
       { role: 'assistant', content: 'Okay.' },
       { role: 'user', content: 'What is due tomorrow?' },
       { role: 'assistant', content: 'Here are your tasks.' },
@@ -105,13 +119,13 @@ test('does not use an old clock range beyond the latest two user messages', () =
     normalizedCommand: 'Schedule task today at 10 am for 1 hour',
     normalizedPreview: normalizedSchoolConflict,
     interpret() {
-      calls += 1;
-      return readyPreview('unused');
+      interpretCalls += 1;
+      return readyPreview(oldRequest);
     },
   });
 
   assert.equal(recovery.recovered, false);
-  assert.equal(calls, 0);
+  assert.equal(interpretCalls, 0);
 });
 
 test('leaves non-school clarifications unchanged', () => {
@@ -120,18 +134,18 @@ test('leaves non-school clarifications unchanged', () => {
     summary: 'How long should this activity take?',
     actions: [],
   };
-  let calls = 0;
+  let interpretCalls = 0;
   const recovery = recoverExplicitRangeFromFalseSchoolConflict({
     messages: [{ role: 'user', content: 'from 10 pm to 11 pm' }],
     normalizedCommand: 'Schedule task tonight',
     normalizedPreview: clarification,
     interpret() {
-      calls += 1;
+      interpretCalls += 1;
       return readyPreview('unused');
     },
   });
 
   assert.equal(recovery.recovered, false);
   assert.equal(recovery.preview, clarification);
-  assert.equal(calls, 0);
+  assert.equal(interpretCalls, 0);
 });

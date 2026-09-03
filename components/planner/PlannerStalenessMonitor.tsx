@@ -34,7 +34,7 @@ export function PlannerStalenessMonitor() {
   useEffect(() => {
     if (!user) return;
     setActiveUser(user.id, Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
-  }, [setActiveUser, user?.id]);
+  }, [setActiveUser, user]);
 
   const taskInputs = useMemo(() => {
     if (!plan) return [];

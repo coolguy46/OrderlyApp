@@ -1,6 +1,7 @@
 import type { Task } from './supabase/types.ts';
 import { taskDueAt, taskMissingDate } from './task-status.ts';
 import {
+  isMonthlyRecurrenceDate,
   localDateFromIso,
   taskUntimedDisplayDate,
   type TaskUntimedDisplayDateOptions,
@@ -19,6 +20,8 @@ function recurringTaskOccursOn(task: Task, date: LocalDate, timeZone?: string): 
     ? localDateFromIso(task.due_date, timeZone)
     : localDateFromIso(task.created_at, timeZone);
   if (!anchor || date < anchor) return false;
+
+  // The materialized deadline row already represents the anchor occurrence.
   if (task.due_date && localDateFromIso(task.due_date, timeZone) === date) return false;
 
   if (task.recurrence === 'daily') return true;
@@ -28,15 +31,16 @@ function recurringTaskOccursOn(task: Task, date: LocalDate, timeZone?: string): 
       : [localDayOfWeek(anchor)];
     return recurrenceDays.includes(localDayOfWeek(date));
   }
-  return task.recurrence === 'monthly' && anchor.slice(8, 10) === date.slice(8, 10);
+  return task.recurrence === 'monthly' && isMonthlyRecurrenceDate(date, anchor);
 }
 
 /**
- * Select the work that belongs on one dashboard day.
+ * Select the work that belongs on a dashboard day.
  *
- * Imported work due during school is surfaced one day early. A task that
- * passes its deadline today remains in today's list until local midnight;
- * older unfinished work is kept out of this list and belongs in Missing.
+ * Imported work due during school is surfaced one day early. An unfinished
+ * task stays visible on its real deadline day even after its exact due time,
+ * then leaves the dashboard at the next calendar-day boundary. The complete
+ * overdue history remains available in Tasks > Missing.
  */
 export function selectDashboardTasksForDate(
   tasks: readonly Task[],

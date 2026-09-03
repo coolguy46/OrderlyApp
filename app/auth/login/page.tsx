@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/Button';
@@ -9,10 +10,24 @@ import { Input } from '@/components/ui/Input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Separator } from '@/components/ui/separator';
-import { Mail, Lock, ArrowRight, Chrome } from 'lucide-react';
+import { Mail, Lock, ArrowRight, Chrome, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { useAppStore } from '@/lib/store';
 import { signInWithGoogle } from '@/lib/supabase/services';
 import { errorMessage } from '@/lib/auth/lifecycle';
+import { useHydrated } from '@/lib/use-hydrated';
+
+function callbackErrorMessage(value: string | null): string {
+  if (value === 'auth_callback_error') {
+    return 'Sign-in could not be completed. Please try again.';
+  }
+  if (value === 'recovery_unavailable') {
+    return 'Password recovery is temporarily unavailable. Please request a new link later.';
+  }
+  if (value === 'invalid_recovery_link') {
+    return 'That password recovery link is invalid or expired. Please request a new one.';
+  }
+  return '';
+}
 
 export default function LoginPage() {
   const router = useRouter();
@@ -21,13 +36,13 @@ export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
-
-  useEffect(() => {
-    const callbackError = new URLSearchParams(window.location.search).get('error');
-    if (callbackError === 'auth_callback_error') {
-      setError('Google sign-in could not be completed. Please try again.');
-    }
-  }, []);
+  const hydrated = useHydrated();
+  const authResult = hydrated ? new URLSearchParams(window.location.search) : null;
+  const queryError = callbackErrorMessage(authResult?.get('error') ?? null);
+  const notice = authResult?.get('accountDeleted') === '1'
+    ? 'Your Orderly account and stored data were deleted.'
+    : '';
+  const displayedError = error || queryError;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -77,7 +92,7 @@ export default function LoginPage() {
           <CardHeader className="text-center space-y-4">
             {/* Logo */}
             <div className="mx-auto w-12 h-12 rounded-xl flex items-center justify-center">
-              <img src="/logo.svg" alt="Orderly Logo" className="w-12 h-12" />
+              <Image src="/logo.svg" alt="Orderly Logo" width={48} height={48} className="w-12 h-12" priority />
             </div>
             <div>
               <CardTitle className="text-2xl font-bold">Welcome back</CardTitle>
@@ -108,9 +123,25 @@ export default function LoginPage() {
               </span>
             </div>
 
-            {error && (
-              <div role="alert" className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
-                {error}
+            {displayedError && (
+              <div
+                role="alert"
+                aria-live="assertive"
+                className="flex items-start gap-2 rounded-lg border border-red-500/25 bg-red-500/10 p-3 text-sm text-red-300"
+              >
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>{displayedError}</span>
+              </div>
+            )}
+
+            {notice && (
+              <div
+                role="status"
+                aria-live="polite"
+                className="flex items-start gap-2 rounded-lg border border-emerald-500/25 bg-emerald-500/10 p-3 text-sm text-emerald-300"
+              >
+                <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>{notice}</span>
               </div>
             )}
 
@@ -125,7 +156,10 @@ export default function LoginPage() {
                     type="email"
                     placeholder="you@example.com"
                     value={email}
-                    onChange={(e) => setEmail(e.target.value)}
+                    onChange={(e) => {
+                      setEmail(e.target.value);
+                      if (error) setError('');
+                    }}
                     className="!pl-12"
                     required
                   />
@@ -149,7 +183,10 @@ export default function LoginPage() {
                     type="password"
                     placeholder="••••••••"
                     value={password}
-                    onChange={(e) => setPassword(e.target.value)}
+                    onChange={(e) => {
+                      setPassword(e.target.value);
+                      if (error) setError('');
+                    }}
                     className="!pl-12"
                     required
                   />
@@ -175,7 +212,7 @@ export default function LoginPage() {
 
           <CardFooter className="justify-center">
             <p className="text-sm text-muted-foreground">
-              Don't have an account?{' '}
+              Don&apos;t have an account?{' '}
               <Link
                 href="/auth/register"
                 className="text-indigo-400 hover:text-indigo-300 font-medium transition-colors"

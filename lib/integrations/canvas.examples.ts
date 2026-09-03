@@ -13,7 +13,6 @@ import {
   sortAssignmentsByDueDate,
   getUpcomingAssignments,
   getOverdueAssignments,
-  CanvasAssignment,
 } from '@/lib/integrations/canvas';
 
 // Example 1: Basic sync from URL
@@ -242,10 +241,7 @@ export async function runAllExamples() {
   console.log('Canvas Integration Examples');
   console.log('='.repeat(50));
   
-  // Note: Replace the URL with your actual Canvas calendar URL
-  const YOUR_CANVAS_URL = process.env.CANVAS_ICAL_URL || 'https://canvas.instructure.com/feeds/calendars/user_xxx.ics';
-  
-  console.log(`\nUsing URL: ${YOUR_CANVAS_URL}`);
+  console.log('\nUsing configured Canvas feed URL (value redacted)');
   console.log('\n');
   
   await exampleBasicSync();

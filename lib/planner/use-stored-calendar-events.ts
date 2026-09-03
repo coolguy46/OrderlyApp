@@ -27,7 +27,10 @@ export function useStoredCalendarEvents(userId: string | null) {
     events: [],
   });
 
-  const events = snapshot.userId === userId ? snapshot.events : [];
+  const events = useMemo(
+    () => snapshot.userId === userId ? snapshot.events : [],
+    [snapshot, userId],
+  );
   const ready = snapshot.userId === userId;
 
   const setEvents = useCallback((nextEvents: StoredCalendarEvent[]) => {
@@ -36,9 +39,12 @@ export function useStoredCalendarEvents(userId: string | null) {
   }, [userId]);
 
   useEffect(() => {
+    let cancelled = false;
     if (!userId) {
-      setSnapshot({ userId: null, events: [] });
-      return;
+      queueMicrotask(() => {
+        if (!cancelled) setSnapshot({ userId: null, events: [] });
+      });
+      return () => { cancelled = true; };
     }
 
     const refresh = () => {
@@ -53,10 +59,16 @@ export function useStoredCalendarEvents(userId: string | null) {
       if (!changedUserId || changedUserId === userId) refresh();
     };
 
-    refresh();
+    // Load after subscription setup without causing a synchronous effect
+    // cascade. Account fencing above keeps the prior account invisible during
+    // this one microtask handoff.
+    queueMicrotask(() => {
+      if (!cancelled) refresh();
+    });
     window.addEventListener('storage', handleStorage);
     window.addEventListener('orderly-calendar-events-changed', handleCalendarChange);
     return () => {
+      cancelled = true;
       window.removeEventListener('storage', handleStorage);
       window.removeEventListener('orderly-calendar-events-changed', handleCalendarChange);
     };

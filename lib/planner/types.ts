@@ -123,6 +123,8 @@ export interface CommitmentOccurrenceOverride {
 export interface RecurringCommitmentInput {
   id: string;
   title: string;
+  description?: string | null;
+  location?: string | null;
   kind: CommitmentKind;
   daysOfWeek: number[];
   startTime: LocalTime;

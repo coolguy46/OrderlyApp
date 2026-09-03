@@ -1,11 +1,16 @@
 -- Orderly deterministic one-week planner.
--- This migration is additive and safe to run after the existing base schema.
+-- Apply this schema before deploying cross-device planner persistence, then
+-- rerun relationship-ownership-migration.sql so optional task/exam/subject
+-- links receive ownership triggers.
+
+BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 CREATE TABLE IF NOT EXISTS planner_preferences (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL UNIQUE REFERENCES profiles(id) ON DELETE CASCADE,
+  revision BIGINT NOT NULL DEFAULT 0 CHECK (revision >= 0),
   time_zone TEXT NOT NULL DEFAULT 'UTC' CHECK (length(trim(time_zone)) > 0),
   horizon_days SMALLINT NOT NULL DEFAULT 7 CHECK (horizon_days BETWEEN 1 AND 7),
   slot_minutes SMALLINT NOT NULL DEFAULT 15 CHECK (slot_minutes = 15),
@@ -32,7 +37,10 @@ CREATE TABLE IF NOT EXISTS planner_preferences (
 CREATE TABLE IF NOT EXISTS recurring_commitments (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  client_commitment_id TEXT NOT NULL,
   title TEXT NOT NULL CHECK (length(trim(title)) > 0),
+  description TEXT,
+  location TEXT,
   kind TEXT NOT NULL DEFAULT 'other'
     CHECK (kind IN ('class', 'school', 'sports', 'work', 'appointment', 'personal', 'other')),
   days_of_week SMALLINT[] NOT NULL
@@ -47,6 +55,8 @@ CREATE TABLE IF NOT EXISTS recurring_commitments (
   time_zone TEXT NOT NULL DEFAULT 'UTC' CHECK (length(trim(time_zone)) > 0),
   enabled BOOLEAN NOT NULL DEFAULT TRUE,
   color TEXT,
+  occurrence_overrides JSONB NOT NULL DEFAULT '{}'::JSONB
+    CHECK (jsonb_typeof(occurrence_overrides) = 'object'),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   CHECK (start_time <> end_time),
@@ -66,6 +76,7 @@ CREATE TABLE IF NOT EXISTS planner_plans (
   input_fingerprint TEXT NOT NULL,
   input_snapshot JSONB NOT NULL DEFAULT '{}'::JSONB CHECK (jsonb_typeof(input_snapshot) = 'object'),
   settings_snapshot JSONB NOT NULL DEFAULT '{}'::JSONB CHECK (jsonb_typeof(settings_snapshot) = 'object'),
+  plan_payload JSONB NOT NULL DEFAULT '{}'::JSONB CHECK (jsonb_typeof(plan_payload) = 'object'),
   messages JSONB NOT NULL DEFAULT '[]'::JSONB CHECK (jsonb_typeof(messages) = 'array'),
   warnings JSONB NOT NULL DEFAULT '[]'::JSONB CHECK (jsonb_typeof(warnings) = 'array'),
   total_scheduled_minutes INTEGER NOT NULL DEFAULT 0 CHECK (total_scheduled_minutes >= 0),
@@ -83,9 +94,10 @@ CREATE TABLE IF NOT EXISTS planner_blocks (
   plan_id UUID NOT NULL,
   user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
   client_block_id TEXT NOT NULL,
-  source_kind TEXT NOT NULL CHECK (source_kind IN ('task', 'exam_prep')),
+  source_kind TEXT NOT NULL CHECK (source_kind IN ('task', 'exam_prep', 'requested_activity')),
   task_id UUID REFERENCES tasks(id) ON DELETE SET NULL,
   exam_id UUID REFERENCES exams(id) ON DELETE SET NULL,
+  activity_id TEXT,
   commitment_id UUID REFERENCES recurring_commitments(id) ON DELETE SET NULL,
   source_id_snapshot TEXT NOT NULL,
   title_snapshot TEXT NOT NULL CHECK (length(trim(title_snapshot)) > 0),
@@ -143,10 +155,14 @@ $$;
 CREATE TABLE IF NOT EXISTS planner_feedback (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  client_feedback_id TEXT NOT NULL,
   plan_id UUID REFERENCES planner_plans(id) ON DELETE SET NULL,
+  client_plan_id TEXT,
   block_id UUID REFERENCES planner_blocks(id) ON DELETE SET NULL,
+  client_block_id TEXT,
   task_id UUID REFERENCES tasks(id) ON DELETE SET NULL,
   exam_id UUID REFERENCES exams(id) ON DELETE SET NULL,
+  activity_id TEXT,
   subject_id UUID REFERENCES subjects(id) ON DELETE SET NULL,
   assignment_type TEXT
     CHECK (assignment_type IS NULL OR assignment_type IN ('assignment', 'exam', 'quiz', 'discussion', 'project', 'other')),
@@ -161,8 +177,11 @@ CREATE TABLE IF NOT EXISTS planner_feedback (
 CREATE TABLE IF NOT EXISTS plan_adjustments (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  client_adjustment_id TEXT NOT NULL,
   plan_id UUID REFERENCES planner_plans(id) ON DELETE SET NULL,
+  client_plan_id TEXT NOT NULL,
   block_id UUID REFERENCES planner_blocks(id) ON DELETE SET NULL,
+  client_block_id TEXT,
   adjustment_type TEXT NOT NULL CHECK (adjustment_type IN ('move', 'resize', 'delete', 'edit')),
   previous_start_at TIMESTAMPTZ,
   previous_end_at TIMESTAMPTZ,
@@ -174,10 +193,138 @@ CREATE TABLE IF NOT EXISTS plan_adjustments (
   CHECK (new_end_at IS NULL OR new_start_at IS NULL OR new_end_at > new_start_at)
 );
 
+-- Upgrade databases that already ran an earlier browser-local planner schema.
+-- The client IDs preserve the app's stable identifiers without assuming they
+-- are database UUIDs, while the canonical payload keeps every plan field
+-- needed for lossless cross-device hydration.
+ALTER TABLE recurring_commitments
+  ADD COLUMN IF NOT EXISTS client_commitment_id TEXT,
+  ADD COLUMN IF NOT EXISTS description TEXT,
+  ADD COLUMN IF NOT EXISTS location TEXT,
+  ADD COLUMN IF NOT EXISTS occurrence_overrides JSONB NOT NULL DEFAULT '{}'::JSONB;
+
+UPDATE recurring_commitments
+SET client_commitment_id = id::TEXT
+WHERE client_commitment_id IS NULL;
+
+ALTER TABLE recurring_commitments
+  ALTER COLUMN client_commitment_id SET NOT NULL;
+
+ALTER TABLE planner_plans
+  ADD COLUMN IF NOT EXISTS plan_payload JSONB NOT NULL DEFAULT '{}'::JSONB;
+
+ALTER TABLE planner_blocks
+  ADD COLUMN IF NOT EXISTS activity_id TEXT;
+
+ALTER TABLE planner_preferences
+  ADD COLUMN IF NOT EXISTS revision BIGINT NOT NULL DEFAULT 0;
+
+ALTER TABLE planner_feedback
+  ADD COLUMN IF NOT EXISTS client_feedback_id TEXT,
+  ADD COLUMN IF NOT EXISTS client_plan_id TEXT,
+  ADD COLUMN IF NOT EXISTS client_block_id TEXT,
+  ADD COLUMN IF NOT EXISTS activity_id TEXT;
+
+UPDATE planner_feedback AS feedback
+SET
+  client_feedback_id = COALESCE(feedback.client_feedback_id, feedback.id::TEXT),
+  client_plan_id = COALESCE(
+    feedback.client_plan_id,
+    (SELECT plan_row.client_plan_id FROM planner_plans AS plan_row WHERE plan_row.id = feedback.plan_id)
+  ),
+  client_block_id = COALESCE(
+    feedback.client_block_id,
+    (SELECT block_row.client_block_id FROM planner_blocks AS block_row WHERE block_row.id = feedback.block_id)
+  )
+WHERE (
+    feedback.client_feedback_id IS NULL
+    OR feedback.client_plan_id IS NULL
+    OR (feedback.block_id IS NOT NULL AND feedback.client_block_id IS NULL)
+  );
+
+UPDATE planner_feedback
+SET client_feedback_id = id::TEXT
+WHERE client_feedback_id IS NULL;
+
+ALTER TABLE planner_feedback
+  ALTER COLUMN client_feedback_id SET NOT NULL;
+
+ALTER TABLE plan_adjustments
+  ADD COLUMN IF NOT EXISTS client_adjustment_id TEXT,
+  ADD COLUMN IF NOT EXISTS client_plan_id TEXT,
+  ADD COLUMN IF NOT EXISTS client_block_id TEXT;
+
+UPDATE plan_adjustments AS adjustment
+SET
+  client_adjustment_id = COALESCE(adjustment.client_adjustment_id, adjustment.id::TEXT),
+  client_plan_id = COALESCE(
+    adjustment.client_plan_id,
+    (SELECT plan_row.client_plan_id FROM planner_plans AS plan_row WHERE plan_row.id = adjustment.plan_id),
+    adjustment.metadata->>'client_plan_id',
+    'legacy-plan-' || adjustment.id::TEXT
+  ),
+  client_block_id = COALESCE(
+    adjustment.client_block_id,
+    (SELECT block_row.client_block_id FROM planner_blocks AS block_row WHERE block_row.id = adjustment.block_id)
+  )
+WHERE (
+    adjustment.client_adjustment_id IS NULL
+    OR adjustment.client_plan_id IS NULL
+    OR (adjustment.block_id IS NOT NULL AND adjustment.client_block_id IS NULL)
+  );
+
+UPDATE plan_adjustments
+SET
+  client_adjustment_id = COALESCE(client_adjustment_id, id::TEXT),
+  client_plan_id = COALESCE(client_plan_id, metadata->>'client_plan_id', 'legacy-plan-' || id::TEXT)
+WHERE client_adjustment_id IS NULL OR client_plan_id IS NULL;
+
+ALTER TABLE plan_adjustments
+  ALTER COLUMN client_adjustment_id SET NOT NULL,
+  ALTER COLUMN client_plan_id SET NOT NULL;
+
+ALTER TABLE planner_blocks
+  DROP CONSTRAINT IF EXISTS planner_blocks_source_kind_check;
+ALTER TABLE planner_blocks
+  ADD CONSTRAINT planner_blocks_source_kind_check
+  CHECK (source_kind IN ('task', 'exam_prep', 'requested_activity'));
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = 'public.planner_preferences'::regclass
+      AND conname = 'planner_preferences_revision_check'
+  ) THEN
+    ALTER TABLE planner_preferences
+      ADD CONSTRAINT planner_preferences_revision_check CHECK (revision >= 0);
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = 'public.recurring_commitments'::regclass
+      AND conname = 'recurring_commitments_occurrence_overrides_check'
+  ) THEN
+    ALTER TABLE recurring_commitments
+      ADD CONSTRAINT recurring_commitments_occurrence_overrides_check
+      CHECK (jsonb_typeof(occurrence_overrides) = 'object');
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = 'public.planner_plans'::regclass
+      AND conname = 'planner_plans_plan_payload_check'
+  ) THEN
+    ALTER TABLE planner_plans
+      ADD CONSTRAINT planner_plans_plan_payload_check
+      CHECK (jsonb_typeof(plan_payload) = 'object');
+  END IF;
+END $$;
+
 -- One editable current plan per user. Archived plans remain available as history.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_planner_plans_one_current
   ON planner_plans(user_id)
   WHERE status IN ('active', 'stale');
+CREATE UNIQUE INDEX IF NOT EXISTS idx_recurring_commitments_user_client_id
+  ON recurring_commitments(user_id, client_commitment_id);
 CREATE INDEX IF NOT EXISTS idx_recurring_commitments_user ON recurring_commitments(user_id, enabled);
 CREATE INDEX IF NOT EXISTS idx_planner_plans_user_generated ON planner_plans(user_id, generated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_planner_blocks_plan_start ON planner_blocks(plan_id, start_at);
@@ -188,10 +335,15 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_planner_feedback_one_per_block
   WHERE block_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_planner_feedback_user_created ON planner_feedback(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_plan_adjustments_user_created ON plan_adjustments(user_id, created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_planner_feedback_user_client_id
+  ON planner_feedback(user_id, client_feedback_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_plan_adjustments_user_client_id
+  ON plan_adjustments(user_id, client_adjustment_id);
 
 CREATE OR REPLACE FUNCTION planner_touch_updated_at()
 RETURNS TRIGGER
 LANGUAGE plpgsql
+SET search_path = pg_catalog
 AS $$
 BEGIN
   NEW.updated_at = NOW();
@@ -294,6 +446,433 @@ CREATE POLICY "Users manage own plan adjustments" ON plan_adjustments
     ))
   );
 
+-- Replace one user's complete planner snapshot under a row-locked revision.
+-- A NULL result is a compare-and-swap conflict. The client then reloads the
+-- revision and retries with p_reconcile_deletes = FALSE, which upserts its own
+-- entities without deleting work created by another tab or device.
+CREATE OR REPLACE FUNCTION replace_planner_snapshot(
+  p_expected_revision BIGINT,
+  p_snapshot JSONB,
+  p_reconcile_deletes BOOLEAN DEFAULT TRUE
+)
+RETURNS BIGINT
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = public, pg_catalog
+AS $$
+DECLARE
+  v_user_id UUID := auth.uid();
+  v_current_revision BIGINT;
+  v_next_revision BIGINT;
+  v_preferences JSONB;
+  v_item JSONB;
+  v_plan JSONB;
+  v_row JSONB;
+  v_block JSONB;
+  v_database_plan_id UUID;
+  v_database_block_id UUID;
+  v_active_client_plan_id TEXT;
+  v_plan_existed BOOLEAN;
+BEGIN
+  IF v_user_id IS NULL THEN
+    RAISE EXCEPTION 'Authentication is required.' USING ERRCODE = '42501';
+  END IF;
+  IF p_expected_revision < 0 OR jsonb_typeof(p_snapshot) <> 'object' THEN
+    RAISE EXCEPTION 'Invalid planner snapshot.' USING ERRCODE = '22023';
+  END IF;
+  IF jsonb_typeof(COALESCE(p_snapshot->'preferences', '{}'::JSONB)) <> 'object'
+    OR jsonb_typeof(COALESCE(p_snapshot->'commitments', '[]'::JSONB)) <> 'array'
+    OR jsonb_typeof(COALESCE(p_snapshot->'plans', '[]'::JSONB)) <> 'array'
+    OR jsonb_typeof(COALESCE(p_snapshot->'feedback', '[]'::JSONB)) <> 'array'
+    OR jsonb_typeof(COALESCE(p_snapshot->'adjustments', '[]'::JSONB)) <> 'array'
+  THEN
+    RAISE EXCEPTION 'Planner snapshot collections are invalid.' USING ERRCODE = '22023';
+  END IF;
+
+  INSERT INTO planner_preferences (user_id, revision)
+  VALUES (v_user_id, 0)
+  ON CONFLICT (user_id) DO NOTHING;
+
+  SELECT revision
+  INTO v_current_revision
+  FROM planner_preferences
+  WHERE user_id = v_user_id
+  FOR UPDATE;
+
+  IF v_current_revision IS DISTINCT FROM p_expected_revision THEN
+    RETURN NULL;
+  END IF;
+
+  v_preferences := p_snapshot->'preferences';
+
+  FOR v_item IN
+    SELECT value FROM jsonb_array_elements(COALESCE(p_snapshot->'commitments', '[]'::JSONB))
+  LOOP
+    INSERT INTO recurring_commitments (
+      user_id, client_commitment_id, title, description, location, kind, days_of_week,
+      start_time, end_time, start_date, end_date, time_zone, enabled,
+      color, occurrence_overrides
+    ) VALUES (
+      v_user_id,
+      v_item->>'client_commitment_id',
+      v_item->>'title',
+      NULLIF(v_item->>'description', ''),
+      NULLIF(v_item->>'location', ''),
+      v_item->>'kind',
+      ARRAY(
+        SELECT value::SMALLINT
+        FROM jsonb_array_elements_text(COALESCE(v_item->'days_of_week', '[]'::JSONB))
+      ),
+      (v_item->>'start_time')::TIME,
+      (v_item->>'end_time')::TIME,
+      NULLIF(v_item->>'start_date', '')::DATE,
+      NULLIF(v_item->>'end_date', '')::DATE,
+      v_item->>'time_zone',
+      COALESCE((v_item->>'enabled')::BOOLEAN, TRUE),
+      NULLIF(v_item->>'color', ''),
+      COALESCE(v_item->'occurrence_overrides', '{}'::JSONB)
+    )
+    ON CONFLICT (user_id, client_commitment_id) DO UPDATE SET
+      title = EXCLUDED.title,
+      description = EXCLUDED.description,
+      location = EXCLUDED.location,
+      kind = EXCLUDED.kind,
+      days_of_week = EXCLUDED.days_of_week,
+      start_time = EXCLUDED.start_time,
+      end_time = EXCLUDED.end_time,
+      start_date = EXCLUDED.start_date,
+      end_date = EXCLUDED.end_date,
+      time_zone = EXCLUDED.time_zone,
+      enabled = EXCLUDED.enabled,
+      color = EXCLUDED.color,
+      occurrence_overrides = EXCLUDED.occurrence_overrides
+    WHERE p_reconcile_deletes;
+  END LOOP;
+
+  IF p_reconcile_deletes THEN
+    DELETE FROM recurring_commitments AS commitment
+    WHERE commitment.user_id = v_user_id
+      AND NOT EXISTS (
+        SELECT 1
+        FROM jsonb_array_elements(COALESCE(p_snapshot->'commitments', '[]'::JSONB)) AS wanted(value)
+        WHERE wanted.value->>'client_commitment_id' = commitment.client_commitment_id
+      );
+  END IF;
+
+  SELECT item.value->'row'->>'client_plan_id'
+  INTO v_active_client_plan_id
+  FROM jsonb_array_elements(COALESCE(p_snapshot->'plans', '[]'::JSONB)) AS item(value)
+  WHERE item.value->'row'->>'status' IN ('active', 'stale')
+  LIMIT 1;
+
+  IF p_reconcile_deletes AND v_active_client_plan_id IS NOT NULL THEN
+    UPDATE planner_plans
+    SET status = 'archived', archived_at = COALESCE(archived_at, NOW())
+    WHERE user_id = v_user_id
+      AND status IN ('active', 'stale')
+      AND client_plan_id <> v_active_client_plan_id;
+  ELSIF p_reconcile_deletes THEN
+    UPDATE planner_plans
+    SET status = 'archived', archived_at = COALESCE(archived_at, NOW())
+    WHERE user_id = v_user_id AND status IN ('active', 'stale');
+  END IF;
+
+  FOR v_plan IN
+    SELECT value FROM jsonb_array_elements(COALESCE(p_snapshot->'plans', '[]'::JSONB))
+  LOOP
+    v_row := v_plan->'row';
+    SELECT EXISTS (
+      SELECT 1 FROM planner_plans
+      WHERE user_id = v_user_id AND client_plan_id = v_row->>'client_plan_id'
+    ) INTO v_plan_existed;
+
+    -- In merge mode the server's current plan wins. A new local plan is kept
+    -- as archived history instead of hiding the plan created on another tab.
+    IF NOT p_reconcile_deletes
+      AND v_row->>'status' IN ('active', 'stale')
+      AND EXISTS (
+        SELECT 1 FROM planner_plans
+        WHERE user_id = v_user_id
+          AND status IN ('active', 'stale')
+          AND client_plan_id <> v_row->>'client_plan_id'
+      )
+    THEN
+      v_row := jsonb_set(v_row, '{status}', '"archived"'::JSONB);
+      v_row := jsonb_set(v_row, '{archived_at}', to_jsonb(NOW()::TEXT));
+    END IF;
+    v_database_plan_id := NULL;
+    INSERT INTO planner_plans (
+      user_id, client_plan_id, status, generated_at, archived_at,
+      horizon_start, horizon_end, prompt, input_fingerprint, input_snapshot,
+      settings_snapshot, plan_payload, messages, warnings,
+      total_scheduled_minutes, total_unscheduled_minutes
+    ) VALUES (
+      v_user_id,
+      v_row->>'client_plan_id',
+      v_row->>'status',
+      (v_row->>'generated_at')::TIMESTAMPTZ,
+      NULLIF(v_row->>'archived_at', '')::TIMESTAMPTZ,
+      (v_row->>'horizon_start')::TIMESTAMPTZ,
+      (v_row->>'horizon_end')::TIMESTAMPTZ,
+      NULLIF(v_row->>'prompt', ''),
+      v_row->>'input_fingerprint',
+      COALESCE(v_row->'input_snapshot', '{}'::JSONB),
+      COALESCE(v_row->'settings_snapshot', '{}'::JSONB),
+      COALESCE(v_row->'plan_payload', '{}'::JSONB),
+      COALESCE(v_row->'messages', '[]'::JSONB),
+      COALESCE(v_row->'warnings', '[]'::JSONB),
+      COALESCE((v_row->>'total_scheduled_minutes')::INTEGER, 0),
+      COALESCE((v_row->>'total_unscheduled_minutes')::INTEGER, 0)
+    )
+    ON CONFLICT (user_id, client_plan_id) DO UPDATE SET
+      status = EXCLUDED.status,
+      generated_at = EXCLUDED.generated_at,
+      archived_at = EXCLUDED.archived_at,
+      horizon_start = EXCLUDED.horizon_start,
+      horizon_end = EXCLUDED.horizon_end,
+      prompt = EXCLUDED.prompt,
+      input_fingerprint = EXCLUDED.input_fingerprint,
+      input_snapshot = EXCLUDED.input_snapshot,
+      settings_snapshot = EXCLUDED.settings_snapshot,
+      plan_payload = EXCLUDED.plan_payload,
+      messages = EXCLUDED.messages,
+      warnings = EXCLUDED.warnings,
+      total_scheduled_minutes = EXCLUDED.total_scheduled_minutes,
+      total_unscheduled_minutes = EXCLUDED.total_unscheduled_minutes
+    WHERE p_reconcile_deletes
+    RETURNING id INTO v_database_plan_id;
+
+    IF v_database_plan_id IS NULL THEN
+      SELECT id INTO v_database_plan_id
+      FROM planner_plans
+      WHERE user_id = v_user_id AND client_plan_id = v_row->>'client_plan_id';
+    END IF;
+
+    IF p_reconcile_deletes OR NOT v_plan_existed THEN
+      FOR v_block IN
+        SELECT value FROM jsonb_array_elements(COALESCE(v_plan->'blocks', '[]'::JSONB))
+      LOOP
+        INSERT INTO planner_blocks (
+        plan_id, user_id, client_block_id, source_kind, task_id, exam_id,
+        activity_id, commitment_id, source_id_snapshot, title_snapshot,
+        description_snapshot, subject_id, assignment_type, priority,
+        start_at, end_at, deadline_at, estimated_minutes, segment_index,
+        segment_count, locked, status
+      ) VALUES (
+        v_database_plan_id,
+        v_user_id,
+        v_block->>'client_block_id',
+        v_block->>'source_kind',
+        NULLIF(v_block->>'task_id', '')::UUID,
+        NULLIF(v_block->>'exam_id', '')::UUID,
+        NULLIF(v_block->>'activity_id', ''),
+        NULL,
+        v_block->>'source_id_snapshot',
+        v_block->>'title_snapshot',
+        NULLIF(v_block->>'description_snapshot', ''),
+        NULLIF(v_block->>'subject_id', '')::UUID,
+        NULLIF(v_block->>'assignment_type', ''),
+        v_block->>'priority',
+        (v_block->>'start_at')::TIMESTAMPTZ,
+        (v_block->>'end_at')::TIMESTAMPTZ,
+        (v_block->>'deadline_at')::TIMESTAMPTZ,
+        (v_block->>'estimated_minutes')::SMALLINT,
+        COALESCE((v_block->>'segment_index')::SMALLINT, 0),
+        COALESCE((v_block->>'segment_count')::SMALLINT, 1),
+        COALESCE((v_block->>'locked')::BOOLEAN, FALSE),
+        v_block->>'status'
+        )
+        ON CONFLICT (plan_id, client_block_id) DO UPDATE SET
+        source_kind = EXCLUDED.source_kind,
+        task_id = EXCLUDED.task_id,
+        exam_id = EXCLUDED.exam_id,
+        activity_id = EXCLUDED.activity_id,
+        commitment_id = EXCLUDED.commitment_id,
+        source_id_snapshot = EXCLUDED.source_id_snapshot,
+        title_snapshot = EXCLUDED.title_snapshot,
+        description_snapshot = EXCLUDED.description_snapshot,
+        subject_id = EXCLUDED.subject_id,
+        assignment_type = EXCLUDED.assignment_type,
+        priority = EXCLUDED.priority,
+        start_at = EXCLUDED.start_at,
+        end_at = EXCLUDED.end_at,
+        deadline_at = EXCLUDED.deadline_at,
+        estimated_minutes = EXCLUDED.estimated_minutes,
+        segment_index = EXCLUDED.segment_index,
+        segment_count = EXCLUDED.segment_count,
+          locked = EXCLUDED.locked,
+          status = EXCLUDED.status
+        WHERE p_reconcile_deletes;
+      END LOOP;
+    END IF;
+
+    IF p_reconcile_deletes THEN
+      DELETE FROM planner_blocks AS block_row
+      WHERE block_row.user_id = v_user_id
+        AND block_row.plan_id = v_database_plan_id
+        AND NOT EXISTS (
+          SELECT 1
+          FROM jsonb_array_elements(COALESCE(v_plan->'blocks', '[]'::JSONB)) AS wanted(value)
+          WHERE wanted.value->>'client_block_id' = block_row.client_block_id
+        );
+    END IF;
+  END LOOP;
+
+  IF p_reconcile_deletes THEN
+    DELETE FROM planner_plans AS plan_row
+    WHERE plan_row.user_id = v_user_id
+      AND NOT EXISTS (
+        SELECT 1
+        FROM jsonb_array_elements(COALESCE(p_snapshot->'plans', '[]'::JSONB)) AS wanted(value)
+        WHERE wanted.value->'row'->>'client_plan_id' = plan_row.client_plan_id
+      );
+  END IF;
+
+  FOR v_item IN
+    SELECT value FROM jsonb_array_elements(COALESCE(p_snapshot->'feedback', '[]'::JSONB))
+  LOOP
+    v_database_plan_id := NULL;
+    v_database_block_id := NULL;
+    IF NULLIF(v_item->>'client_plan_id', '') IS NOT NULL THEN
+      SELECT id INTO v_database_plan_id
+      FROM planner_plans
+      WHERE user_id = v_user_id AND client_plan_id = v_item->>'client_plan_id';
+    END IF;
+    IF NULLIF(v_item->>'client_block_id', '') IS NOT NULL THEN
+      SELECT block_row.id INTO v_database_block_id
+      FROM planner_blocks AS block_row
+      JOIN planner_plans AS plan_row ON plan_row.id = block_row.plan_id
+      WHERE block_row.user_id = v_user_id
+        AND block_row.client_block_id = v_item->>'client_block_id'
+        AND (
+          NULLIF(v_item->>'client_plan_id', '') IS NULL
+          OR plan_row.client_plan_id = v_item->>'client_plan_id'
+        )
+      ORDER BY plan_row.generated_at DESC
+      LIMIT 1;
+    END IF;
+
+    -- Keep the first persisted feedback for a block as the duplicate fence.
+    IF v_database_block_id IS NOT NULL AND EXISTS (
+      SELECT 1 FROM planner_feedback
+      WHERE user_id = v_user_id
+        AND block_id = v_database_block_id
+        AND client_feedback_id <> v_item->>'client_feedback_id'
+    ) THEN
+      CONTINUE;
+    END IF;
+
+    INSERT INTO planner_feedback (
+      user_id, client_feedback_id, plan_id, client_plan_id, block_id,
+      client_block_id, task_id, exam_id, activity_id, subject_id,
+      assignment_type, predicted_minutes, actual_minutes, timing_rating,
+      schedule_rating, note, created_at
+    ) VALUES (
+      v_user_id,
+      v_item->>'client_feedback_id',
+      v_database_plan_id,
+      NULLIF(v_item->>'client_plan_id', ''),
+      v_database_block_id,
+      NULLIF(v_item->>'client_block_id', ''),
+      NULLIF(v_item->>'task_id', '')::UUID,
+      NULLIF(v_item->>'exam_id', '')::UUID,
+      NULLIF(v_item->>'activity_id', ''),
+      NULLIF(v_item->>'subject_id', '')::UUID,
+      NULLIF(v_item->>'assignment_type', ''),
+      (v_item->>'predicted_minutes')::SMALLINT,
+      NULLIF(v_item->>'actual_minutes', '')::SMALLINT,
+      v_item->>'timing_rating',
+      NULLIF(v_item->>'schedule_rating', '')::SMALLINT,
+      NULLIF(v_item->>'note', ''),
+      (v_item->>'created_at')::TIMESTAMPTZ
+    )
+    ON CONFLICT (user_id, client_feedback_id) DO NOTHING;
+  END LOOP;
+
+  -- Feedback is immutable learning history. Never reconcile-delete rows that
+  -- fell out of a browser's bounded cache, and never rewrite the first signal
+  -- accepted for a stable client ID.
+
+  FOR v_item IN
+    SELECT value FROM jsonb_array_elements(COALESCE(p_snapshot->'adjustments', '[]'::JSONB))
+  LOOP
+    v_database_plan_id := NULL;
+    v_database_block_id := NULL;
+    SELECT id INTO v_database_plan_id
+    FROM planner_plans
+    WHERE user_id = v_user_id AND client_plan_id = v_item->>'client_plan_id';
+
+    IF NULLIF(v_item->>'client_block_id', '') IS NOT NULL THEN
+      SELECT block_row.id INTO v_database_block_id
+      FROM planner_blocks AS block_row
+      JOIN planner_plans AS plan_row ON plan_row.id = block_row.plan_id
+      WHERE block_row.user_id = v_user_id
+        AND block_row.client_block_id = v_item->>'client_block_id'
+        AND plan_row.client_plan_id = v_item->>'client_plan_id'
+      LIMIT 1;
+    END IF;
+
+    INSERT INTO plan_adjustments (
+      user_id, client_adjustment_id, plan_id, client_plan_id, block_id,
+      client_block_id, adjustment_type, previous_start_at, previous_end_at,
+      new_start_at, new_end_at, metadata, created_at
+    ) VALUES (
+      v_user_id,
+      v_item->>'client_adjustment_id',
+      v_database_plan_id,
+      v_item->>'client_plan_id',
+      v_database_block_id,
+      NULLIF(v_item->>'client_block_id', ''),
+      v_item->>'adjustment_type',
+      NULLIF(v_item->>'previous_start_at', '')::TIMESTAMPTZ,
+      NULLIF(v_item->>'previous_end_at', '')::TIMESTAMPTZ,
+      NULLIF(v_item->>'new_start_at', '')::TIMESTAMPTZ,
+      NULLIF(v_item->>'new_end_at', '')::TIMESTAMPTZ,
+      COALESCE(v_item->'metadata', '{}'::JSONB),
+      (v_item->>'created_at')::TIMESTAMPTZ
+    )
+    ON CONFLICT (user_id, client_adjustment_id) DO NOTHING;
+  END LOOP;
+
+  -- Adjustments are also append-only learning history; a snapshot can add a
+  -- stable event but cannot erase events learned on another device.
+
+  v_next_revision := v_current_revision + 1;
+  IF p_reconcile_deletes THEN
+    UPDATE planner_preferences SET
+      revision = v_next_revision,
+      time_zone = v_preferences->>'time_zone',
+      horizon_days = (v_preferences->>'horizon_days')::SMALLINT,
+      slot_minutes = 15,
+      max_block_minutes = (v_preferences->>'max_block_minutes')::SMALLINT,
+      wake_time = (v_preferences->>'wake_time')::TIME,
+      school_start_time = (v_preferences->>'school_start_time')::TIME,
+      school_home_time = (v_preferences->>'school_home_time')::TIME,
+      bedtime = (v_preferences->>'bedtime')::TIME,
+      school_days = ARRAY(
+        SELECT value::SMALLINT
+        FROM jsonb_array_elements_text(COALESCE(v_preferences->'school_days', '[]'::JSONB))
+      ),
+      weekend_available_start = (v_preferences->>'weekend_available_start')::TIME,
+      weekend_available_end = (v_preferences->>'weekend_available_end')::TIME,
+      max_daily_minutes = (v_preferences->>'max_daily_minutes')::SMALLINT,
+      min_break_minutes = (v_preferences->>'min_break_minutes')::SMALLINT,
+      estimate_cache = COALESCE(v_preferences->'estimate_cache', '{}'::JSONB),
+      feedback_multipliers = COALESCE(v_preferences->'feedback_multipliers', '{}'::JSONB)
+    WHERE user_id = v_user_id;
+  ELSE
+    UPDATE planner_preferences
+    SET revision = v_next_revision
+    WHERE user_id = v_user_id;
+  END IF;
+
+  RETURN v_next_revision;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION replace_planner_snapshot(BIGINT, JSONB, BOOLEAN) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION replace_planner_snapshot(BIGINT, JSONB, BOOLEAN) TO authenticated;
+
 GRANT SELECT, INSERT, UPDATE, DELETE ON planner_preferences TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON recurring_commitments TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON planner_plans TO authenticated;
@@ -307,3 +886,5 @@ COMMENT ON TABLE planner_plans IS 'Current and archived seven-day plans with inp
 COMMENT ON TABLE planner_blocks IS 'Editable 15-minute-grid work blocks; task/exam deletion preserves snapshots.';
 COMMENT ON TABLE planner_feedback IS 'Timing accuracy and schedule satisfaction signals used by the local estimator.';
 COMMENT ON TABLE plan_adjustments IS 'Drag, resize, edit, and deletion signals used to learn user preferences.';
+
+COMMIT;

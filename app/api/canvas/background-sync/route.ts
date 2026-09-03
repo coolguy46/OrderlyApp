@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import {
+  CanvasSyncInProgressError,
+  CanvasSyncMigrationRequiredError,
+  CanvasSyncNotEnabledError,
   syncCanvasUser,
   type CanvasSyncSetting,
 } from '@/lib/integrations/canvas-server-sync';
@@ -99,7 +102,7 @@ export async function POST(request: NextRequest) {
   const { data, error } = settingsResult;
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: 'Could not load Canvas settings' }, { status: 500 });
   }
 
   const now = new Date();
@@ -131,7 +134,6 @@ export async function POST(request: NextRequest) {
     ? dueSettings
     : dueSettings.slice(0, MAX_USERS_PER_RUN);
   const results: Array<{
-    userId: string;
     success: boolean;
     imported?: number;
     updated?: number;
@@ -141,7 +143,9 @@ export async function POST(request: NextRequest) {
     orphanCleanupSkipped?: boolean;
     lastSyncAt?: string;
     lastBackgroundSyncAt?: string | null;
-    error?: string;
+    busy?: boolean;
+    migrationRequired?: boolean;
+    skipped?: boolean;
   }> = [];
 
   // Small batches keep feeds moving without overwhelming Canvas or Supabase.
@@ -149,9 +153,10 @@ export async function POST(request: NextRequest) {
     const batch = selectedSettings.slice(index, index + 3);
     const batchResults = await Promise.all(batch.map(async setting => {
       try {
-        // The targeted pg_cron dispatcher atomically claims the row before it
-        // queues this HTTP request. The legacy bulk path has no SQL claim, so
-        // it records its own attempt marker here.
+        // The targeted pg_cron dispatcher atomically claims delivery before it
+        // queues this HTTP request. syncCanvasUser separately acquires the
+        // durable mutation lease shared with manual syncs. The legacy bulk
+        // path has no delivery claim, so it records its attempt marker here.
         if (!target.userId && supportsAttemptMarker) {
           const { error: attemptError } = await admin
             .from('canvas_settings')
@@ -162,16 +167,31 @@ export async function POST(request: NextRequest) {
           }
         }
         const { assignments: _assignments, ...counts } = await syncCanvasUser(admin, setting, 'background');
-        return { userId: setting.user_id, success: true, ...counts };
+        return { success: true, ...counts };
       } catch (syncError) {
-        return {
-          userId: setting.user_id,
-          success: false,
-          error: syncError instanceof Error ? syncError.message : 'Unknown sync error',
-        };
+        if (syncError instanceof CanvasSyncInProgressError) {
+          return { success: false, busy: true };
+        }
+        if (syncError instanceof CanvasSyncMigrationRequiredError) {
+          return { success: false, migrationRequired: true };
+        }
+        if (syncError instanceof CanvasSyncNotEnabledError) {
+          return { success: false, skipped: true };
+        }
+        // Feed/network errors can retain the private iCal URL. Keep both user
+        // identifiers and raw provider errors out of HTTP bodies and logs.
+        console.error(`Canvas background sync failed (${syncError instanceof Error ? syncError.name : 'UnknownError'})`);
+        return { success: false };
       }
     }));
     results.push(...batchResults);
+  }
+
+  if (results.some(result => result.migrationRequired)) {
+    return NextResponse.json(
+      { error: 'Canvas sync requires a database migration' },
+      { status: 503 }
+    );
   }
 
   return NextResponse.json({
@@ -180,7 +200,14 @@ export async function POST(request: NextRequest) {
     attempted: selectedSettings.length,
     deferred: Math.max(0, dueSettings.length - selectedSettings.length),
     synced: results.filter(result => result.success).length,
-    failed: results.filter(result => !result.success).length,
-    results,
+    busy: results.filter(result => result.busy).length,
+    skipped: results.filter(result => result.skipped).length,
+    failed: results.filter(result =>
+      !result.success && !result.busy && !result.skipped
+    ).length,
+    imported: results.reduce((total, result) => total + (result.imported || 0), 0),
+    updated: results.reduce((total, result) => total + (result.updated || 0), 0),
+    removed: results.reduce((total, result) => total + (result.removed || 0), 0),
+    orphanCleanupSkipped: results.some(result => result.orphanCleanupSkipped),
   });
 }

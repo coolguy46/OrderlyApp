@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState, useEffect, useCallback } from 'react';
+import { useMemo, useState, useCallback } from 'react';
 import { useAppStore } from '@/lib/store';
 import { 
   Card, 
@@ -20,10 +20,14 @@ import { getDefaultPlannerSettings } from '@/lib/planner/types';
 import { buildCommitmentOccurrences } from '@/lib/planner/commitments';
 import { localDateFromIso } from '@/lib/schedule/selectors';
 import { selectDashboardTasksForDate } from '@/lib/dashboard-tasks';
-import { getDaysUntil, cn, isExamType } from '@/lib/utils';
+import { cn, isExamType } from '@/lib/utils';
+import { civilDateFromStored, formatCivilDate } from '@/lib/civil-date';
+import { examDateInputValue, examDayDistance, examTemporalStatus } from '@/lib/exam-status';
+import { isGoalComplete } from '@/lib/goal-status';
 import { hasMissingTaskOnDate, isTaskMissing, isTaskMissingFromPriorDay } from '@/lib/task-status';
 import { useCurrentTime } from '@/lib/use-current-time';
-import { format, isToday, startOfMonth, endOfMonth, startOfWeek, endOfWeek, addDays } from 'date-fns';
+import { useHydrated } from '@/lib/use-hydrated';
+import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, addDays } from 'date-fns';
 import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -60,30 +64,23 @@ const itemVariants = {
   }
 };
 
-// Normalize any date value to a 'yyyy-MM-dd' string in local time.
-// Handles ISO strings, date-only strings, and Date objects consistently.
-function toLocalDateStr(d: string | Date, timeZone: string): string {
-  if (typeof d === 'string') {
-    // For date-only strings like '2026-03-16', return as-is
-    if (!d.includes('T')) return d.slice(0, 10);
-    return localDateFromIso(d, timeZone) || d.slice(0, 10);
-  }
-  return localDateFromIso(d.toISOString(), timeZone) || format(d, 'yyyy-MM-dd');
+function localDateFromKey(value: string): Date {
+  const [year, month, day] = value.split('-').map(Number);
+  return new Date(year, month - 1, day, 12);
 }
 
 export function Dashboard() {
   const { tasks, goals, exams, subjects, user } = useAppStore();
   const plannerUsers = usePlannerStore(state => state.users);
   const now = useCurrentTime();
-  const [mounted, setMounted] = useState(false);
+  const mounted = useHydrated();
   const [currentDate, setCurrentDate] = useState(new Date());
+  const [currentDateTimeZone, setCurrentDateTimeZone] = useState<string | null>(null);
   const [showTaskForm, setShowTaskForm] = useState(false);
   const [mainView, setMainView] = useState<'tasks' | 'schedule'>('tasks');
   // Store selected date as a stable string to avoid Date reference / timezone issues
   const [selectedDateStr, setSelectedDateStr] = useState<string | null>(null);
 
-  // Derive a Date from the selected string for display/comparison in the calendar UI
-  const selectedDate = selectedDateStr ? new Date(selectedDateStr + 'T00:00:00') : null;
   const fallbackTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
   const plannerRecord = user?.id ? plannerUsers[user.id] : null;
   const plannerSettings = plannerRecord?.settings
@@ -97,10 +94,14 @@ export function Dashboard() {
   const todayKey = localDateFromIso(now.toISOString(), taskDisplayOptions.timeZone);
   const viewingDateKey = selectedDateStr || todayKey;
   const isViewingToday = Boolean(viewingDateKey && viewingDateKey === todayKey);
+  const selectedDateLabel = viewingDateKey
+    ? formatCivilDate(viewingDateKey, taskDisplayOptions.timeZone, { month: 'short', day: 'numeric' })
+    : null;
 
-  useEffect(() => {
-    setMounted(true);
-  }, []);
+  if (mounted && todayKey && currentDateTimeZone !== taskDisplayOptions.timeZone) {
+    setCurrentDate(localDateFromKey(todayKey));
+    setCurrentDateTimeZone(taskDisplayOptions.timeZone);
+  }
 
   // Today's stats
   const todayStats = useMemo(() => {
@@ -124,8 +125,8 @@ export function Dashboard() {
     [now, taskDisplayOptions.timeZone, tasks],
   );
 
-  // The dashboard defaults to one focused day. The mini calendar may select
-  // another day, but it never expands back into an all-upcoming list.
+  // The dashboard is a single-day view. It defaults to today and only changes
+  // when the user explicitly chooses another day in the mini calendar.
   const upcomingTasks = useMemo(() => {
     if (!viewingDateKey) return [];
     return selectDashboardTasksForDate(tasks, viewingDateKey, now, taskDisplayOptions);
@@ -133,17 +134,18 @@ export function Dashboard() {
 
   // Active goals
   const activeGoals = useMemo(() => {
-    return goals.filter((g) => g.status === 'active').slice(0, 3);
+    return goals.filter((g) => g.status === 'active' && !isGoalComplete(g)).slice(0, 3);
   }, [goals]);
 
   // Upcoming exams
   const upcomingExams = useMemo(() => {
     if (!mounted) return [];
-    const today = localDateFromIso(now.toISOString(), taskDisplayOptions.timeZone);
-    if (!today) return [];
     return exams
-      .filter((e) => toLocalDateStr(e.exam_date, taskDisplayOptions.timeZone) >= today)
-      .sort((a, b) => new Date(a.exam_date).getTime() - new Date(b.exam_date).getTime())
+      .filter((exam) => examTemporalStatus(exam, now, taskDisplayOptions.timeZone) === 'upcoming')
+      .sort((a, b) =>
+        examDateInputValue(a, taskDisplayOptions.timeZone)
+          .localeCompare(examDateInputValue(b, taskDisplayOptions.timeZone))
+      )
       .slice(0, 3);
   }, [exams, mounted, now, taskDisplayOptions.timeZone]);
 
@@ -167,7 +169,7 @@ export function Dashboard() {
     const dateStr = format(date, 'yyyy-MM-dd');
     const dayTasks = selectDashboardTasksForDate(tasks, dateStr, now, taskDisplayOptions);
     const dayExams = exams.filter((exam) => {
-      return toLocalDateStr(exam.exam_date, taskDisplayOptions.timeZone) === dateStr;
+      return civilDateFromStored(exam.exam_date, taskDisplayOptions.timeZone) === dateStr;
     });
     const dayCommitments = (plannerRecord?.commitments || []).flatMap(commitment =>
       buildCommitmentOccurrences(commitment, dateStr, dateStr),
@@ -196,7 +198,14 @@ export function Dashboard() {
             </motion.span>
           </h1>
           <p className="text-xs sm:text-sm text-muted-foreground">
-            {mounted ? format(new Date(), "EEEE, MMMM d, yyyy") : '\u00A0'}
+            {mounted && todayKey
+              ? formatCivilDate(todayKey, taskDisplayOptions.timeZone, {
+                  weekday: 'long',
+                  month: 'long',
+                  day: 'numeric',
+                  year: 'numeric',
+                })
+              : '\u00A0'}
           </p>
         </div>
         <Link href="/study" className="self-start sm:self-auto">
@@ -211,7 +220,7 @@ export function Dashboard() {
       <motion.div variants={containerVariants} className="grid grid-cols-1 gap-2.5 sm:grid-cols-3 sm:gap-3">
         {[
           { label: 'Completed', value: String(todayStats.tasksCompleted), sub: `${todayStats.tasksDue} due today`, icon: CheckCircle2, color: 'green', gradient: 'from-green-500/10 to-emerald-500/10', borderColor: 'border-green-500/20', href: null },
-          { label: 'Goals', value: String(activeGoals.length), sub: `${goals.filter((g) => g.status === 'completed').length} done`, icon: Target, color: 'purple', gradient: 'from-purple-500/10 to-pink-500/10', borderColor: 'border-purple-500/20', href: null },
+          { label: 'Goals', value: String(activeGoals.length), sub: `${goals.filter(isGoalComplete).length} done`, icon: Target, color: 'purple', gradient: 'from-purple-500/10 to-pink-500/10', borderColor: 'border-purple-500/20', href: null },
           { label: 'Missing', value: String(missingTasks.length), sub: missingTasks.length === 1 ? '1 overdue task' : `${missingTasks.length} overdue tasks`, icon: AlertTriangle, color: 'red', gradient: 'from-red-500/10 to-rose-500/10', borderColor: 'border-red-500/20', href: '/tasks?view=missing' },
         ].map((stat) => (
           <motion.div key={stat.label} variants={itemVariants}>
@@ -298,7 +307,7 @@ export function Dashboard() {
                   </div>
                   <div>
                     <CardTitle className="text-base font-display">
-                      {isViewingToday ? "Today's Tasks" : `Tasks for ${selectedDate ? format(selectedDate, 'MMM d') : 'selected date'}`}
+                      {isViewingToday ? "Today's Tasks" : `Tasks for ${selectedDateLabel || 'selected date'}`}
                     </CardTitle>
                     <CardDescription className="text-xs">
                       {upcomingTasks.length} {upcomingTasks.length === 1 ? 'task' : 'tasks'} {isViewingToday ? 'for today' : 'on this date'}
@@ -371,7 +380,7 @@ export function Dashboard() {
                     variants={{ hidden: {}, show: { transition: { staggerChildren: 0.05 } } }}
                     className="max-h-[26rem] space-y-2 overflow-y-auto overscroll-contain pr-1 sm:max-h-[30rem]"
                   >
-                    {upcomingTasks.map((task, i) => (
+                    {upcomingTasks.map((task) => (
                       <motion.div
                         key={task.id}
                         variants={{
@@ -449,11 +458,11 @@ export function Dashboard() {
                       className={cn(
                         'aspect-square text-xs rounded-lg flex flex-col items-center justify-center transition-all relative group/day min-h-[36px] sm:min-h-0',
                         !isCurrentMonth && 'opacity-30',
-                        isToday(day) && 'bg-primary/20 border border-primary font-bold dot-pulse',
+                        dayKey === todayKey && 'bg-primary/20 border border-primary font-bold dot-pulse',
                         viewingDateKey === dayKey && 'bg-primary/10 ring-1 ring-primary/50',
                         hasMissingTasks && 'border border-red-500/70 bg-red-500/15 text-red-300',
                         hasMissingTasks && viewingDateKey === dayKey && 'ring-1 ring-red-500/70',
-                        !isToday(day) && 'hover:bg-muted hover:scale-110'
+                        dayKey !== todayKey && 'hover:bg-muted hover:scale-110'
                       )}
                     >
                       {format(day, 'd')}
@@ -594,9 +603,9 @@ export function Dashboard() {
               </div>
             ) : (
               upcomingExams.map((exam, i) => {
-                const daysUntil = getDaysUntil(exam.exam_date);
+                const daysUntil = examDayDistance(exam, now, taskDisplayOptions.timeZone);
                 const subject = subjects.find((s) => s.id === exam.subject_id);
-                const isUrgent = daysUntil <= 7;
+                const isUrgent = daysUntil !== null && daysUntil <= 7;
 
                 return (
                   <motion.div
@@ -617,7 +626,7 @@ export function Dashboard() {
                         )}
                       </div>
                       <Badge variant={isUrgent ? "destructive" : "secondary"} className={cn("shrink-0 text-xs", isUrgent && "animate-breathe")}>
-                        {daysUntil === 0 ? 'Today' : daysUntil === 1 ? 'Tomorrow' : `${daysUntil}d`}
+                        {daysUntil === null ? 'Date unavailable' : daysUntil === 0 ? 'Today' : daysUntil === 1 ? 'Tomorrow' : `${daysUntil}d`}
                       </Badge>
                     </div>
                     <div className="mt-2 relative">

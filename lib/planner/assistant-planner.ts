@@ -37,7 +37,6 @@ export interface AssistantTaskPlanAdditionalTask {
   title: string;
   durationSeconds: number;
 }
-
 /**
  * High-level intent produced by the language model. Clock arithmetic and task
  * selection remain deterministic and local to Orderly.

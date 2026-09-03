@@ -5,7 +5,6 @@ export interface AssistantUsageRemaining {
   remainingDaily: number;
   remainingMonthly: number;
 }
-
 export interface AssistantUsageReservation {
   allowed: boolean;
   requestId: string;

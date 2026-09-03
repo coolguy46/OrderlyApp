@@ -24,6 +24,10 @@
 .DS_Store
 *.pem
 
+# private calendar-feed exports
+*.ics
+*.ical
+
 # debug
 npm-debug.log*
 yarn-debug.log*

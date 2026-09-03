@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { Goal, GoalType, Task } from '@/lib/supabase/types';
+import { useState, useEffect, useRef } from 'react';
+import { Goal, GoalType } from '@/lib/supabase/types';
 import { useAppStore } from '@/lib/store';
 import { 
   Card, 
@@ -25,7 +25,15 @@ import {
 } from '@/components/ui';
 import { CircularProgress, ConfirmDialog } from '@/components/ui';
 import { motion, AnimatePresence } from 'framer-motion';
-import { getDaysUntil, getProgressPercentage, cn } from '@/lib/utils';
+import { getProgressPercentage, cn } from '@/lib/utils';
+import { goalStatusForSave, isGoalComplete } from '@/lib/goal-status';
+import {
+  civilDateDayDistance,
+  civilDateFromStored,
+  civilDateToIso,
+} from '@/lib/civil-date';
+import { useCurrentTime } from '@/lib/use-current-time';
+import { usePlannerStore } from '@/lib/planner/store';
 import {
   Target,
   Plus,
@@ -36,9 +44,6 @@ import {
   CheckCircle2,
   TrendingUp,
   Star,
-  Link2,
-  ChevronDown,
-  ChevronUp,
 } from 'lucide-react';
 
 // ─────────────────── GoalCard ───────────────────
@@ -46,23 +51,38 @@ import {
 interface GoalCardProps {
   goal: Goal;
   onEdit: (goal: Goal) => void;
-  linkedTasks?: Task[];
+  now: Date;
+  timeZone: string;
 }
 
-function GoalCard({ goal, onEdit, linkedTasks = [] }: GoalCardProps) {
+function GoalCard({ goal, onEdit, now, timeZone }: GoalCardProps) {
   const { updateGoal, deleteGoal } = useAppStore();
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [expanded, setExpanded] = useState(false);
+  const [isUpdatingProgress, setIsUpdatingProgress] = useState(false);
+  const [progressSaveFailed, setProgressSaveFailed] = useState(false);
+  const progressUpdateInFlightRef = useRef(false);
   const progress = getProgressPercentage(goal.current_value, goal.target_value);
-  const daysLeft = goal.deadline ? getDaysUntil(goal.deadline) : null;
-  const isCompleted = goal.status === 'completed' || progress >= 100;
+  const daysLeft = civilDateDayDistance(goal.deadline, now, timeZone);
+  const isCompleted = isGoalComplete(goal);
 
   const handleIncrement = async () => {
+    if (progressUpdateInFlightRef.current) return;
+    progressUpdateInFlightRef.current = true;
+    setIsUpdatingProgress(true);
+    setProgressSaveFailed(false);
     const newValue = Math.min(goal.current_value + 1, goal.target_value);
-    await updateGoal(goal.id, {
-      current_value: newValue,
-      status: newValue >= goal.target_value ? 'completed' : 'active',
-    });
+    try {
+      const saved = await updateGoal(goal.id, {
+        current_value: newValue,
+        status: newValue >= goal.target_value ? 'completed' : 'active',
+      });
+      if (!saved) setProgressSaveFailed(true);
+    } catch {
+      setProgressSaveFailed(true);
+    } finally {
+      progressUpdateInFlightRef.current = false;
+      setIsUpdatingProgress(false);
+    }
   };
 
   return (
@@ -113,20 +133,14 @@ function GoalCard({ goal, onEdit, linkedTasks = [] }: GoalCardProps) {
                         {daysLeft === 0 ? 'Today' : `${daysLeft}d left`}
                       </span>
                     )}
-                    {linkedTasks.length > 0 && (
-                      <span className="text-xs text-indigo-400 flex items-center gap-1">
-                        <Link2 className="w-3 h-3" />
-                        {linkedTasks.length} task{linkedTasks.length > 1 ? 's' : ''}
-                      </span>
-                    )}
                   </div>
                 </div>
 
-                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <Button variant="ghost" size="icon-sm" onClick={() => onEdit(goal)}>
+                <div className="flex items-center gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
+                  <Button variant="ghost" size="icon-sm" onClick={() => onEdit(goal)} aria-label={`Edit ${goal.title}`}>
                     <Edit3 className="w-3.5 h-3.5" />
                   </Button>
-                  <Button variant="ghost" size="icon-sm" onClick={() => setConfirmDelete(true)} className="text-red-400 hover:text-red-500">
+                  <Button variant="ghost" size="icon-sm" onClick={() => setConfirmDelete(true)} className="text-red-400 hover:text-red-500" aria-label={`Delete ${goal.title}`}>
                     <Trash2 className="w-3.5 h-3.5" />
                   </Button>
                 </div>
@@ -140,30 +154,26 @@ function GoalCard({ goal, onEdit, linkedTasks = [] }: GoalCardProps) {
                 <div className="flex items-center justify-between">
                   <span className="text-xs text-muted-foreground">{goal.current_value} / {goal.target_value} {goal.unit}</span>
                   {!isCompleted && (
-                    <Button size="sm" variant="ghost" onClick={handleIncrement} className="h-6 text-xs gap-1 px-2">
-                      <Plus className="w-3 h-3" /> Add 1
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={handleIncrement}
+                      disabled={isUpdatingProgress}
+                      aria-busy={isUpdatingProgress}
+                      className="h-6 text-xs gap-1 px-2"
+                    >
+                      <Plus className="w-3 h-3" /> {isUpdatingProgress ? 'Saving…' : 'Add 1'}
                     </Button>
                   )}
                 </div>
                 <Progress value={progress} className={cn('h-1.5', isCompleted && '[&>div]:bg-green-500')} />
+                {progressSaveFailed && (
+                  <p role="alert" className="text-[11px] text-red-400">
+                    Progress was not saved. Try again.
+                  </p>
+                )}
               </div>
 
-              {linkedTasks.length > 0 && (
-                <button onClick={() => setExpanded(!expanded)} className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors">
-                  {expanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                  {expanded ? 'Hide' : 'Show'} linked tasks
-                </button>
-              )}
-              {expanded && linkedTasks.length > 0 && (
-                <div className="space-y-1 mt-1">
-                  {linkedTasks.slice(0, 5).map(t => (
-                    <div key={t.id} className={cn('text-xs px-2 py-1 rounded-lg flex items-center gap-2', t.status === 'completed' ? 'bg-green-500/10 text-green-400' : 'bg-muted/50 text-muted-foreground')}>
-                      <CheckCircle2 className="w-3 h-3 flex-shrink-0" />
-                      <span className="truncate">{t.title}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
             </div>
           </div>
         </CardContent>
@@ -187,9 +197,10 @@ interface GoalFormProps {
   isOpen: boolean;
   onClose: () => void;
   goal?: Goal | null;
+  timeZone: string;
 }
 
-function GoalForm({ isOpen, onClose, goal }: GoalFormProps) {
+function GoalForm({ isOpen, onClose, goal, timeZone }: GoalFormProps) {
   const { addGoal, updateGoal, user } = useAppStore();
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -198,50 +209,94 @@ function GoalForm({ isOpen, onClose, goal }: GoalFormProps) {
   const [unit, setUnit] = useState('tasks');
   const [goalType, setGoalType] = useState<GoalType>('short_term');
   const [deadline, setDeadline] = useState('');
+  const [saveError, setSaveError] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const formSessionRef = useRef(0);
 
   useEffect(() => {
-    if (goal) {
-      setTitle(goal.title);
-      setDescription(goal.description || '');
-      setTargetValue(goal.target_value.toString());
-      setCurrentValue(goal.current_value.toString());
-      setUnit(goal.unit);
-      setGoalType(goal.goal_type);
-      setDeadline(goal.deadline ? new Date(goal.deadline).toISOString().split('T')[0] : '');
-    } else {
-      resetForm();
-    }
-  }, [goal, isOpen]);
+    formSessionRef.current += 1;
+  }, [isOpen, goal?.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      if (goal) {
+        setTitle(goal.title);
+        setDescription(goal.description || '');
+        setTargetValue(goal.target_value.toString());
+        setCurrentValue(goal.current_value.toString());
+        setUnit(goal.unit);
+        setGoalType(goal.goal_type);
+        setDeadline(civilDateFromStored(goal.deadline, timeZone) || '');
+        setSaveError('');
+      } else {
+        resetForm();
+      }
+    });
+    return () => { cancelled = true; };
+  }, [goal, isOpen, timeZone]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setSaveError('');
+    const storedDeadline = deadline ? civilDateToIso(deadline, timeZone) : null;
+    if (deadline && !storedDeadline) {
+      setSaveError('Choose a valid deadline.');
+      return;
+    }
+    setIsSubmitting(true);
+    const submitSession = formSessionRef.current;
+    const isCurrentSubmission = () => formSessionRef.current === submitSession;
+    const parsedTargetValue = parseInt(targetValue) || 10;
+    const parsedCurrentValue = parseInt(currentValue) || 0;
     const goalData = {
       user_id: user?.id || '',
       title,
       description: description || null,
-      target_value: parseInt(targetValue) || 10,
-      current_value: parseInt(currentValue) || 0,
+      target_value: parsedTargetValue,
+      current_value: parsedCurrentValue,
       unit,
       goal_type: goalType,
-      deadline: deadline ? new Date(deadline + 'T00:00:00').toISOString() : null,
-      status: 'active' as const,
+      deadline: storedDeadline,
+      // Editing progress/details must not silently reactivate a completed goal.
+      status: goalStatusForSave(parsedCurrentValue, parsedTargetValue, goal?.status),
     };
-    if (goal) {
-      await updateGoal(goal.id, goalData);
-    } else {
-      await addGoal(goalData);
+    try {
+      const saved = goal
+        ? await updateGoal(goal.id, goalData)
+        : await addGoal(goalData);
+      if (!isCurrentSubmission()) return;
+      if (!saved) {
+        setSaveError('Orderly could not save this goal. Your changes are still here—please try again.');
+        return;
+      }
+      closeForm();
+    } catch {
+      if (isCurrentSubmission()) {
+        setSaveError('Orderly could not save this goal. Your changes are still here—please try again.');
+      }
+    } finally {
+      if (isCurrentSubmission()) setIsSubmitting(false);
     }
-    onClose();
   };
 
-  const resetForm = () => {
+  function resetForm() {
     setTitle(''); setDescription(''); setTargetValue('10');
     setCurrentValue('0'); setUnit('tasks'); setGoalType('short_term');
     setDeadline('');
-  };
+    setSaveError('');
+    setIsSubmitting(false);
+  }
+
+  function closeForm() {
+    formSessionRef.current += 1;
+    onClose();
+    resetForm();
+  }
 
   return (
-    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+    <Dialog open={isOpen} onOpenChange={(open) => !open && closeForm()}>
       <DialogContent className="sm:max-w-[500px]">
         <DialogHeader>
           <DialogTitle>{goal ? 'Edit Goal' : 'Create New Goal'}</DialogTitle>
@@ -249,32 +304,32 @@ function GoalForm({ isOpen, onClose, goal }: GoalFormProps) {
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4 mt-2">
           <div className="space-y-1.5">
-            <Label>Goal Title</Label>
-            <Input placeholder="e.g., Complete 20 assignments" value={title} onChange={(e) => setTitle(e.target.value)} required />
+            <Label htmlFor="goal-title">Goal Title</Label>
+            <Input id="goal-title" placeholder="e.g., Complete 20 assignments" value={title} onChange={(e) => setTitle(e.target.value)} required />
           </div>
           <div className="space-y-1.5">
-            <Label>Description</Label>
-            <Textarea placeholder="Describe your goal..." value={description} onChange={(e) => setDescription(e.target.value)} rows={2} />
+            <Label htmlFor="goal-description">Description</Label>
+            <Textarea id="goal-description" placeholder="Describe your goal..." value={description} onChange={(e) => setDescription(e.target.value)} rows={2} />
           </div>
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <div className="space-y-1.5">
-              <Label>Target</Label>
-              <Input type="number" min="1" value={targetValue} onChange={(e) => setTargetValue(e.target.value)} required />
+              <Label htmlFor="goal-target">Target</Label>
+              <Input id="goal-target" type="number" min="1" value={targetValue} onChange={(e) => setTargetValue(e.target.value)} required />
             </div>
             <div className="space-y-1.5">
-              <Label>Current</Label>
-              <Input type="number" min="0" value={currentValue} onChange={(e) => setCurrentValue(e.target.value)} />
+              <Label htmlFor="goal-current">Current</Label>
+              <Input id="goal-current" type="number" min="0" value={currentValue} onChange={(e) => setCurrentValue(e.target.value)} />
             </div>
             <div className="space-y-1.5">
-              <Label>Unit</Label>
-              <Input placeholder="tasks, hours..." value={unit} onChange={(e) => setUnit(e.target.value)} required />
+              <Label htmlFor="goal-unit">Unit</Label>
+              <Input id="goal-unit" placeholder="tasks, hours..." value={unit} onChange={(e) => setUnit(e.target.value)} required />
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="space-y-1.5">
-              <Label>Goal Type</Label>
+              <Label htmlFor="goal-type">Goal Type</Label>
               <Select value={goalType} onValueChange={(v) => setGoalType(v as GoalType)}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectTrigger id="goal-type"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="short_term">Short Term</SelectItem>
                   <SelectItem value="long_term">Long Term</SelectItem>
@@ -282,13 +337,16 @@ function GoalForm({ isOpen, onClose, goal }: GoalFormProps) {
               </Select>
             </div>
             <div className="space-y-1.5">
-              <Label>Deadline</Label>
-              <Input type="date" value={deadline} onChange={(e) => setDeadline(e.target.value)} />
+              <Label htmlFor="goal-deadline">Deadline</Label>
+              <Input id="goal-deadline" type="date" value={deadline} onChange={(e) => setDeadline(e.target.value)} />
             </div>
           </div>
+          {saveError && <p role="alert" aria-live="polite" className="text-sm text-red-400">{saveError}</p>}
           <div className="flex gap-3 pt-2">
-            <Button type="button" variant="outline" onClick={onClose} className="flex-1">Cancel</Button>
-            <Button type="submit" className="flex-1">{goal ? 'Update Goal' : 'Create Goal'}</Button>
+            <Button type="button" variant="outline" onClick={closeForm} className="flex-1">Cancel</Button>
+            <Button type="submit" disabled={isSubmitting} aria-busy={isSubmitting} className="flex-1">
+              {isSubmitting ? 'Saving…' : goal ? 'Update Goal' : 'Create Goal'}
+            </Button>
           </div>
         </form>
       </DialogContent>
@@ -309,19 +367,24 @@ const itemVariants = {
 };
 
 export function GoalList() {
-  const { goals, tasks } = useAppStore();
+  const { goals, user } = useAppStore();
+  const plannerUsers = usePlannerStore(state => state.users);
+  const now = useCurrentTime();
+  const timeZone = (user?.id ? plannerUsers[user.id]?.settings.timeZone : null)
+    || Intl.DateTimeFormat().resolvedOptions().timeZone
+    || 'UTC';
   const [showForm, setShowForm] = useState(false);
   const [editingGoal, setEditingGoal] = useState<Goal | null>(null);
   const [filter, setFilter] = useState<'all' | 'active' | 'completed'>('all');
 
   const filteredGoals = goals.filter((goal) => {
     if (filter === 'all') return true;
-    if (filter === 'completed') return goal.status === 'completed' || goal.current_value >= goal.target_value;
-    return goal.status === 'active' && goal.current_value < goal.target_value;
+    if (filter === 'completed') return isGoalComplete(goal);
+    return goal.status === 'active' && !isGoalComplete(goal);
   });
 
-  const activeGoals = goals.filter((g) => g.status === 'active' && g.current_value < g.target_value);
-  const completedGoals = goals.filter((g) => g.status === 'completed' || g.current_value >= g.target_value);
+  const activeGoals = goals.filter((g) => g.status === 'active' && !isGoalComplete(g));
+  const completedGoals = goals.filter(isGoalComplete);
   const totalProgress = goals.length > 0
     ? Math.round(goals.reduce((acc, g) => acc + getProgressPercentage(g.current_value, g.target_value), 0) / goals.length)
     : 0;
@@ -342,18 +405,18 @@ export function GoalList() {
         {/* Overview stats */}
         <motion.div variants={itemVariants} className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
           {[
-            { icon: Target, label: 'Total Goals', value: goals.length, color: 'indigo', grad: 'from-indigo-500/10 to-indigo-500/5' },
-            { icon: TrendingUp, label: 'In Progress', value: activeGoals.length, color: 'blue', grad: 'from-blue-500/10 to-blue-500/5' },
-            { icon: Trophy, label: 'Completed', value: completedGoals.length, color: 'green', grad: 'from-green-500/10 to-green-500/5' },
-            { icon: Star, label: 'Avg Progress', value: `${totalProgress}%`, color: 'amber', grad: 'from-amber-500/10 to-amber-500/5' },
+            { icon: Target, label: 'Total Goals', value: goals.length, iconClass: 'bg-indigo-500/10 text-indigo-500', grad: 'from-indigo-500/10 to-indigo-500/5' },
+            { icon: TrendingUp, label: 'In Progress', value: activeGoals.length, iconClass: 'bg-blue-500/10 text-blue-500', grad: 'from-blue-500/10 to-blue-500/5' },
+            { icon: Trophy, label: 'Completed', value: completedGoals.length, iconClass: 'bg-green-500/10 text-green-500', grad: 'from-green-500/10 to-green-500/5' },
+            { icon: Star, label: 'Avg Progress', value: `${totalProgress}%`, iconClass: 'bg-amber-500/10 text-amber-500', grad: 'from-amber-500/10 to-amber-500/5' },
           ].map(s => {
             const Icon = s.icon;
             return (
               <Card key={s.label} className={`bg-gradient-to-br ${s.grad} glow-border`}>
                 <CardContent className="p-4">
                   <div className="flex items-center gap-3">
-                    <div className={`p-2 rounded-xl bg-${s.color}-500/10`}>
-                      <Icon className={`w-5 h-5 text-${s.color}-500`} />
+                    <div className={cn('p-2 rounded-xl', s.iconClass)}>
+                      <Icon className="w-5 h-5" />
                     </div>
                     <div>
                       <p className="text-2xl font-bold font-display">{s.value}</p>
@@ -400,7 +463,8 @@ export function GoalList() {
                   <GoalCard
                     key={goal.id}
                     goal={goal}
-                    linkedTasks={tasks.filter(t => t.status === 'completed').slice(0, 3)}
+                    now={now}
+                    timeZone={timeZone}
                     onEdit={(g) => { setEditingGoal(g); setShowForm(true); }}
                   />
                 ))
@@ -413,6 +477,7 @@ export function GoalList() {
         isOpen={showForm}
         onClose={() => { setShowForm(false); setEditingGoal(null); }}
         goal={editingGoal}
+        timeZone={timeZone}
       />
     </motion.div>
   );

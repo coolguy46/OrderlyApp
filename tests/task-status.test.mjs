@@ -81,7 +81,7 @@ test('completed tasks are never missing even after their deadline', () => {
 test('missing calendar state belongs to the actual local deadline date', () => {
   const missingTask = task({
     source: 'canvas',
-    due_date: '2026-08-27T15:00:00.000Z',
+    due_date: '2026-08-27T15:00:00.000Z', // Aug 27 at 8 AM PDT
   });
   const completedTask = task({
     id: 'completed-task',
@@ -99,7 +99,7 @@ test('missing calendar state belongs to the actual local deadline date', () => {
 test('missing calendar date honors the user timezone across a UTC date boundary', () => {
   const lateTask = task({
     source: 'canvas',
-    due_date: '2026-08-28T06:00:00.000Z',
+    due_date: '2026-08-28T06:00:00.000Z', // Aug 27 at 11 PM PDT
   });
   const now = new Date('2026-08-28T06:01:00.000Z');
 

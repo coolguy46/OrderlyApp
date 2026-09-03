@@ -18,8 +18,10 @@ test('Assistant uses the bounded multi-turn chat API contract', async () => {
   assert.match(source, /\.slice\(0, 20\)[\s\S]*examDate: exam\.exam_date/);
   assert.match(source, /occurrences: context\.occurrences\.slice\(0, 80\)/);
   assert.match(source, /busy: \(context\.busy \|\| \[\]\)\.slice\(0, 80\)/);
+  assert.match(source, /activeDraft: browserIntentContext\.activeDraft/);
   assert.match(source, /interpretScheduleCommands\(payload\.normalizedCommands/);
   assert.match(source, /payload\.normalizedCommands\.length > 0/);
+  assert.match(source, /describeScheduleCommandDraft\(nextPreview, timeZone\)/);
   assert.match(source, /interpretDirectScheduleRequest\(normalized, commandContext\)/);
   assert.ok(
     source.indexOf('interpretDirectScheduleRequest(normalized, commandContext)')
@@ -119,6 +121,8 @@ test('Assistant stages changes on the calendar and revalidates before saving', a
   assert.match(source, /Save changes/);
   assert.match(source, /Discard/);
   assert.doesNotMatch(source, /preview=\{activePreview\}/);
+  assert.match(applySection, /waitForSchedulePersistence/);
+  assert.match(applySection, /waitForPlannerPersistence/);
 });
 
 test('Assistant persists events as calendar commitments with rollback and undo', async () => {
@@ -138,6 +142,15 @@ test('Assistant persists events as calendar commitments with rollback and undo',
   assert.match(source, /Retry cleanup/);
   assert.match(source, /for \(const commitmentId of snapshot\.createdCommitmentIds \|\| \[\]\)/);
   assert.match(source, /removeCommitment\(operationUserId, commitmentId\)/);
+  assert.match(applySection, /if \(action\.type === 'create_event'\)[\s\S]*upsertCommitment\(operationUserId, commitment\)/);
+  assert.match(applySection, /const created = await addTask\([\s\S]*applyScheduleBatch\(operationUserId/);
+  assert.match(applySection, /if \(!schedulePersisted \|\| !plannerPersisted\)[\s\S]*throw new Error/);
+  assert.match(applySection, /content: `Done — \$\{freshPreview\.summary\}`/);
+  assert.ok(
+    applySection.indexOf('if (!schedulePersisted || !plannerPersisted)')
+      < applySection.indexOf('content: `Done — ${freshPreview.summary}`'),
+    'success must be reported only after persistence acknowledgement',
+  );
 });
 
 test('event drag and resize replace stale Undo with the exact prior event state', async () => {

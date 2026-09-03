@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { useState, useEffect } from 'react';
+import { motion } from 'framer-motion';
 import { 
   Sun, 
   Moon, 
@@ -21,9 +21,7 @@ import {
   Check,
   X,
   Mail,
-  Shield,
   BellRing,
-  BellOff,
   Clock,
   GraduationCap,
   Target,
@@ -39,10 +37,19 @@ import { Input } from '@/components/ui/Input';
 import { MainLayout } from '@/components/layout';
 import { useAppStore } from '@/lib/store';
 import { usePlannerStore } from '@/lib/planner/store';
+import { useScheduleStore } from '@/lib/schedule/store';
 import { getDefaultPlannerSettings, type PlannerSettings } from '@/lib/planner/types';
 import { supabase } from '@/lib/supabase/client';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
+import {
+  discardUnownedLegacyStorageValue,
+  removeUserScopedStorageValues,
+  userScopedStorageKey,
+} from '@/lib/user-scoped-storage';
+import { hasRecentSignIn } from '@/lib/auth/recent-auth';
+import { useHydrated } from '@/lib/use-hydrated';
 
 type Theme = 'light' | 'dark' | 'system';
 
@@ -86,13 +93,40 @@ const defaultNotificationPrefs: NotificationPreferences = {
   soundEnabled: true,
 };
 
+function readNotificationPreferences(userId: string): NotificationPreferences {
+  discardUnownedLegacyStorageValue(localStorage, 'orderly-notification-prefs');
+  const storageKey = userScopedStorageKey('orderly-notification-prefs', userId);
+  const saved = storageKey ? localStorage.getItem(storageKey) : null;
+  if (!saved) return defaultNotificationPrefs;
+  try {
+    return { ...defaultNotificationPrefs, ...JSON.parse(saved) };
+  } catch {
+    if (storageKey) localStorage.removeItem(storageKey);
+    return defaultNotificationPrefs;
+  }
+}
+
 // Toggle switch component
-function ToggleSwitch({ checked, onChange, disabled }: { checked: boolean; onChange: (val: boolean) => void; disabled?: boolean }) {
+function ToggleSwitch({
+  checked,
+  onChange,
+  disabled,
+  labelledBy,
+  describedBy,
+}: {
+  checked: boolean;
+  onChange: (val: boolean) => void;
+  disabled?: boolean;
+  labelledBy: string;
+  describedBy: string;
+}) {
   return (
     <button
       type="button"
       role="switch"
       aria-checked={checked}
+      aria-labelledby={labelledBy}
+      aria-describedby={describedBy}
       disabled={disabled}
       onClick={() => onChange(!checked)}
       className={`
@@ -112,18 +146,26 @@ function ToggleSwitch({ checked, onChange, disabled }: { checked: boolean; onCha
 }
 
 export default function SettingsPage() {
-  const [mounted, setMounted] = useState(false);
+  const router = useRouter();
+  const mounted = useHydrated();
   const { theme, setTheme, user, updateUserProfile, tasks, goals, exams, studySessions, subjects, logout } = useAppStore();
   const plannerRecord = usePlannerStore(state => user ? state.users[user.id] : undefined);
   const setPlannerActiveUser = usePlannerStore(state => state.setActiveUser);
   const updatePlannerSettings = usePlannerStore(state => state.updateSettings);
+  const clearUserPlannerData = usePlannerStore(state => state.clearUserPlannerData);
+  const clearTaskSchedules = useScheduleStore(state => state.clearTaskSchedules);
   
   // Account state
   const [fullName, setFullName] = useState('');
+  const userProfileSource = user ? `${user.id}:${user.full_name || ''}` : '';
+  const [fullNameSource, setFullNameSource] = useState(userProfileSource);
+  if (fullNameSource !== userProfileSource) {
+    setFullNameSource(userProfileSource);
+    setFullName(user?.full_name || '');
+  }
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   
   // Password state
-  const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPasswords, setShowPasswords] = useState(false);
@@ -131,32 +173,30 @@ export default function SettingsPage() {
   
   // Notification preferences  
   const [notifPrefs, setNotifPrefs] = useState<NotificationPreferences>(defaultNotificationPrefs);
+  const notificationOwner = mounted ? user?.id || '' : '';
+  const [notificationPrefsOwner, setNotificationPrefsOwner] = useState('');
+  if (notificationPrefsOwner !== notificationOwner) {
+    setNotificationPrefsOwner(notificationOwner);
+    setNotifPrefs(notificationOwner
+      ? readNotificationPreferences(notificationOwner)
+      : defaultNotificationPrefs);
+  }
   
   // Data export
   const [isExporting, setIsExporting] = useState(false);
   const [plannerDraft, setPlannerDraft] = useState<PlannerSettings>(() => getDefaultPlannerSettings());
-
-  useEffect(() => {
-    setMounted(true);
-    
-    // Load notification preferences from localStorage
-    const savedNotifPrefs = localStorage.getItem('orderly-notification-prefs');
-    if (savedNotifPrefs) {
-      try { setNotifPrefs(JSON.parse(savedNotifPrefs)); } catch {}
-    }
-    
-  }, []);
+  const plannerSettingsSource = plannerRecord?.settings || null;
+  const [loadedPlannerSettings, setLoadedPlannerSettings] = useState<PlannerSettings | null>(null);
+  if (plannerSettingsSource && loadedPlannerSettings !== plannerSettingsSource) {
+    setLoadedPlannerSettings(plannerSettingsSource);
+    setPlannerDraft(plannerSettingsSource);
+  }
 
   useEffect(() => {
     if (user) {
-      setFullName(user.full_name || '');
       setPlannerActiveUser(user.id, Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
     }
   }, [setPlannerActiveUser, user]);
-
-  useEffect(() => {
-    if (plannerRecord?.settings) setPlannerDraft(plannerRecord.settings);
-  }, [plannerRecord?.settings]);
 
   const handleSavePlannerAvailability = () => {
     if (!user) return;
@@ -174,7 +214,6 @@ export default function SettingsPage() {
     }
     updatePlannerSettings(user.id, {
       ...plannerDraft,
-      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || plannerDraft.timeZone,
       horizonDays: 7,
       slotMinutes: 15,
     });
@@ -205,14 +244,20 @@ export default function SettingsPage() {
     
     setIsChangingPw(true);
     try {
+      const { data: authData, error: authError } = await supabase.auth.getUser();
+      if (authError || !authData.user) {
+        throw new Error('Your session could not be verified. Please sign in again.');
+      }
+      if (!hasRecentSignIn(authData.user.last_sign_in_at)) {
+        throw new Error('For your security, sign out and sign back in before changing your password.');
+      }
       const { error } = await supabase.auth.updateUser({ password: newPassword });
       if (error) throw error;
       toast.success('Password updated successfully');
-      setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
-    } catch (error: any) {
-      toast.error(error.message || 'Failed to update password');
+    } catch (error: unknown) {
+      toast.error(error instanceof Error ? error.message : 'Failed to update password');
     } finally {
       setIsChangingPw(false);
     }
@@ -221,7 +266,8 @@ export default function SettingsPage() {
   const handleNotifChange = (key: keyof NotificationPreferences, value: boolean) => {
     const updated = { ...notifPrefs, [key]: value };
     setNotifPrefs(updated);
-    localStorage.setItem('orderly-notification-prefs', JSON.stringify(updated));
+    const storageKey = userScopedStorageKey('orderly-notification-prefs', user?.id);
+    if (storageKey) localStorage.setItem(storageKey, JSON.stringify(updated));
     toast.success('Notification preference updated');
   };
   
@@ -259,16 +305,33 @@ export default function SettingsPage() {
     if (!confirm('Are you sure you want to delete your account? This action cannot be undone. All your data will be permanently removed.')) {
       return;
     }
-    if (!confirm('This is your last chance. Type OK in the next prompt to confirm deletion.')) {
+    if (prompt('Type DELETE to permanently delete your account and all Orderly data.') !== 'DELETE') {
       return;
     }
     
     try {
-      // Sign out (actual account deletion would require server-side admin action)
-      toast.success('Account deletion requested. You will be signed out.');
+      const response = await fetch('/api/account', { method: 'DELETE' });
+      const result = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(result?.error || 'Failed to delete account');
+      }
+
+      const userId = user?.id;
+      if (userId) {
+        clearUserPlannerData(userId);
+        clearTaskSchedules(userId);
+        removeUserScopedStorageValues(localStorage, userId);
+        localStorage.removeItem(`canvas_sync_interval_${userId}`);
+      }
+      // These old keys had no owner and may contain a private Canvas URL and
+      // academic data from an earlier account on the same browser.
+      localStorage.removeItem('canvas_sync_settings');
+      localStorage.removeItem('canvas_assignments');
       await logout();
-    } catch {
-      toast.error('Failed to process account deletion');
+      router.replace('/auth/login?accountDeleted=1');
+      router.refresh();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to delete account');
     }
   };
 
@@ -431,7 +494,7 @@ export default function SettingsPage() {
                   {[
                     { label: 'Tasks Completed', value: user?.tasks_completed || 0, icon: Check },
                     { label: 'Study Hours', value: Math.round((user?.total_study_time || 0) / 60), icon: Clock },
-                    { label: 'Current Streak', value: `${user?.current_streak || 0}d`, icon: Target },
+                    { label: 'Active Tasks', value: tasks.filter((task) => task.status !== 'completed').length, icon: Target },
                     { label: 'Member Since', value: user?.created_at ? new Date(user.created_at).toLocaleDateString('en-US', { month: 'short', year: 'numeric' }) : '—', icon: User },
                   ].map((stat) => (
                     <div key={stat.label} className="p-3 rounded-lg bg-muted/30 border text-center">
@@ -569,18 +632,20 @@ export default function SettingsPage() {
                   { key: 'goalDeadlines' as const, label: 'Goal Deadlines', description: 'Alerts when goal deadlines approach', icon: Target },
                   { key: 'dailyDigest' as const, label: 'Daily Digest', description: 'Summary of your daily tasks and schedule', icon: Mail },
                   { key: 'soundEnabled' as const, label: 'Sound Effects', description: 'Play sounds for timer and notifications', icon: BellRing },
-                ].map((item, idx) => (
+                ].map((item) => (
                   <div key={item.key} className="flex items-center justify-between py-3 px-1">
                     <div className="flex items-center gap-3">
                       <item.icon className="w-4 h-4 text-muted-foreground shrink-0" />
                       <div>
-                        <p className="text-sm font-medium">{item.label}</p>
-                        <p className="text-xs text-muted-foreground">{item.description}</p>
+                        <p id={`notification-${item.key}-label`} className="text-sm font-medium">{item.label}</p>
+                        <p id={`notification-${item.key}-description`} className="text-xs text-muted-foreground">{item.description}</p>
                       </div>
                     </div>
                     <ToggleSwitch
                       checked={notifPrefs[item.key]}
                       onChange={(val) => handleNotifChange(item.key, val)}
+                      labelledBy={`notification-${item.key}-label`}
+                      describedBy={`notification-${item.key}-description`}
                     />
                   </div>
                 ))}
@@ -709,7 +774,7 @@ export default function SettingsPage() {
                     <Button 
                       variant="outline" 
                       size="sm" 
-                      onClick={async () => { await logout(); window.location.href = '/auth/login'; }}
+                      onClick={async () => { await logout(); router.replace('/auth/login'); router.refresh(); }}
                       className="shrink-0 gap-1.5"
                     >
                       <LogOut className="w-4 h-4" />

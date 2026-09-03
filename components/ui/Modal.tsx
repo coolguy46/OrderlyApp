@@ -1,9 +1,14 @@
 'use client';
 
 import { cn } from '@/lib/utils';
-import { motion, AnimatePresence } from 'framer-motion';
 import { X } from 'lucide-react';
-import { useEffect, useCallback } from 'react';
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 
 interface ModalProps {
   isOpen: boolean;
@@ -14,78 +19,49 @@ interface ModalProps {
 }
 
 export function Modal({ isOpen, onClose, title, children, size = 'md' }: ModalProps) {
-  const handleEscape = useCallback(
-    (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    },
-    [onClose]
-  );
-
-  useEffect(() => {
-    document.addEventListener('keydown', handleEscape);
-    return () => document.removeEventListener('keydown', handleEscape);
-  }, [handleEscape]);
-
-  useEffect(() => {
-    if (isOpen) {
-      document.body.style.overflow = 'hidden';
-    } else {
-      document.body.style.overflow = 'unset';
-    }
-    return () => {
-      document.body.style.overflow = 'unset';
-    };
-  }, [isOpen]);
-
   const sizeClasses = {
-    sm: 'max-w-sm',
-    md: 'max-w-md',
-    lg: 'max-w-lg',
-    xl: 'max-w-xl',
+    sm: 'sm:max-w-sm',
+    md: 'sm:max-w-md',
+    lg: 'sm:max-w-lg',
+    xl: 'sm:max-w-xl',
   };
 
   return (
-    <AnimatePresence>
-      {isOpen && (
-        <>
-          {/* Backdrop */}
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50"
-            onClick={onClose}
-          />
+    <Dialog
+      open={isOpen}
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+    >
+      <DialogContent
+        showCloseButton={false}
+        aria-describedby={undefined}
+        className={cn(
+          'left-1/2 right-auto flex w-[calc(100%-2rem)] -translate-x-1/2 flex-col gap-0 overflow-hidden border-white/10 bg-gray-900/95 p-0 text-white shadow-2xl shadow-black/50 backdrop-blur-xl',
+          'sm:max-h-[90dvh] sm:overflow-hidden sm:rounded-2xl',
+          sizeClasses[size]
+        )}
+        style={{ maxHeight: 'min(90dvh, 900px)' }}
+      >
+        <DialogHeader className="shrink-0 flex-row items-center justify-between space-y-0 px-6 pb-4 pt-6 text-left">
+          <DialogTitle className={cn('text-xl text-white', !title && 'sr-only')}>
+            {title || 'Dialog'}
+          </DialogTitle>
+          <DialogClose asChild>
+            <button
+              type="button"
+              aria-label="Close dialog"
+              className="rounded-xl p-2 text-gray-400 transition-colors hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
+            >
+              <X size={20} />
+            </button>
+          </DialogClose>
+        </DialogHeader>
 
-          {/* Modal */}
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95, y: 20 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: 20 }}
-            transition={{ duration: 0.2 }}
-            className={cn(
-              'fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50',
-              'bg-gray-900/95 backdrop-blur-xl border border-white/10 rounded-2xl',
-              'shadow-2xl shadow-black/50 w-full p-6',
-              sizeClasses[size]
-            )}
-          >
-            {/* Header */}
-            <div className="flex items-center justify-between mb-6">
-              {title && <h2 className="text-xl font-semibold text-white">{title}</h2>}
-              <button
-                onClick={onClose}
-                className="p-2 rounded-xl hover:bg-white/10 transition-colors text-gray-400 hover:text-white"
-              >
-                <X size={20} />
-              </button>
-            </div>
-
-            {/* Content */}
-            {children}
-          </motion.div>
-        </>
-      )}
-    </AnimatePresence>
+        <div className="min-h-0 overflow-y-auto overscroll-contain px-6 pb-6">
+          {children}
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }

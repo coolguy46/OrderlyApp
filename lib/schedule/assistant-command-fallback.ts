@@ -2,7 +2,6 @@ export interface AssistantCommandMessage {
   role: 'assistant' | 'user';
   content: string;
 }
-
 export interface AssistantCommandPreviewLike {
   status: string;
   summary: string;

@@ -5,6 +5,7 @@ import { MainLayout } from '@/components/layout';
 import { Card, CardContent, Button, Input } from '@/components/ui';
 import { useCanvasSyncSupabase, formatTimeUntilSync, formatLastSync } from '@/lib/integrations/useCanvasSyncSupabase';
 import { useAppStore } from '@/lib/store';
+import { useCurrentTime } from '@/lib/use-current-time';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Link2,
@@ -39,6 +40,7 @@ function CanvasIcon({ className }: { className?: string }) {
 
 export default function IntegrationsPage() {
   const { user, tasks, exams, refreshData } = useAppStore();
+  const currentTime = useCurrentTime();
 
   // Canvas live sync hook with Supabase
   const {
@@ -90,32 +92,32 @@ export default function IntegrationsPage() {
 
   // Canvas URL input state (separate from saved settings)
   const [canvasUrlInput, setCanvasUrlInput] = useState('');
-  const [feedCourseCount, setFeedCourseCount] = useState<number | null>(null);
+  const [canvasUrlSource, setCanvasUrlSource] = useState('');
+  if (canvasUrlSource !== canvasSettings.icalUrl) {
+    setCanvasUrlSource(canvasSettings.icalUrl);
+    setCanvasUrlInput(canvasSettings.icalUrl);
+  }
+  const [feedSummary, setFeedSummary] = useState<{ url: string; courses: number } | null>(null);
+  const feedCourseCount = feedSummary?.url === canvasSettings.icalUrl
+    ? feedSummary.courses
+    : null;
   const [isCanvasConnecting, setIsCanvasConnecting] = useState(false);
   const connectingFlowRef = useRef(false);
   const feedSummaryControllerRef = useRef<AbortController | null>(null);
 
-  // Sync input with saved URL
-  useEffect(() => {
-    if (canvasSettings.icalUrl && !canvasUrlInput) {
-      setCanvasUrlInput(canvasSettings.icalUrl);
-    }
-  }, [canvasSettings.icalUrl]);
-
   // Course enrollment cannot be inferred reliably from stored tasks because a
-  // course may currently have no imported assignment. Read the distinct course
-  // names from the connected Canvas feed instead. Manual sync always gets the
-  // feed request to itself; starting one aborts this lower-priority summary.
+  // course may currently have no imported assignment. This endpoint reads the
+  // count persisted by the last successful sync; it never refetches the private
+  // provider feed merely to render this page. Manual sync still gets the request
+  // slot to itself by aborting this lower-priority summary.
   useEffect(() => {
-    if (!canvasSettings.icalUrl) {
-      setFeedCourseCount(null);
-      return;
-    }
+    if (!canvasSettings.icalUrl) return;
     if (isCanvasConnecting || isCanvasSyncing) return;
 
     const controller = new AbortController();
     feedSummaryControllerRef.current = controller;
     const timeoutId = window.setTimeout(() => controller.abort(), 20_000);
+    const requestedUrl = canvasSettings.icalUrl;
     const loadFeedSummary = async () => {
       try {
         const response = await fetch('/api/canvas/sync', {
@@ -125,7 +127,9 @@ export default function IntegrationsPage() {
         });
         if (!response.ok) return;
         const summary = await response.json();
-        if (Number.isFinite(summary.courses)) setFeedCourseCount(summary.courses);
+        if (Number.isFinite(summary.courses)) {
+          setFeedSummary({ url: requestedUrl, courses: summary.courses });
+        }
       } catch (error) {
         if (controller.signal.aborted) return;
         console.error('Could not load Canvas feed summary:', error);
@@ -177,7 +181,7 @@ export default function IntegrationsPage() {
 
   const canvasTasks = tasks.filter((task) => task.source === 'canvas');
   const canvasExams = exams.filter((exam) => exam.source === 'canvas');
-  const now = Date.now();
+  const now = currentTime.getTime();
   const upcomingCanvasTasks = canvasTasks.filter((task) => {
     if (task.status === 'completed' || !task.due_date) return false;
     const dueAt = new Date(task.due_date).getTime();
@@ -211,7 +215,10 @@ export default function IntegrationsPage() {
     },
     {
       label: 'Courses',
-      value: feedCourseCount ?? canvasCourseCount,
+      // Existing rows receive course_count=0 during migration and are updated
+      // on their next successful sync. Keep the locally loaded task identities
+      // as a temporary lower bound so rollout never regresses to a false zero.
+      value: Math.max(feedCourseCount ?? 0, canvasCourseCount),
       tone: 'text-violet-400',
     },
   ];

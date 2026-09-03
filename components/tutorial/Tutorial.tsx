@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
 import {
@@ -180,8 +180,8 @@ export function Tutorial({ onComplete, forceShow = false }: TutorialProps) {
                   >
                     <CheckCircle2 className="w-10 h-10 text-green-400" />
                   </motion.div>
-                  <h3 className="text-2xl font-bold">You're all set! 🎉</h3>
-                  <p className="text-muted-foreground mt-2">Let's start your academic journey with Orderly!</p>
+                  <h3 className="text-2xl font-bold">You&apos;re all set! 🎉</h3>
+                  <p className="text-muted-foreground mt-2">Let&apos;s start your academic journey with Orderly!</p>
                 </motion.div>
               ) : (
                 <div className={cn('bg-card border rounded-3xl shadow-2xl overflow-hidden', cfg.border)}>

@@ -175,7 +175,9 @@ Return only a JSON object with exactly this shape:
 {"normalizedCommand":"..."}
 
 Supported command forms:
-- Schedule <task or activity> <date> at <time> for <duration>
+- Create event <title> <date> at <time> for <duration>
+- Create task <title> <date> at <time> for <duration>
+- Schedule <existing task or activity> <date> at <time> for <duration>
 - Schedule <activity> for <duration> every day or every weekday through <date>
 - Move <task> to <date> at <time>
 - Resize <task> to <duration>
@@ -185,7 +187,7 @@ Supported command forms:
 - Find the best time for <task or activity> <date> for <duration> after <time> before <time>
 
 Rules:
-1. Preserve the user's intent. Do not add an operation, time, duration, date, or repeat rule the user did not request unless it is required to make the command parseable.
+1. Preserve the user's intent. Do not add an operation, time, duration, date, repeat rule, or calendar item type the user did not request unless it is required to make the command parseable. If the user explicitly calls something an event, keep the word event in its command. If the user explicitly calls something a task, keep the word task in its command.
 2. Resolve relative dates using the provided current instant, time zone, and selected date.
 3. Use task titles exactly as provided when the user refers to an existing task. Never invent task IDs.
 4. If the user asks for the best/open time and wants it added, use "Find the best time for ..." so Orderly can check real schedule conflicts.
@@ -206,7 +208,7 @@ Conversation rules:
 1. Answer questions about the user's workload, deadlines, free time, and schedule using only the supplied context. Be honest when the context does not contain enough information. Use taskSummary for complete aggregate counts; if pendingTotal is greater than includedTotal, the task list is only a partial snapshot, so never present its titles as the complete list.
 2. Use the conversation history to understand follow-ups such as "do that", "make it later", and "what about tomorrow?".
 3. For questions, analysis, recommendations, brainstorming, or clarification, return an empty normalizedCommands array and a null planRequest.
-4. Use normalizedCommands for exact changes whose task or activity, date, time, and duration are already concrete, and for the supported exact move, resize, repeat, unschedule, and best-time forms below. Keep distinct changes in the same order as the request.
+4. Use normalizedCommands for exact changes whose task or activity, date, time, and duration are already concrete, and for the supported exact move, resize, repeat, unschedule, and best-time forms below. Keep distinct changes in the same order as the request. Preserve each explicitly requested calendar item type: use "Create event <title> ..." for an event and "Create task <title> ..." for a task, including when one message contains both types.
 5. Use planRequest for broad planning requests where Orderly should choose dates, times, or estimated durations across one or more existing tasks. Examples include "schedule my overdue work", "plan my week", "fit in everything due this week", "schedule them", and "don't overload today". Missing per-task times or durations are expected for planRequest and must not trigger a clarification question.
 6. Never return both a non-empty normalizedCommands array and a non-null planRequest.
 7. For planRequest, use taskScope "task_ids" with exact supplied task IDs when the user names or refers to a specific set of existing tasks. Otherwise use the matching broad scope. taskIds must be non-empty only for "task_ids" and empty for every other scope. Never invent task IDs.
@@ -220,7 +222,9 @@ Conversation rules:
 12. Never decide or claim that a requested time overlaps, conflicts, is blocked, or is unavailable. Emit the requested normalizedCommands or planRequest and let Orderly's deterministic schedule engine check the actual instants. Likewise, never claim that a calendar change succeeded or failed based on conversation alone.
 13. Keep replies under 180 words. Use short paragraphs and, when helpful, bullet or numbered lists and **bold** emphasis. Do not use markdown tables, headings, code blocks, links, or HTML.
 
-- Schedule <task or activity> <date> at <time> for <duration>
+- Create event <title> <date> at <time> for <duration>
+- Create task <title> <date> at <time> for <duration>
+- Schedule <existing task or activity> <date> at <time> for <duration>
 - Schedule <activity> for <duration> every day or every weekday through <date>
 - Move <task> to <date> at <time>
 - Resize <task> to <duration>
@@ -1238,13 +1242,15 @@ type ExactMutationFamily = keyof typeof EXACT_MUTATION_FAMILY_PATTERNS;
 const BROAD_COLLECTION_TARGET_PATTERN = /\b(?:all|everything|overdue|missing|past\s+due|late|workload|my\s+week|tasks?|assignments?|homework|them|those|these)\b/i;
 const EXACT_INTENT_STOP_WORDS = new Set([
   'a', 'add', 'after', 'all', 'also', 'am', 'an', 'and', 'app', 'at', 'before',
-  'book', 'calendar', 'can', 'could', 'create', 'day', 'do', 'event', 'every',
+  'assignment', 'block', 'book', 'calendar', 'called', 'can', 'could', 'create',
+  'day', 'do', 'event', 'every',
   'find', 'for', 'from', 'hour', 'hours', 'hrs', 'i', 'in', 'is', 'it', 'later',
-  'me', 'min', 'mins', 'minute', 'minutes', 'move', 'my', 'next', 'on', 'place',
+  'homework', 'me', 'min', 'mins', 'minute', 'minutes', 'move', 'my', 'named',
+  'midnight', 'morning', 'next', 'night', 'noon', 'on', 'place',
   'please', 'pm', 'put', 'repeat', 'reschedule', 'resize', 'schedule', 'scheduled',
   'second', 'seconds', 'shift', 'shorten', 'task', 'the', 'this', 'through', 'time',
-  'today', 'tonight', 'tomorrow', 'to', 'unschedule', 'until', 'week', 'weekday',
-  'weekdays', 'weekend', 'weekends', 'will', 'would',
+  'afternoon', 'evening', 'today', 'tonight', 'tomorrow', 'to', 'unschedule', 'until', 'week', 'weekday',
+  'weekdays', 'weekend', 'weekends', 'will', 'would', 'you',
   'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday',
   'mon', 'tue', 'tues', 'wed', 'thu', 'thur', 'thurs', 'fri', 'sat', 'sun',
 ]);
@@ -1311,6 +1317,7 @@ function significantExactIntentTokens(value: string): string[] {
 interface ExactIntentBinding {
   family: ExactMutationFamily;
   target: string;
+  entityKind: 'task' | 'event' | null;
   dates: string[];
   startMinute: number | null;
   afterMinute: number | null;
@@ -1324,6 +1331,20 @@ const EXACT_BUNDLE_BOUNDARY_PATTERN = new RegExp(
   `(?:;|\\b(?:and\\s+then|then|also|and)\\b)\\s*(?=(?:(?:please|actually|just)\\s+)*(?:(?:can|could|would|will)\\s+(?:you|u)\\s+)?${EXACT_ACTION_PATTERN}\\b)`,
   'gi',
 );
+const EXACT_ELIDED_NEW_ENTITY_BOUNDARY_PATTERN = /(?:;|\b(?:and\s+then|then|also|and|plus)\b)\s*(?=(?:a\s+|an\s+|the\s+)?[^;\n]{1,120}?\b(?:task|event)\b[^;\n]{0,120}?\b(?:today|tonight|tomorrow|sunday|monday|tuesday|wednesday|thursday|friday|saturday|\d{4}-\d{1,2}-\d{1,2}|at\s+\d|from\s+\d))/gi;
+const EXACT_EVENT_NOUN_SCHEDULE_BOUNDARY = '(?:on\\s+(?:today|tonight|tomorrow|sunday|monday|tuesday|wednesday|thursday|friday|saturday|\\d{4}-\\d{1,2}-\\d{1,2})|today\\b|tonight\\b|tomorrow\\b|at\\s+\\d|from\\s+\\d|between\\s+\\d|every\\b|each\\b)';
+
+/** Keep typo tolerance scoped to a calendar item-type position. */
+function normalizeExactEventNounTypoAtBoundary(value: string): string {
+  const beforeSchedule = new RegExp(
+    `\\b(?:even|evnet)\\b(?=\\s+${EXACT_EVENT_NOUN_SCHEDULE_BOUNDARY})`,
+    'gi',
+  );
+  const immediatelyAfterAction = /((?:^|\b)(?:add|book|create|place|put|schedule)\s+(?:me\s+)?(?:a\s+|an\s+|the\s+))evnet\b/gi;
+  return value
+    .replace(beforeSchedule, 'event')
+    .replace(immediatelyAfterAction, '$1event');
+}
 
 function splitAtMatches(value: string, matches: readonly RegExpMatchArray[]): string[] | null {
   if (matches.length === 0) return null;
@@ -1381,16 +1402,30 @@ function splitExactIntentClauses(
   value: string,
   context?: PlannerCommandAIContext,
 ): string[] {
-  const explicitParts = splitAtMatches(value, [...value.matchAll(EXACT_BUNDLE_BOUNDARY_PATTERN)]);
+  const normalizedValue = normalizeExactEventNounTypoAtBoundary(value);
+  const explicitParts = splitAtMatches(normalizedValue, [
+    ...normalizedValue.matchAll(EXACT_BUNDLE_BOUNDARY_PATTERN),
+  ]);
   if (explicitParts) return explicitParts;
 
-  const mentions = taskMentionPositions(value, context);
-  if (mentions.length < 2) return [value.trim()];
+  // The second item in a natural bundle often elides the repeated action
+  // verb: "add a Hiking event ... and a Pickleball task ...". Split only
+  // when both an entity noun and a date/time anchor make the boundary
+  // unambiguous; the inherited family below supplies the omitted "add".
+  if (exactMutationFamily(normalizedValue) === 'schedule') {
+    const elidedParts = splitAtMatches(normalizedValue, [
+      ...normalizedValue.matchAll(EXACT_ELIDED_NEW_ENTITY_BOUNDARY_PATTERN),
+    ]);
+    if (elidedParts) return elidedParts;
+  }
+
+  const mentions = taskMentionPositions(normalizedValue, context);
+  if (mentions.length < 2) return [normalizedValue.trim()];
   const boundaries: RegExpMatchArray[] = [];
   for (let index = 1; index < mentions.length; index += 1) {
     const betweenStart = mentions[index - 1].end;
     const betweenEnd = mentions[index].index;
-    const between = value.slice(betweenStart, betweenEnd);
+    const between = normalizedValue.slice(betweenStart, betweenEnd);
     const delimiters = [...between.matchAll(/(?:;|\b(?:and\s+then|then|also|and|plus)\b)\s*/gi)];
     const delimiter = delimiters.at(-1);
     if (!delimiter || delimiter.index === undefined) return [value.trim()];
@@ -1398,7 +1433,7 @@ function splitExactIntentClauses(
     synthetic.index = betweenStart + delimiter.index;
     boundaries.push(synthetic);
   }
-  return splitAtMatches(value, boundaries) || [value.trim()];
+  return splitAtMatches(normalizedValue, boundaries) || [normalizedValue.trim()];
 }
 
 function parseClockToken(value: string, fallbackMeridiem?: 'am' | 'pm'): number | null {
@@ -1487,7 +1522,8 @@ function exactRecurrence(value: string): ExactIntentBinding['recurrence'] | null
 }
 
 function exactTargetBinding(value: string, context?: PlannerCommandAIContext): string | null {
-  const normalized = normalizedIntentText(value);
+  const canonicalValue = normalizeExactEventNounTypoAtBoundary(value);
+  const normalized = normalizedIntentText(canonicalValue);
   const taskIds = new Set<string>();
   for (const task of context?.tasks || []) {
     if (taskTitleAliases(task.title).some(alias => containsNormalizedPhrase(normalized, alias))) {
@@ -1497,10 +1533,39 @@ function exactTargetBinding(value: string, context?: PlannerCommandAIContext): s
   if (taskIds.size === 1) return `task:${[...taskIds][0]}`;
   if (taskIds.size > 1) return null;
 
-  const tokens = [...new Set(significantExactIntentTokens(value)
+  const tokens = [...new Set(significantExactIntentTokens(canonicalValue)
     .filter(token => !['actual', 'activity', 'daily', 'each', 'existing', 'into', 'new', 'now', 'once', 'work'].includes(token)))]
     .sort();
   return tokens.length > 0 ? `text:${tokens.join(' ')}` : null;
+}
+
+function exactEntityKind(
+  value: string,
+  family: ExactMutationFamily,
+  target: string,
+): ExactIntentBinding['entityKind'] {
+  if (target.startsWith('task:')) return 'task';
+  if (family !== 'schedule' && family !== 'find') return null;
+  const canonicalValue = normalizeExactEventNounTypoAtBoundary(value);
+
+  // Only an entity noun at the start of the requested item or immediately
+  // before its schedule details is authoritative. This mirrors the
+  // deterministic command parser and avoids treating a title such as
+  // "prepare for the game" as an event when the user asked for a task.
+  const actionTarget = canonicalValue.match(
+    /\b(?:add|book|create|place|put|schedule|find(?:\s+the\s+best\s+time\s+for)?)\b\s+(?:me\s+)?(?:a\s+|an\s+|the\s+)?([\s\S]+)$/i,
+  )?.[1] || canonicalValue;
+  const beforeSchedule = actionTarget
+    .split(/\s+\b(?:on\s+(?:today|tonight|tomorrow|sunday|monday|tuesday|wednesday|thursday|friday|saturday|\d{4}-\d{1,2}-\d{1,2})|today|tonight|tomorrow|at\s+\d|from\s+\d|every\s+(?:day|weekday))\b/i)[0]
+    .replace(/[.!?,;:\s]+$/g, '')
+    .trim();
+  const nounTarget = beforeSchedule.replace(/^(?:me\s+)?(?:a\s+|an\s+|the\s+)?/i, '').trim();
+  if (/^(?:task|assignment|homework|to[ -]?do)\b/i.test(nounTarget)
+    || /\b(?:task|assignment|homework|to[ -]?do)$/i.test(nounTarget)) return 'task';
+  if (/^(?:calendar\s+)?event\b/i.test(nounTarget)
+    || /\b(?:calendar\s+)?event$/i.test(nounTarget)
+    || /\b(?:meeting|appointment|game|class)$/i.test(nounTarget)) return 'event';
+  return 'task';
 }
 
 function exactIntentBinding(
@@ -1527,6 +1592,7 @@ function exactIntentBinding(
   return {
     family,
     target,
+    entityKind: exactEntityKind(value, family, target),
     dates: [...requestedCalendarDates(value, context)].sort(),
     startMinute: time.startMinute,
     afterMinute: time.afterMinute,
@@ -1539,6 +1605,7 @@ function exactIntentBinding(
 function sameExactIntentBinding(left: ExactIntentBinding, right: ExactIntentBinding): boolean {
   return left.family === right.family
     && left.target === right.target
+    && left.entityKind === right.entityKind
     && left.dates.length === right.dates.length
     && left.dates.every((date, index) => date === right.dates[index])
     && left.startMinute === right.startMinute
@@ -1546,6 +1613,108 @@ function sameExactIntentBinding(left: ExactIntentBinding, right: ExactIntentBind
     && left.beforeMinute === right.beforeMinute
     && left.durationSeconds === right.durationSeconds
     && left.recurrence === right.recurrence;
+}
+
+function sameExactIntentExceptEntity(left: ExactIntentBinding, right: ExactIntentBinding): boolean {
+  return left.family === right.family
+    && left.target === right.target
+    && left.dates.length === right.dates.length
+    && left.dates.every((date, index) => date === right.dates[index])
+    && left.startMinute === right.startMinute
+    && left.afterMinute === right.afterMinute
+    && left.beforeMinute === right.beforeMinute
+    && left.durationSeconds === right.durationSeconds
+    && left.recurrence === right.recurrence;
+}
+
+function explicitEntityCorrection(
+  value: string,
+): { target: string; desired: 'task' | 'event' } | null {
+  const patterns = [
+    /\b(?:i\s+)?(?:meant|menat)\s+(.{1,100}?)\s+(?:to\s+be\s+|as\s+)?(?:an?\s+)?(event|task)\b/i,
+    /\bmake\s+(.{1,100}?)\s+(?:an?\s+)?(event|task)\b/i,
+    /^\s*(.{1,100}?)\s+(?:should|needs?\s+to)\s+be\s+(?:an?\s+)?(event|task)\b/i,
+  ];
+  for (const pattern of patterns) {
+    const match = pattern.exec(value);
+    const target = match?.[1]?.replace(/^(?:the|that)\s+/i, '').trim();
+    if (target && match?.[2]) {
+      return { target, desired: match[2].toLowerCase() as 'task' | 'event' };
+    }
+  }
+  return null;
+}
+
+function rewriteExactEntityKind(
+  command: string,
+  current: 'task' | 'event',
+  desired: 'task' | 'event',
+): string | null {
+  const canonicalCommand = normalizeExactEventNounTypoAtBoundary(command);
+  if (canonicalCommand !== command) {
+    if (desired === 'event') return canonicalCommand;
+    return canonicalCommand.replace(/\b(?:calendar\s+)?event\b/i, 'task');
+  }
+  if (current === desired) return command;
+  const source = current === 'task'
+    ? '(?:task|assignment|homework|to[ -]?do)'
+    : '(?:calendar\\s+)?event';
+  const explicit = new RegExp(`\\b${source}\\b`, 'i');
+  if (explicit.test(command)) return command.replace(explicit, desired);
+
+  // A model may have omitted the default word "task" entirely. Insert the
+  // corrected type immediately before the first scheduling detail so the
+  // title, date, clock, duration, and recurrence stay byte-for-byte intact.
+  const scheduleBoundary = /\s+(?=(?:on\s+(?:today|tonight|tomorrow|sunday|monday|tuesday|wednesday|thursday|friday|saturday|\d{4}-\d{1,2}-\d{1,2})|today\b|tonight\b|tomorrow\b|at\s+\d|from\s+\d|every\s+(?:day|weekday)))/i;
+  if (!scheduleBoundary.test(command)) return null;
+  return command.replace(scheduleBoundary, ` ${desired} `);
+}
+
+/**
+ * Resolve a narrow conversational correction against the complete active
+ * exact draft. The returned bundle retains every unaffected command and
+ * changes only the explicitly named item's task/event type. If the target is
+ * ambiguous, or any date/time/duration detail would change, nothing is
+ * inferred and the provider cannot mutate the draft on its own.
+ */
+export function inferPlannerChatExactCorrection(
+  messages: readonly PlannerChatMessage[],
+  context?: PlannerCommandAIContext,
+): string[] | null {
+  const latest = sanitizePlannerChatMessages(messages).at(-1);
+  const activeCommands = context?.activeDraft?.kind === 'exact_commands'
+    ? context.activeDraft.normalizedCommands
+    : [];
+  if (!latest || latest.role !== 'user' || activeCommands.length === 0) return null;
+  const correction = explicitEntityCorrection(latest.content);
+  if (!correction) return null;
+  const correctionTarget = exactTargetBinding(
+    `Create task ${correction.target} on 2099-01-01 at 1 PM for 1 hour`,
+    context,
+  );
+  if (!correctionTarget) return null;
+
+  const bindings = activeCommands.map(command => exactIntentBinding(command, context));
+  if (bindings.some(binding => !binding)) return null;
+  const matchingIndexes = bindings.flatMap((binding, index) => (
+    binding?.target === correctionTarget ? [index] : []
+  ));
+  if (matchingIndexes.length !== 1) return null;
+  const changedIndex = matchingIndexes[0];
+  const before = bindings[changedIndex];
+  if (!before?.entityKind) return null;
+  if (before.entityKind === correction.desired) return [...activeCommands];
+  const rewritten = rewriteExactEntityKind(
+    activeCommands[changedIndex],
+    before.entityKind,
+    correction.desired,
+  );
+  if (!rewritten) return null;
+  const after = exactIntentBinding(rewritten, context);
+  if (!after
+    || after.entityKind !== correction.desired
+    || !sameExactIntentExceptEntity(before, after)) return null;
+  return activeCommands.map((command, index) => index === changedIndex ? rewritten : command);
 }
 
 function hasBijectiveExactIntentMatch(
@@ -1593,6 +1762,11 @@ export function plannerChatNormalizedCommandsPreserveIntent(
   const activeDraftCommands = context?.activeDraft?.kind === 'exact_commands'
     ? context.activeDraft.normalizedCommands
     : [];
+  const correctedDraftCommands = inferPlannerChatExactCorrection(sanitizedMessages, context);
+  if (correctedDraftCommands) {
+    return exactCommands.length === correctedDraftCommands.length
+      && exactCommands.every((command, index) => command === correctedDraftCommands[index]);
+  }
   if (
     BROAD_PLAN_CONFIRMATION_PATTERN.test(latest.content)
     && activeDraftCommands.length > 0

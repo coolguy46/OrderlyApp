@@ -19,7 +19,6 @@ test('created-task cleanup reports every failed deletion for retry', async () =>
   assert.deepEqual(result.deletedTaskIds, ['created-1']);
   assert.deepEqual(result.failedTaskIds, ['created-2', 'created-3']);
 });
-
 test('planner mutations become stale after an account or generation change', () => {
   assert.equal(plannerMutationIsCurrent({
     operationUserId: 'user-a',

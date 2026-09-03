@@ -49,7 +49,6 @@ const { answerAssistantTaskQuery, resolveAssistantTaskQuery } = compiledRequire(
 after(async () => {
   await rm(buildRoot, { recursive: true, force: true });
 });
-
 const NOW = '2026-08-28T19:00:00.000Z'; // Friday noon in Los Angeles.
 const TIME_ZONE = 'America/Los_Angeles';
 

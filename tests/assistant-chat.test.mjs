@@ -4,8 +4,10 @@ import test from 'node:test';
 
 import {
   PLANNER_CHAT_SYSTEM_PROMPT,
+  inferPlannerChatExactCorrection,
   inferPlannerChatPlanRequest,
   parsePlannerChatAIJson,
+  plannerChatNormalizedCommandsPreserveIntent,
   sanitizePlannerChatAIInput,
   sanitizePlannerChatPlanRequest,
   selectPlannerChatProviderContext,
@@ -356,6 +358,115 @@ test('chat parser accepts replies and optional schedule commands but rejects mod
       normalizedCommands: Array.from({ length: 9 }, (_, index) => `Schedule item ${index} today at 5 pm for 1 hour`),
     })),
     null,
+  );
+});
+
+test('exact command verification preserves explicit event and task types in a mixed request', () => {
+  const input = chatInput(
+    'Add a hiking event on 2026-09-02 from 4 PM to 5 PM and a pickleball task on 2026-09-03 from 6 PM to 7 PM.',
+  );
+  assert.ok(input);
+
+  const correct = [
+    'Create Hiking event on 2026-09-02 from 4 PM to 5 PM',
+    'Create Pickleball task on 2026-09-03 from 6 PM to 7 PM',
+  ];
+  assert.equal(
+    plannerChatNormalizedCommandsPreserveIntent(input.messages, correct, input.context),
+    true,
+  );
+  assert.equal(
+    plannerChatNormalizedCommandsPreserveIntent(input.messages, [
+      'Create Hiking task on 2026-09-02 from 4 PM to 5 PM',
+      correct[1],
+    ], input.context),
+    false,
+    'a provider may not silently turn an explicit event into a completable task',
+  );
+});
+
+test('an entity correction is checked against the complete active exact draft', () => {
+  const activeDraftCommands = [
+    'Create Hiking task on 2026-09-02 from 4 PM to 5 PM',
+    'Create Pickleball task on 2026-09-03 from 6 PM to 7 PM',
+  ];
+  const input = chatInput([
+    {
+      role: 'user',
+      content: 'Add a hiking event on 2026-09-02 from 4 PM to 5 PM and a pickleball task on 2026-09-03 from 6 PM to 7 PM.',
+    },
+    { role: 'assistant', content: 'I placed both changes in a calendar draft.' },
+    { role: 'user', content: 'I menat hiking event, not a task.' },
+  ], {
+    activeDraft: {
+      kind: 'exact_commands',
+      summary: 'Create two calendar items.',
+      taskScope: null,
+      taskIds: [],
+      normalizedCommands: activeDraftCommands,
+      createdAt: '2026-08-27T19:00:00.000Z',
+    },
+  });
+  assert.ok(input);
+
+  const corrected = [
+    'Create Hiking event on 2026-09-02 from 4 PM to 5 PM',
+    activeDraftCommands[1],
+  ];
+  assert.equal(
+    plannerChatNormalizedCommandsPreserveIntent(input.messages, corrected, input.context),
+    true,
+    'the correction should retain the unaffected pickleball action',
+  );
+  assert.equal(
+    plannerChatNormalizedCommandsPreserveIntent(input.messages, activeDraftCommands, input.context),
+    false,
+    'repeating the wrong task type must not pass as the correction',
+  );
+  assert.equal(
+    plannerChatNormalizedCommandsPreserveIntent(input.messages, [corrected[0]], input.context),
+    false,
+    'a correction may not silently drop another action from the active draft',
+  );
+});
+
+test('a typo correction keeps an already-correct mixed draft and all original timing', () => {
+  const activeDraftCommands = [
+    'can you add a hiking even on saturday morning from 4 am to 9 am',
+    'add a pickleball task from 4 to 5 pm or saturday',
+  ];
+  const input = chatInput([
+    {
+      role: 'user',
+      content: `${activeDraftCommands[0]} and then ${activeDraftCommands[1]}`,
+    },
+    { role: 'assistant', content: 'Both items are in your calendar draft.' },
+    { role: 'user', content: 'i menat hiking event not task' },
+  ], {
+    activeDraft: {
+      kind: 'exact_commands',
+      summary: 'Create two calendar items.',
+      taskScope: null,
+      taskIds: [],
+      normalizedCommands: activeDraftCommands,
+      createdAt: '2026-08-27T19:00:00.000Z',
+    },
+  });
+  assert.ok(input);
+
+  assert.deepEqual(
+    inferPlannerChatExactCorrection(input.messages, input.context),
+    activeDraftCommands,
+    'the already-correct event must keep its original command and the unaffected task',
+  );
+  assert.equal(
+    plannerChatNormalizedCommandsPreserveIntent(input.messages, activeDraftCommands, input.context),
+    true,
+  );
+  assert.equal(
+    plannerChatNormalizedCommandsPreserveIntent(input.messages, [activeDraftCommands[0]], input.context),
+    false,
+    'the correction may not drop the unaffected pickleball task',
   );
 });
 
@@ -949,7 +1060,7 @@ test('usage migration is authenticated, keeps token logging, and supports disabl
   assert.match(migration, /REVOKE ALL ON assistant_ai_usage FROM PUBLIC, anon, authenticated/i);
 });
 
-test('chat route is authenticated, usage-tracked, per-minute limited, abortable, and server-only', async () => {
+test('chat route is authenticated, usage-tracked without quotas, per-minute limited, abortable, and server-only', async () => {
   const route = await readFile(
     new URL('../app/api/planner/chat/route.ts', import.meta.url),
     'utf8',
@@ -966,11 +1077,13 @@ test('chat route is authenticated, usage-tracked, per-minute limited, abortable,
   assert.match(route, /planRequest: PlannerChatPlanRequest \| null/);
   assert.match(route, /plannerChatPlanRequestPreservesIntent/);
   assert.match(route, /plannerChatNormalizedCommandsPreserveIntent/);
+  assert.match(route, /inferPlannerChatExactCorrection/);
+  assert.match(route, /correctedDraftCommands[\s\S]*aiUsed: false/);
   assert.match(route, /planRequest: rejectedWithoutFallback \? null : providerPlanRequest \|\| inferredPlanRequest/);
   assert.match(route, /selectPlannerChatProviderContext/);
   assert.match(route, /request\.signal\.addEventListener\('abort'/);
   assert.match(route, /20_000/);
-  assert.match(route, /max_tokens:\s*700/);
+  assert.match(route, /max_tokens:\s*1_000/);
   assert.match(route, /Cache-Control', 'no-store/);
   assert.match(route, /new TextEncoder\(\)\.encode\(rawBody\)\.byteLength/);
   assert.match(route, /providerDispatched = true/);

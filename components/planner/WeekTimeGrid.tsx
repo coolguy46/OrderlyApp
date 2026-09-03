@@ -7,6 +7,8 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
   type MutableRefObject,
   type PointerEvent as ReactPointerEvent,
 } from 'react';
@@ -46,6 +48,13 @@ import {
   localTimeFromIso,
 } from '@/lib/schedule/selectors';
 import { cn } from '@/lib/utils';
+import { splitCalendarIntervalByDay } from '@/lib/planner/calendar-segments';
+import {
+  canActivateEmptySlot,
+  DEFAULT_EMPTY_SLOT_DURATION_MINUTES,
+  emptySlotStartMinute,
+  keyboardEmptySlotStartMinute,
+} from './week-time-grid-slot';
 import type { PlannerBlockView } from './types';
 
 const DAYS_IN_PLAN = 7;
@@ -81,6 +90,11 @@ export interface WeekTimeGridProps {
     nextEnd: Date,
   ) => void | Promise<void>;
   onBlockClick?: (block: PlannerBlockView) => void;
+  /** Called when an unoccupied part of a day column is activated. */
+  onEmptySlotClick?: (
+    nextStart: Date,
+    nextEnd: Date,
+  ) => void | Promise<void>;
   onBlockMoveToUntimed?: (
     block: PlannerBlockView,
     targetDate?: string,
@@ -193,6 +207,10 @@ interface PositionedBlockProps {
     event: ReactPointerEvent<HTMLButtonElement>,
     block: PlannerBlockView,
   ) => void;
+  onResizeKeyDown?: (
+    event: ReactKeyboardEvent<HTMLButtonElement>,
+    block: PlannerBlockView,
+  ) => void;
 }
 
 function PositionedBlock({
@@ -205,10 +223,18 @@ function PositionedBlock({
   onClick,
   onMoveToUntimed,
   onResizeStart,
+  onResizeKeyDown,
 }: PositionedBlockProps) {
   const fixed = isFixedBlock(block);
   const draggable = editable && !fixed;
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    setActivatorNodeRef,
+    transform,
+    isDragging,
+  } = useDraggable({
     id: block.id,
     disabled: !draggable,
   });
@@ -237,63 +263,70 @@ function PositionedBlock({
     <div
       ref={setNodeRef}
       style={style}
-      {...attributes}
-      {...listeners}
-      role="button"
-      tabIndex={0}
-      aria-label={`${block.title}, ${formatBlockTime(start, end)}, ${minutesLabel(duration)}`}
-      onClick={(event) => {
-        event.stopPropagation();
-        if (Date.now() >= suppressClickUntil.current && !isDragging) onClick?.(block);
-      }}
-      onKeyDown={(event) => {
-        if (draggable) listeners?.onKeyDown?.(event);
-        if (event.defaultPrevented) return;
-        if ((event.key === 'Enter' || (!draggable && event.key === ' ')) && !isDragging) {
-          event.preventDefault();
-          onClick?.(block);
-        }
-      }}
       className={cn(
-        'group absolute left-1 right-1 overflow-hidden rounded-md border border-l-[3px] px-1.5 py-1 text-left shadow-sm outline-none transition-[box-shadow,opacity] focus-visible:ring-2 focus-visible:ring-primary',
-        draggable && 'cursor-grab touch-none active:cursor-grabbing',
+        'group absolute left-1 right-1 overflow-hidden rounded-md border border-l-[3px] text-left shadow-sm transition-[box-shadow,opacity]',
+        draggable && 'cursor-grab active:cursor-grabbing',
         fixed && 'border-dashed bg-muted/70',
         block.draft && 'border-primary/80 bg-primary/15 shadow-lg ring-1 ring-primary/35',
         block.completed && 'opacity-55',
         isDragging && 'opacity-25',
         active && 'shadow-xl ring-1 ring-primary/50',
-        compact && 'py-0.5',
       )}
     >
-      <div className="flex min-w-0 items-start gap-1">
-        {block.draft ? (
-          <Sparkles className="mt-0.5 h-3 w-3 shrink-0 text-primary" />
-        ) : fixed ? (
-          <LockKeyhole className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground" />
-        ) : editable ? (
-          <GripVertical className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground/70" />
-        ) : null}
-        <div className={cn('min-w-0 flex-1', draggable && block.kind === 'task' && onMoveToUntimed && 'pr-4')}>
-          <p
-            className={cn(
-              'truncate text-[11px] font-semibold leading-tight text-foreground',
-              block.completed && 'line-through',
+      <button
+        ref={setActivatorNodeRef}
+        type="button"
+        {...attributes}
+        {...listeners}
+        aria-label={`${block.title}, ${formatBlockTime(start, end)}, ${minutesLabel(duration)}`}
+        onClick={(event) => {
+          event.stopPropagation();
+          if (Date.now() >= suppressClickUntil.current && !isDragging) onClick?.(block);
+        }}
+        onKeyDown={(event) => {
+          if (draggable) listeners?.onKeyDown?.(event);
+          if (event.defaultPrevented) return;
+          if ((event.key === 'Enter' || (!draggable && event.key === ' ')) && !isDragging) {
+            event.preventDefault();
+            onClick?.(block);
+          }
+        }}
+        className={cn(
+          'absolute inset-0 z-0 w-full px-1.5 py-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary',
+          draggable && 'cursor-grab touch-none active:cursor-grabbing',
+          compact && 'py-0.5',
+        )}
+      >
+        <div className="flex min-w-0 items-start gap-1">
+          {block.draft ? (
+            <Sparkles className="mt-0.5 h-3 w-3 shrink-0 text-primary" />
+          ) : fixed ? (
+            <LockKeyhole className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground" />
+          ) : editable ? (
+            <GripVertical className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground/70" />
+          ) : null}
+          <div className={cn('min-w-0 flex-1', draggable && block.kind === 'task' && onMoveToUntimed && 'pr-4')}>
+            <p
+              className={cn(
+                'truncate text-[11px] font-semibold leading-tight text-foreground',
+                block.completed && 'line-through',
+              )}
+            >
+              {block.title}
+            </p>
+            {!compact && (
+              <p className="truncate text-[9px] leading-tight text-muted-foreground">
+                {formatBlockTime(start, end)}
+              </p>
             )}
-          >
-            {block.title}
-          </p>
-          {!compact && (
-            <p className="truncate text-[9px] leading-tight text-muted-foreground">
-              {formatBlockTime(start, end)}
-            </p>
-          )}
-          {roomy && (
-            <p className="mt-0.5 truncate text-[9px] leading-tight text-muted-foreground/80">
-              {block.draft ? `Draft · ${minutesLabel(duration)}` : block.subjectName || block.reason || minutesLabel(duration)}
-            </p>
-          )}
+            {roomy && (
+              <p className="mt-0.5 truncate text-[9px] leading-tight text-muted-foreground/80">
+                {block.draft ? `Draft · ${minutesLabel(duration)}` : block.subjectName || block.reason || minutesLabel(duration)}
+              </p>
+            )}
+          </div>
         </div>
-      </div>
+      </button>
 
       {draggable && block.kind === 'task' && onMoveToUntimed && (
         <button
@@ -315,13 +348,14 @@ function PositionedBlock({
         </button>
       )}
 
-      {draggable && (
+      {draggable && onResizeStart && onResizeKeyDown && (
         <button
           type="button"
-          aria-label={`Resize ${block.title}`}
-          title="Drag to change duration"
+          aria-label={`Resize ${block.title}. Current duration ${minutesLabel(duration)}. Use Arrow Up or Arrow Down to change by 15 minutes.`}
+          title="Drag, or use Arrow Up and Arrow Down, to change duration"
           data-size="icon-sm"
           onPointerDown={(event) => onResizeStart?.(event, block)}
+          onKeyDown={(event) => onResizeKeyDown(event, block)}
           className="absolute inset-x-1 bottom-0 z-20 h-2 cursor-ns-resize touch-none rounded-full opacity-0 transition-opacity after:absolute after:bottom-0.5 after:left-1/2 after:h-0.5 after:w-7 after:-translate-x-1/2 after:rounded-full after:bg-foreground/35 hover:opacity-100 focus-visible:opacity-100 group-hover:opacity-100"
         />
       )}
@@ -329,15 +363,52 @@ function PositionedBlock({
   );
 }
 
-function DayColumn({ day }: { day: Date }) {
+interface DayColumnProps {
+  day: Date;
+  keyboardStartMinute: () => number;
+  onActivate?: (
+    day: Date,
+    clientY: number,
+    columnTop: number,
+  ) => void;
+}
+
+function DayColumn({ day, keyboardStartMinute, onActivate }: DayColumnProps) {
   const { isOver, setNodeRef } = useDroppable({ id: `planner-day:${format(day, 'yyyy-MM-dd')}` });
+  const interactive = Boolean(onActivate);
+
+  const activate = (
+    event: ReactMouseEvent<HTMLDivElement> | ReactKeyboardEvent<HTMLDivElement>,
+    useKeyboardPosition = false,
+  ) => {
+    if (!onActivate) return;
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const clientY = useKeyboardPosition
+      ? bounds.top + keyboardStartMinute() * PIXELS_PER_MINUTE
+      : 'clientY' in event ? event.clientY : bounds.top;
+    onActivate(day, clientY, bounds.top);
+  };
 
   return (
     <div
       ref={setNodeRef}
       data-planner-day={format(day, 'yyyy-MM-dd')}
+      role={interactive ? 'button' : undefined}
+      tabIndex={interactive ? 0 : undefined}
+      aria-label={interactive ? `Create an item on ${format(day, 'EEEE, MMMM d')}` : undefined}
+      onClick={interactive ? event => {
+        // Keyboard activation is handled below so it receives a stable time.
+        if (event.detail === 0) return;
+        activate(event);
+      } : undefined}
+      onKeyDown={interactive ? event => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        activate(event, true);
+      } : undefined}
       className={cn(
         'relative border-r border-border/50 bg-background/25 transition-colors last:border-r-0',
+        interactive && 'cursor-cell outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary',
         isOver && 'bg-primary/5',
       )}
       style={{ height: GRID_HEIGHT }}
@@ -378,6 +449,7 @@ export function WeekTimeGrid({
   onBlockMove,
   onBlockResize,
   onBlockClick,
+  onEmptySlotClick,
   onBlockMoveToUntimed,
   onRequestFullscreen,
   untimedItems = [],
@@ -441,6 +513,26 @@ export function WeekTimeGrid({
     start: displayDateInTimeZone(block.startAt, resolvedTimeZone),
     end: displayDateInTimeZone(block.endAt, resolvedTimeZone),
   }] as const)), [resolvedTimeZone, validBlocks]);
+  const displaySegments = useMemo(() => validBlocks.flatMap((sourceBlock) => {
+    const interval = displayIntervals.get(sourceBlock.id);
+    if (!interval || !days[0]) return [];
+    return splitCalendarIntervalByDay(
+      interval.start,
+      interval.end,
+      days[0],
+      DAYS_IN_PLAN,
+    ).map((segment) => ({
+      ...segment,
+      sourceBlock,
+      displayBlock: segment.startsAtSource
+        ? sourceBlock
+        : {
+            ...sourceBlock,
+            id: `${sourceBlock.id}:continuation:${format(segment.start, 'yyyy-MM-dd')}`,
+          },
+      key: `${sourceBlock.id}:${format(segment.start, 'yyyy-MM-dd')}`,
+    }));
+  }), [days, displayIntervals, validBlocks]);
 
   const activeBlock = useMemo(
     () => validBlocks.find((block) => block.id === activeDragId) || null,
@@ -479,16 +571,28 @@ export function WeekTimeGrid({
   );
 
   const handleDragStart = useCallback((event: DragStartEvent) => {
+    suppressClickUntil.current = Date.now() + 1_000;
     setActiveDragId(String(event.active.id));
   }, []);
 
-  const handleDragCancel = useCallback(() => setActiveDragId(null), []);
+  const handleDragCancel = useCallback(() => {
+    suppressClickUntil.current = Date.now() + 250;
+    setActiveDragId(null);
+  }, []);
+
+  const canAutoScrollPlannerViewport = useCallback(
+    (element: Element) => element === scrollRef.current,
+    [],
+  );
 
   const handleDragEnd = useCallback(
     (event: DragEndEvent) => {
       const activeId = String(event.active.id);
       const untimedItem = untimedItems.find(item => item.id === activeId);
       const block = validBlocks.find((candidate) => candidate.id === String(event.active.id));
+      // A drag can end over an empty day. Suppress the click synthesized from
+      // that pointer release even when the move is rejected or unchanged.
+      suppressClickUntil.current = Date.now() + 250;
       setActiveDragId(null);
       if (!event.over) return;
 
@@ -557,11 +661,40 @@ export function WeekTimeGrid({
     [days, displayIntervals, invokeMove, onBlockMoveToUntimed, onUntimedItemSchedule, resolvedTimeZone, untimedItems, validBlocks],
   );
 
+  const handleEmptySlotClick = useCallback((
+    day: Date,
+    clientY: number,
+    columnTop: number,
+  ) => {
+    const nowTime = Date.now();
+    if (
+      !editable
+      || !onEmptySlotClick
+      || !canActivateEmptySlot({
+        now: nowTime,
+        suppressUntil: suppressClickUntil.current,
+        dragActive: Boolean(activeDragId),
+        resizeActive: Boolean(resizePreview),
+      })
+    ) return;
+
+    const startMinute = emptySlotStartMinute(clientY, columnTop);
+    const displayStart = addMinutes(startOfDay(day), startMinute);
+    const nextStart = instantFromDisplayDate(displayStart, resolvedTimeZone);
+    if (!nextStart) return;
+    const nextEnd = addMinutes(nextStart, DEFAULT_EMPTY_SLOT_DURATION_MINUTES);
+
+    // Prevent a double-click from opening two creation flows.
+    suppressClickUntil.current = nowTime + 250;
+    void Promise.resolve(onEmptySlotClick(nextStart, nextEnd));
+  }, [activeDragId, editable, onEmptySlotClick, resizePreview, resolvedTimeZone]);
+
   const handleResizeStart = useCallback(
     (event: ReactPointerEvent<HTMLButtonElement>, block: PlannerBlockView) => {
       if (!editable || isFixedBlock(block)) return;
       event.preventDefault();
       event.stopPropagation();
+      suppressClickUntil.current = Date.now() + 1_000;
 
       resizeCleanupRef.current?.();
 
@@ -605,6 +738,7 @@ export function WeekTimeGrid({
       const onPointerCancel = () => {
         cleanup();
         setResizePreview(null);
+        suppressClickUntil.current = Date.now() + 250;
       };
 
       resizeCleanupRef.current = cleanup;
@@ -612,6 +746,40 @@ export function WeekTimeGrid({
       window.addEventListener('pointerup', onPointerUp);
       window.addEventListener('pointercancel', onPointerCancel);
       setResizePreview({ blockId: block.id, end: originalEnd });
+    },
+    [displayIntervals, editable, onBlockResize, resolvedTimeZone],
+  );
+
+  const handleResizeKeyDown = useCallback(
+    (event: ReactKeyboardEvent<HTMLButtonElement>, block: PlannerBlockView) => {
+      if (!editable || !onBlockResize || isFixedBlock(block)) return;
+      const supportedKeys = ['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End'];
+      if (!supportedKeys.includes(event.key)) return;
+      event.preventDefault();
+      event.stopPropagation();
+
+      const displayInterval = displayIntervals.get(block.id);
+      if (!displayInterval) return;
+      const originalStart = displayInterval.start;
+      const originalEnd = displayInterval.end;
+      const originalDuration = Math.max(SNAP_MINUTES, differenceInMinutes(originalEnd, originalStart));
+      const maximumDuration = MINUTES_PER_DAY - minutesIntoDay(originalStart);
+      let nextDuration = originalDuration;
+      if (event.key === 'ArrowUp') nextDuration -= SNAP_MINUTES;
+      if (event.key === 'ArrowDown') nextDuration += SNAP_MINUTES;
+      if (event.key === 'PageUp') nextDuration -= 60;
+      if (event.key === 'PageDown') nextDuration += 60;
+      if (event.key === 'Home') nextDuration = SNAP_MINUTES;
+      if (event.key === 'End') nextDuration = maximumDuration;
+      nextDuration = clamp(nextDuration, SNAP_MINUTES, maximumDuration);
+      if (nextDuration === originalDuration) return;
+
+      const nextEnd = addMinutes(originalStart, nextDuration);
+      const actualStart = instantFromDisplayDate(originalStart, resolvedTimeZone);
+      const actualEnd = instantFromDisplayDate(nextEnd, resolvedTimeZone);
+      if (!actualStart || !actualEnd || actualEnd <= actualStart) return;
+      suppressClickUntil.current = Date.now() + 250;
+      void Promise.resolve(onBlockResize(block, actualStart, actualEnd));
     },
     [displayIntervals, editable, onBlockResize, resolvedTimeZone],
   );
@@ -651,7 +819,16 @@ export function WeekTimeGrid({
 
       <DndContext
         sensors={sensors}
-        autoScroll={false}
+        autoScroll={{
+          // Only move the schedule viewport itself. Letting dnd-kit discover
+          // every scrollable ancestor made the page jump while users aimed at
+          // the untimed shelf, and could invalidate the final drop target.
+          canScroll: canAutoScrollPlannerViewport,
+          threshold: { x: 0, y: 0.06 },
+          acceleration: 3,
+          interval: 16,
+          layoutShiftCompensation: { x: false, y: true },
+        }}
         collisionDetection={(args) => {
           const pointerCollisions = pointerWithin(args);
           if (args.pointerCoordinates) {
@@ -753,10 +930,7 @@ export function WeekTimeGrid({
               </div>
 
               {days.map((day) => {
-                const dayBlocks = validBlocks.filter((block) => {
-                  const interval = displayIntervals.get(block.id);
-                  return Boolean(interval && isSameDay(interval.start, day));
-                });
+                const dayBlocks = displaySegments.filter((segment) => isSameDay(segment.start, day));
                 const today = isSameDay(day, displayNow);
                 const currentMinute = minutesIntoDay(displayNow);
 
@@ -769,7 +943,14 @@ export function WeekTimeGrid({
                     )}
                     style={{ height: GRID_HEIGHT }}
                   >
-                    <DayColumn day={day} />
+                    <DayColumn
+                      day={day}
+                      keyboardStartMinute={() => keyboardEmptySlotStartMinute(
+                        scrollRef.current?.scrollTop,
+                        initialScrollHour * 60,
+                      )}
+                      onActivate={editable && onEmptySlotClick ? handleEmptySlotClick : undefined}
+                    />
 
                     {today && (
                       <div
@@ -781,25 +962,24 @@ export function WeekTimeGrid({
                       </div>
                     )}
 
-                    {dayBlocks.map((block) => {
-                      const interval = displayIntervals.get(block.id);
-                      if (!interval) return null;
-                      const start = interval.start;
-                      const end = resizePreview?.blockId === block.id
+                    {dayBlocks.map((segment) => {
+                      const { displayBlock, sourceBlock, start } = segment;
+                      const end = segment.startsAtSource && resizePreview?.blockId === sourceBlock.id
                         ? resizePreview.end
-                        : interval.end;
+                        : segment.end;
                       return (
                         <PositionedBlock
-                          key={block.id}
-                          block={block}
+                          key={segment.key}
+                          block={displayBlock}
                           start={start}
                           end={end}
-                          editable={editable}
-                          active={activeDragId === block.id}
+                          editable={editable && segment.startsAtSource}
+                          active={segment.startsAtSource && activeDragId === sourceBlock.id}
                           suppressClickUntil={suppressClickUntil}
-                          onClick={onBlockClick}
-                          onMoveToUntimed={onBlockMoveToUntimed}
-                          onResizeStart={handleResizeStart}
+                          onClick={onBlockClick ? () => onBlockClick(sourceBlock) : undefined}
+                          onMoveToUntimed={segment.startsAtSource ? onBlockMoveToUntimed : undefined}
+                          onResizeStart={segment.startsAtSource && onBlockResize ? handleResizeStart : undefined}
+                          onResizeKeyDown={segment.startsAtSource && onBlockResize ? handleResizeKeyDown : undefined}
                         />
                       );
                     })}

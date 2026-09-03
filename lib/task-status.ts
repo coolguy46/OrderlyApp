@@ -113,8 +113,11 @@ export function taskDueDayDistance(
 }
 
 /**
- * An unfinished task belongs in Missing only after its deadline date is
- * before the current local date. Same-day overdue tasks stay in Today's Tasks.
+ * Whether an unfinished task belongs in the Missing view.
+ *
+ * A task that passed its deadline earlier today is overdue, but it remains in
+ * today's workload until the user's local day ends. It becomes "missing" only
+ * after its deadline date is before the current local date.
  */
 export function isTaskMissingFromPriorDay(
   task: Task,

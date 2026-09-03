@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useRef, useEffect } from 'react';
+import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { useAppStore } from '@/lib/store';
 import { useRouter } from 'next/navigation';
 import { useHotkeys } from '@/lib/useHotkeys';
@@ -29,12 +29,9 @@ import {
   ArrowLeft,
 } from 'lucide-react';
 import Link from 'next/link';
+import Image from 'next/image';
 
-interface HeaderProps {
-  onMobileMenuToggle?: () => void;
-}
-
-export function Header({ onMobileMenuToggle }: HeaderProps) {
+export function Header() {
   const router = useRouter();
   const { user, logout, tasks, goals, exams } = useAppStore();
   const [searchOpen, setSearchOpen] = useState(false);
@@ -42,6 +39,21 @@ export function Header({ onMobileMenuToggle }: HeaderProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const searchInputRef = useRef<HTMLInputElement>(null);
   const mobileSearchInputRef = useRef<HTMLInputElement>(null);
+  const mobileSearchTriggerRef = useRef<HTMLButtonElement>(null);
+  const mobileSearchDialogRef = useRef<HTMLDivElement>(null);
+  const mobileSearchReturnFocusRef = useRef<HTMLElement | null>(null);
+
+  const openMobileSearch = useCallback(() => {
+    mobileSearchReturnFocusRef.current = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : mobileSearchTriggerRef.current;
+    setMobileSearchOpen(true);
+  }, []);
+
+  const closeMobileSearch = useCallback(() => {
+    setMobileSearchOpen(false);
+    setSearchQuery('');
+  }, []);
 
   // Keyboard shortcut: Ctrl+K to open search
   useHotkeys([
@@ -57,8 +69,7 @@ export function Header({ onMobileMenuToggle }: HeaderProps) {
       key: 'Escape',
       handler: () => {
         setSearchOpen(false);
-        setMobileSearchOpen(false);
-        setSearchQuery('');
+        closeMobileSearch();
       },
     },
   ]);
@@ -86,8 +97,7 @@ export function Header({ onMobileMenuToggle }: HeaderProps) {
 
   const handleSearchSelect = (href: string) => {
     setSearchOpen(false);
-    setMobileSearchOpen(false);
-    setSearchQuery('');
+    closeMobileSearch();
     router.push(href);
   };
 
@@ -105,11 +115,42 @@ export function Header({ onMobileMenuToggle }: HeaderProps) {
     return () => document.removeEventListener('mousedown', handleClick);
   }, [searchOpen]);
 
-  // Focus mobile search input when opened
+  // Keep keyboard focus inside the mobile dialog and return it to the control
+  // that opened the dialog when search closes.
   useEffect(() => {
-    if (mobileSearchOpen) {
-      setTimeout(() => mobileSearchInputRef.current?.focus(), 100);
+    if (!mobileSearchOpen) {
+      if (mobileSearchReturnFocusRef.current) {
+        const returnTarget = mobileSearchReturnFocusRef.current;
+        mobileSearchReturnFocusRef.current = null;
+        requestAnimationFrame(() => returnTarget.focus());
+      }
+      return;
     }
+
+    const focusTimer = window.setTimeout(() => mobileSearchInputRef.current?.focus(), 100);
+    const handleDialogKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Tab') return;
+      const dialog = mobileSearchDialogRef.current;
+      if (!dialog) return;
+      const focusable = Array.from(dialog.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), input:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])',
+      )).filter(element => !element.hasAttribute('hidden'));
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', handleDialogKeyDown);
+    return () => {
+      window.clearTimeout(focusTimer);
+      document.removeEventListener('keydown', handleDialogKeyDown);
+    };
   }, [mobileSearchOpen]);
 
   const renderSearchResults = () => {
@@ -201,7 +242,7 @@ export function Header({ onMobileMenuToggle }: HeaderProps) {
         <div className="h-full flex items-center justify-between px-4 sm:px-8 gap-3 sm:gap-8">
           {/* Left side: Logo on mobile, hamburger hidden since we have bottom nav */}
           <div className="flex items-center gap-3 lg:hidden shrink-0">
-            <img src="/logo.svg" alt="Orderly" className="w-8 h-8 rounded-lg" />
+            <Image src="/logo.svg" alt="Orderly" width={32} height={32} className="w-8 h-8 rounded-lg" priority />
             <span className="font-bold text-base font-display tracking-tight">Orderly</span>
           </div>
 
@@ -211,6 +252,7 @@ export function Header({ onMobileMenuToggle }: HeaderProps) {
               <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none z-10" />
               <Input 
                 ref={searchInputRef}
+                aria-label="Search tasks, goals, and exams"
                 placeholder="Search tasks, goals, exams..." 
                 className="!pl-12 bg-muted/30 border-border/50 focus:bg-background/80 transition-colors"
                 value={searchQuery}
@@ -243,12 +285,14 @@ export function Header({ onMobileMenuToggle }: HeaderProps) {
           <div className="flex items-center gap-1.5 sm:gap-3">
             {/* Mobile search trigger */}
             <Button
+              ref={mobileSearchTriggerRef}
               variant="ghost"
               size="icon"
               className="sm:hidden h-10 w-10"
-              onClick={() => setMobileSearchOpen(true)}
+              onClick={openMobileSearch}
+              aria-label="Open search"
             >
-              <Search className="w-5 h-5" />
+              <Search className="w-5 h-5" aria-hidden="true" />
             </Button>
 
             {/* User Menu */}
@@ -270,7 +314,7 @@ export function Header({ onMobileMenuToggle }: HeaderProps) {
                   <div className="flex flex-col">
                     <span>{user?.full_name || 'Demo User'}</span>
                     <span className="text-xs font-normal text-muted-foreground">
-                      {user?.tasks_completed || 0} tasks completed • {user?.current_streak || 0} day streak
+                      {user?.tasks_completed || 0} tasks completed
                     </span>
                   </div>
                 </DropdownMenuLabel>
@@ -302,12 +346,17 @@ export function Header({ onMobileMenuToggle }: HeaderProps) {
       <AnimatePresence>
         {mobileSearchOpen && (
           <motion.div
+            ref={mobileSearchDialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="mobile-search-title"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.15 }}
             className="fixed inset-0 z-50 bg-background sm:hidden"
           >
+            <h2 id="mobile-search-title" className="sr-only">Search Orderly</h2>
             <div className="flex flex-col h-full safe-area-top">
               {/* Search header */}
               <div className="flex items-center gap-3 px-4 h-14 border-b border-border/40">
@@ -315,14 +364,16 @@ export function Header({ onMobileMenuToggle }: HeaderProps) {
                   variant="ghost"
                   size="icon"
                   className="h-10 w-10 shrink-0"
-                  onClick={() => { setMobileSearchOpen(false); setSearchQuery(''); }}
+                  onClick={closeMobileSearch}
+                  aria-label="Close search"
                 >
-                  <ArrowLeft className="w-5 h-5" />
+                  <ArrowLeft className="w-5 h-5" aria-hidden="true" />
                 </Button>
                 <div className="relative flex-1">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" aria-hidden="true" />
                   <Input
                     ref={mobileSearchInputRef}
+                    aria-label="Search tasks, goals, and exams"
                     placeholder="Search..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
@@ -331,10 +382,12 @@ export function Header({ onMobileMenuToggle }: HeaderProps) {
                   />
                   {searchQuery && (
                     <button
+                      type="button"
                       onClick={() => setSearchQuery('')}
+                      aria-label="Clear search"
                       className="absolute right-3 top-1/2 -translate-y-1/2 p-1"
                     >
-                      <X className="w-4 h-4 text-muted-foreground" />
+                      <X className="w-4 h-4 text-muted-foreground" aria-hidden="true" />
                     </button>
                   )}
                 </div>

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { AnimatePresence, motion } from 'framer-motion';
@@ -12,6 +12,7 @@ import {
   plannerBlockMatchesTaskCompletion,
   plannerFeedbackEntityKey,
 } from './adapters';
+import { useHydrated } from '@/lib/use-hydrated';
 
 function dismissalStorageKey(userId: string): string {
   return `orderly-planner-feedback-dismissed-${userId}`;
@@ -35,14 +36,13 @@ export function PlannerFeedbackNudge() {
   const { user, tasks } = useAppStore();
   const plannerRecord = usePlannerStore(state => user ? state.users[user.id] : undefined);
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
-
-  useEffect(() => {
-    if (!user) {
-      setDismissed(new Set());
-      return;
-    }
-    setDismissed(new Set(readDismissed(user.id)));
-  }, [user?.id]);
+  const hydrated = useHydrated();
+  const dismissedUserId = hydrated ? user?.id || '' : '';
+  const [loadedDismissalsFor, setLoadedDismissalsFor] = useState('');
+  if (loadedDismissalsFor !== dismissedUserId) {
+    setLoadedDismissalsFor(dismissedUserId);
+    setDismissed(new Set(dismissedUserId ? readDismissed(dismissedUserId) : []));
+  }
 
   const candidate = useMemo(() => {
     const plan = plannerRecord?.currentPlan;

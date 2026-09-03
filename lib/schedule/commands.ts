@@ -35,6 +35,8 @@ export interface ScheduleCommandBusyInterval {
   startAt: string;
   endAt: string;
   taskId?: string | null;
+  commitmentId?: string | null;
+  occurrenceDate?: LocalDate | null;
 }
 
 export interface ScheduleCommandContext {
@@ -45,6 +47,7 @@ export interface ScheduleCommandContext {
   occurrences: readonly ScheduleOccurrence[];
   busy?: readonly ScheduleCommandBusyInterval[];
   selectedTaskId?: string | null;
+  selectedEventId?: string | null;
   selectedDate?: LocalDate | null;
   availableStartTime?: string;
   availableEndTime?: string;
@@ -76,9 +79,27 @@ export interface ScheduleCommandBatchAction {
   operations: ScheduleBatchOperation[];
 }
 
+export interface ScheduleCommandUpdateEventAction {
+  type: 'update_event';
+  commitmentId: string;
+  occurrenceDate: LocalDate;
+  title: string;
+  schedule: ScheduleEntryInput;
+}
+
+export interface ScheduleCommandRemoveEventAction {
+  type: 'remove_event';
+  commitmentId: string;
+  occurrenceDate: LocalDate;
+  title: string;
+  wholeSeries: boolean;
+}
+
 export type ScheduleCommandAction =
   | ScheduleCommandCreateTaskAction
   | ScheduleCommandCreateEventAction
+  | ScheduleCommandUpdateEventAction
+  | ScheduleCommandRemoveEventAction
   | ScheduleCommandBatchAction;
 
 export interface ScheduleCommandEventCommitmentOptions {
@@ -243,6 +264,84 @@ function localDayOfWeek(value: LocalDate): number {
   return dateFromLocalDate(value).getUTCDay();
 }
 
+function humanScheduleDate(value: LocalDate): string {
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: 'UTC',
+    weekday: 'long',
+    month: 'short',
+    day: 'numeric',
+  }).format(dateFromLocalDate(value));
+}
+
+function humanScheduleClock(value: string, timeZone: string): string | null {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  }).format(date).replace(':00 ', ' ');
+}
+
+function humanSchedulePlacement(
+  schedule: ScheduleEntryInput,
+  timeZone: string,
+): string {
+  const date = schedule.scheduledDate && isLocalDate(schedule.scheduledDate)
+    ? humanScheduleDate(schedule.scheduledDate)
+    : null;
+  const start = schedule.startAt ? humanScheduleClock(schedule.startAt, timeZone) : null;
+  const duration = schedule.durationSeconds;
+  const end = schedule.startAt && duration && duration > 0
+    ? humanScheduleClock(
+        new Date(new Date(schedule.startAt).getTime() + duration * 1_000).toISOString(),
+        timeZone,
+      )
+    : null;
+  const timing = [date, start && end ? `${start}–${end}` : start].filter(Boolean).join(', ');
+  const repeat = schedule.recurrence === 'daily'
+    ? ' every day'
+    : schedule.recurrence === 'weekly'
+      ? ' weekly'
+      : '';
+  return timing ? `${timing}${repeat}`.trim() : 'without a set time';
+}
+
+/** Produce concrete, user-facing copy for a still-unsaved calendar draft. */
+export function describeScheduleCommandDraft(
+  preview: ScheduleCommandPreview,
+  timeZone: string,
+): string {
+  const lines = preview.actions.flatMap(action => {
+    if (action.type === 'create_task' || action.type === 'create_event') {
+      const type = action.type === 'create_event' ? 'event' : 'task';
+      return [`**${action.title}** is set as ${type === 'event' ? 'an event' : 'a task'} in the draft for ${humanSchedulePlacement(action.schedule, timeZone)}.`];
+    }
+    if (action.type === 'update_event') {
+      return [`**${action.title}** is moved in the draft to ${humanSchedulePlacement(action.schedule, timeZone)}.`];
+    }
+    if (action.type === 'remove_event') {
+      return [`**${action.title}** is marked for removal${action.wholeSeries ? ' as a repeating event' : ` on ${humanScheduleDate(action.occurrenceDate)}`}.`];
+    }
+    const batchTaskIds = new Set(action.operations.map(operation => operation.taskId));
+    const occurrenceLines = preview.occurrences
+      .filter(occurrence => occurrence.taskId && batchTaskIds.has(occurrence.taskId))
+      .map(occurrence => {
+      const schedule: ScheduleEntryInput = {
+        scheduledDate: occurrence.date,
+        startAt: occurrence.startAt,
+        durationSeconds: occurrence.durationSeconds,
+      };
+      return `**${occurrence.title}** is set in the draft for ${humanSchedulePlacement(schedule, timeZone)}.`;
+      });
+    return occurrenceLines.length > 0 ? occurrenceLines : [preview.summary];
+  });
+  const uniqueLines = [...new Set(lines)];
+  return uniqueLines.length === 1
+    ? uniqueLines[0]
+    : `I set these in the draft:\n${uniqueLines.map(line => `- ${line}`).join('\n')}`;
+}
 /** Convert a validated event command into the planner's durable event shape. */
 export function scheduleEventActionToCommitment(
   action: ScheduleCommandCreateEventAction,
@@ -284,6 +383,8 @@ export function scheduleEventActionToCommitment(
     return {
       id: options.id,
       title: action.title,
+      description: action.description,
+      location: null,
       kind: action.kind,
       daysOfWeek,
       startTime: localStart.time,
@@ -560,8 +661,11 @@ function recurrenceFromText(
   }
 
   const namedDays = DAY_NAMES.flatMap((day, index) => {
-    const full = new RegExp(`\\b(?:every|each|on)\\s+${day}s?\\b`, 'i');
-    const abbreviated = new RegExp(`\\b(?:every|each|on)\\s+${day.slice(0, 3)}\\b`, 'i');
+    // "on Wednesday" selects one calendar date. Only every/each Wednesday is
+    // a recurrence request; treating a plain date anchor as a repeat rule made
+    // one-time Assistant events silently recur forever.
+    const full = new RegExp(`\\b(?:every|each)\\s+${day}s?\\b`, 'i');
+    const abbreviated = new RegExp(`\\b(?:every|each)\\s+${day.slice(0, 3)}\\b`, 'i');
     return full.test(text) || abbreviated.test(text) ? [index] : [];
   });
   if (namedDays.length > 0 && recurrence !== 'daily') {
@@ -628,12 +732,30 @@ function stripTrailingScheduleDetails(value: string): string {
     .replace(/\s+\b(?:through|until|ending(?:\s+on)?)\b[\s\S]*$/i, '')
     .replace(/\s+\b(?:day\s+after\s+tomorrow|today|tonight|tomorrow)\b[\s\S]*$/i, '')
     .replace(/\s+\b(?:(?:next\s+)+|this\s+|on\s+)(?:sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b[\s\S]*$/i, '')
+    .replace(/\s+\b(?:sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b[\s\S]*$/i, '')
     .replace(/\s+\b(?:on\s+)?(?:\d{4}-\d{1,2}-\d{1,2}|\d{1,2}\/\d{1,2}(?:\/\d{2,4})?)\b[\s\S]*$/i, '')
     .replace(new RegExp(`\\s+\\b(?:on\\s+)?(?:${Object.keys(MONTHS).join('|')})\\s+\\d{1,2}(?:st|nd|rd|th)?(?:,?\\s+\\d{4})?\\b[\\s\\S]*$`, 'i'), '')
     .replace(/\s+\b(?:at|from|starting(?:\s+at)?|between)\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?\b[\s\S]*$/i, '')
     .trim();
 }
 
+const EVENT_NOUN_SCHEDULE_BOUNDARY = '(?:on\\s+(?:today|tonight|tomorrow|sunday|monday|tuesday|wednesday|thursday|friday|saturday|\\d{4}-\\d{1,2}-\\d{1,2}|\\d{1,2}\\/\\d{1,2}(?:\\/\\d{2,4})?)|today\\b|tonight\\b|tomorrow\\b|at\\s+\\d|from\\s+\\d|between\\s+\\d|every\\b|each\\b)';
+
+/**
+ * Repair the two common spellings of "event" only where an item-type noun
+ * belongs. In particular, `even` is not normalized in ordinary titles such as
+ * "Even Numbers task" or prose such as "even if it overlaps".
+ */
+function normalizeEventNounTypoAtBoundary(value: string): string {
+  const beforeSchedule = new RegExp(
+    `\\b(?:even|evnet)\\b(?=\\s+${EVENT_NOUN_SCHEDULE_BOUNDARY})`,
+    'gi',
+  );
+  const immediatelyAfterAction = /((?:^|\b)(?:add|schedule|create|put|plan|include|fit\s+in)\s+(?:me\s+)?(?:a\s+|an\s+|the\s+))evnet\b/gi;
+  return value
+    .replace(beforeSchedule, 'event')
+    .replace(immediatelyAfterAction, '$1event');
+}
 interface RequestedNewCalendarEntity {
   type: 'task' | 'event';
   kind: CommitmentKind | null;
@@ -645,48 +767,76 @@ interface RequestedNewCalendarEntity {
  * and deadline behavior.
  */
 function requestedNewCalendarEntity(command: string): RequestedNewCalendarEntity {
-  const actionable = withoutConversationalCommandPrefix(command);
+  const actionable = normalizeEventNounTypoAtBoundary(
+    withoutConversationalCommandPrefix(command),
+  );
   const mutation = actionable.match(
     /^(?:add|schedule|create|put|plan|include|fit\s+in)\s+(?:me\s+)?(?:a\s+|an\s+)?([\s\S]+)$/i,
   );
   if (!mutation) return { type: 'task', kind: null };
-  const target = mutation[1];
+  const target = stripTrailingScheduleDetails(mutation[1])
+    .replace(/[.!?,;:\s]+$/g, '')
+    .trim();
+  const nounTarget = target
+    .replace(/^(?:me\s+)?(?:a\s+|an\s+|the\s+)?/i, '')
+    .trim();
 
-  // Explicit task language wins even when its title mentions an event, e.g.
-  // "create a task to prepare for the game".
-  if (/\b(?:task|assignment|homework|to[ -]?do)\b/i.test(target)) {
+  // A leading or trailing entity noun is the user's explicit type. Restrict
+  // this check to the boundary so ordinary title prose such as "task to
+  // prepare for the game" remains a task while "hiking event" remains an
+  // event. Searching the entire title made any later word "task" win.
+  if (/^(?:task|assignment|homework|to[ -]?do)\b/i.test(nounTarget)
+    || /\b(?:task|assignment|homework|to[ -]?do)$/i.test(nounTarget)) {
     return { type: 'task', kind: null };
   }
-  const eventKind: CommitmentKind | null = /\b(?:meeting|appointment)\b/i.test(target)
+  const eventKind: CommitmentKind | null = /\b(?:meeting|appointment)\b/i.test(nounTarget)
     ? 'appointment'
-    : /\bgame\b/i.test(target)
+    : /\bgame\b/i.test(nounTarget)
       ? 'sports'
-      : /\bclass\b/i.test(target)
+      : /\bclass\b/i.test(nounTarget)
         ? 'class'
         : null;
-  if (/^(?:calendar\s+)?event\b/i.test(target) || eventKind) {
+  if (/^(?:calendar\s+)?event\b/i.test(nounTarget)
+    || /\b(?:calendar\s+)?event$/i.test(nounTarget)
+    || eventKind) {
     return { type: 'event', kind: eventKind || 'other' };
   }
   return { type: 'task', kind: null };
 }
 
 function activityTitle(text: string, duration: ParsedDuration | null): string {
+  const normalizedText = normalizeEventNounTypoAtBoundary(text);
+  // An explicit name is authoritative. Do this before scanning for activity
+  // verbs because ordinary titles such as “Soccer Practice” otherwise look
+  // like the verb “practice” and lose their leading words.
+  const explicitName = normalizedText.match(/\b(?:called|named)\s+([\s\S]+)$/i)?.[1];
+  if (explicitName) {
+    const namedTitle = stripTrailingScheduleDetails(explicitName)
+      .replace(/[.!?,;:\s]+$/g, '')
+      .trim();
+    if (namedTitle) return titleCase(namedTitle);
+  }
   const actionPattern = /\b(?:study(?:\s+for)?|practice|review|read|exercise|train|work\s+on|prepare\s+for|meditate|write|code)\b/gi;
-  const actionMatches = [...text.matchAll(actionPattern)];
+  const actionMatches = [...normalizedText.matchAll(actionPattern)];
   const actionMatch = actionMatches[actionMatches.length - 1];
   const durationComesAfterAction = actionMatch?.index !== undefined
     && (duration?.index === undefined || duration.index > actionMatch.index);
-  const cutoff = durationComesAfterAction ? duration?.index ?? text.length : text.length;
+  const cutoff = durationComesAfterAction ? duration?.index ?? normalizedText.length : normalizedText.length;
   let value = actionMatch?.index !== undefined
-    ? text.slice(actionMatch.index, cutoff)
-    : text.slice(0, duration?.index ?? text.length);
+    ? normalizedText.slice(actionMatch.index, cutoff)
+    : normalizedText.slice(0, duration?.index ?? normalizedText.length);
   value = stripTrailingScheduleDetails(value
     .replace(/^(?:please\s+)?(?:can\s+you\s+)?(?:add|schedule|create|put|plan|include|fit\s+in)\s+/i, '')
     .replace(/^(?:me\s+)?(?:a\s+|an\s+)?(?:task|event|block)\s+(?:called\s+|named\s+|to\s+)?/i, '')
     .replace(/^(?:me\s+)?(?:a\s+)?(?:week\s+)?(?:where\s+)?(?:i|it)\s+(?:can\s+|will\s+|has\s+)?/i, '')
+    .replace(/^(?:a|an|the)\s+/i, '')
+    .replace(/\s+(?:task|event|block)\s*$/i, '')
     .replace(/\bfor\s*$/i, '')
     .replace(/[,:-]+$/g, '')
     .trim());
+  value = value
+    .replace(/\s+(?:task|event|block)\s*$/i, '')
+    .trim();
 
   const study = value.match(/^study\s+for\s+(.+)$/i) || value.match(/^study\s+(.+)$/i);
   if (study) return `${titleCase(study[1].replace(/^(?:the|my)\s+/i, '').trim())} Study`;
@@ -732,6 +882,58 @@ function resolveTask(
     : null;
   if (selected) return { task: selected, candidates: best };
   return { task: best.length === 1 ? best[0] : null, candidates: best };
+}
+
+interface ResolvedScheduledEvent {
+  event: ScheduleCommandBusyInterval | null;
+  candidates: ScheduleCommandBusyInterval[];
+}
+
+function scheduledEventCandidates(context: ScheduleCommandContext): ScheduleCommandBusyInterval[] {
+  const unique = new Map<string, ScheduleCommandBusyInterval>();
+  for (const item of context.busy || []) {
+    if (!item.commitmentId || !item.occurrenceDate) continue;
+    const key = `${item.commitmentId}:${item.occurrenceDate}`;
+    if (!unique.has(key)) unique.set(key, item);
+  }
+  return [...unique.values()].sort((left, right) => (
+    left.startAt.localeCompare(right.startAt)
+    || left.title.localeCompare(right.title)
+  ));
+}
+
+function resolveScheduledEvent(text: string, context: ScheduleCommandContext): ResolvedScheduledEvent {
+  const candidates = scheduledEventCandidates(context);
+  const pronoun = /\b(?:it|this|that|selected event)\b/i.test(text);
+  if (pronoun && context.selectedEventId) {
+    const selected = candidates.filter(item => item.commitmentId === context.selectedEventId);
+    if (selected.length > 0) return { event: selected[0], candidates: selected };
+  }
+
+  const normalizedText = normalizeWords(text);
+  const included = candidates.filter(item => {
+    const title = normalizeWords(item.title);
+    return title.length >= 2 && normalizedText.includes(title);
+  }).sort((left, right) => normalizeWords(right.title).length - normalizeWords(left.title).length);
+  if (included.length > 0) {
+    const bestLength = normalizeWords(included[0].title).length;
+    const best = included.filter(item => normalizeWords(item.title).length === bestLength);
+    const selected = context.selectedEventId
+      ? best.find(item => item.commitmentId === context.selectedEventId)
+      : null;
+    return { event: selected || (best.length === 1 ? best[0] : null), candidates: best };
+  }
+
+  const commandTokens = new Set(normalizedText.split(' ').filter(token => token.length > 1));
+  const scored = candidates.map(event => {
+    const tokens = normalizeWords(event.title).split(' ').filter(Boolean);
+    const matches = tokens.filter(token => commandTokens.has(token)).length;
+    return { event, score: tokens.length ? matches / tokens.length : 0 };
+  }).filter(item => item.score >= 0.6)
+    .sort((left, right) => right.score - left.score || left.event.title.localeCompare(right.event.title));
+  if (scored.length === 0) return { event: null, candidates: [] };
+  const best = scored.filter(item => item.score === scored[0].score).map(item => item.event);
+  return { event: best.length === 1 ? best[0] : null, candidates: best };
 }
 
 function entryForTask(context: ScheduleCommandContext, taskId: string): ScheduleEntry | null {
@@ -820,7 +1022,19 @@ function hasExplicitDirectScheduleIntent(value: string): boolean {
  * interpreter without an AI rewrite.
  */
 function splitExplicitDirectScheduleOperations(value: string): string[] | null {
-  const boundary = /(?:[;\n]+|\b(?:and\s+then|then|also|and)\b)\s*(?=(?:(?:please|actually|just)\s+)*(?:(?:can|could|would|will)\s+(?:you|u)\s+)?(?:add|schedule|create|put|plan|include|fit\s+in|move|reschedule|shift|resize|extend|shorten|repeat|delete|remove|unschedule|clear)\b)/gi;
+  const actionable = withoutConversationalCommandPrefix(value);
+  const leadingAction = actionable.match(/^(add|schedule|create|put|plan|include|fit\s+in)\b/i)?.[1] || null;
+  const explicitBoundary = '(?=(?:(?:please|actually|just)\\s+)*(?:(?:can|could|would|will)\\s+(?:you|u)\\s+)?(?:add|schedule|create|put|plan|include|fit\\s+in|move|reschedule|shift|resize|extend|shorten|repeat|delete|remove|unschedule|clear)\\b)';
+  // Also accept a deliberately narrow elided add clause: "add a Hiking
+  // event ... and a Pickleball task on Thursday ...". Requiring the entity
+  // noun plus a date/time anchor avoids splitting ordinary compound titles.
+  const elidedBoundary = leadingAction
+    ? '(?=(?:a\\s+|an\\s+|the\\s+)?[^;\\n]{1,120}?\\b(?:task|event|evnet|even)\\b[^;\\n]{0,120}?\\b(?:today|tonight|tomorrow|sunday|monday|tuesday|wednesday|thursday|friday|saturday|\\d{4}-\\d{1,2}-\\d{1,2}|at\\s+\\d|from\\s+\\d))'
+    : '(?!)';
+  const boundary = new RegExp(
+    `(?:[;\\n]+|\\b(?:and\\s+then|then|also|and|plus)\\b)\\s*(?:${explicitBoundary}|${elidedBoundary})`,
+    'gi',
+  );
   const boundaries = [...value.matchAll(boundary)];
   if (boundaries.length === 0) return null;
 
@@ -837,11 +1051,13 @@ function splitExplicitDirectScheduleOperations(value: string): string[] | null {
   if (!finalPart) return null;
   parts.push(finalPart);
 
-  // Every fragment must independently authorize a calendar operation. If any
-  // part is ordinary prose, leave the whole message to chat instead.
-  return parts.length > 1 && parts.every(hasExplicitDirectScheduleIntent)
-    ? parts
-    : null;
+  if (parts.length <= 1) return null;
+  const normalizedParts = parts.map((part, index) => {
+    if (hasExplicitDirectScheduleIntent(part)) return part;
+    if (index > 0 && leadingAction) return `${leadingAction} ${part}`;
+    return '';
+  });
+  return normalizedParts.every(Boolean) ? normalizedParts : null;
 }
 
 function hasMultipleDirectScheduleOperations(value: string): boolean {
@@ -951,11 +1167,12 @@ function guardSchedulePlacement(
 function previewForAdd(command: string, context: ScheduleCommandContext): ScheduleCommandPreview {
   const preview = emptyPreview(command);
   preview.kind = 'add';
+  const interpretedCommand = normalizeEventNounTypoAtBoundary(command);
   const assumptions: string[] = [];
-  const date = parseNaturalDate(command, context);
+  const date = parseNaturalDate(interpretedCommand, context);
   if (!date.explicit) assumptions.push(`Used ${date.date} because no date was provided.`);
-  const durationMatch = parseDuration(command);
-  const range = parseTimeRange(command);
+  const durationMatch = parseDuration(interpretedCommand);
+  const range = parseTimeRange(interpretedCommand);
   if (range.equalEndpoints) {
     return { ...preview, status: 'clarification', summary: 'The start and end time are the same. Choose a later end time, or give me an explicit duration.' };
   }
@@ -975,15 +1192,15 @@ function previewForAdd(command: string, context: ScheduleCommandContext): Schedu
     return { ...preview, status: 'clarification', summary: 'How long should this activity take? Try “for 45 minutes” or “from 4 pm to 5 pm”.' };
   }
   if (range.start?.assumption) assumptions.push(range.start.assumption);
-  const recurrence = recurrenceFromText(command, date.date, context);
+  const recurrence = recurrenceFromText(interpretedCommand, date.date, context);
   if (recurrence.recurrenceEndDate && recurrence.recurrenceEndDate < date.date) {
     return { ...preview, status: 'clarification', summary: 'The repeat end date must be on or after the first scheduled date.' };
   }
-  const title = activityTitle(command, durationMatch);
-  const requestedEntity = requestedNewCalendarEntity(command);
+  const title = activityTitle(interpretedCommand, durationMatch);
+  const requestedEntity = requestedNewCalendarEntity(interpretedCommand);
   const existing = requestedEntity.type === 'event'
     ? { task: null, candidates: [] as Task[] }
-    : resolveTask(command, context);
+    : resolveTask(interpretedCommand, context);
   if (!existing.task && existing.candidates.length > 1) {
     return {
       ...preview,
@@ -995,7 +1212,7 @@ function previewForAdd(command: string, context: ScheduleCommandContext): Schedu
   const schedule = scheduleInput(context, date.date, range.start?.time || null, durationSeconds, recurrence);
   if (!schedule) return { ...preview, summary: 'That local date or time does not exist in your timezone.' };
   const task = existing.task;
-  const guard = guardSchedulePlacement(command, context, task, task?.title || title, schedule);
+  const guard = guardSchedulePlacement(interpretedCommand, context, task, task?.title || title, schedule);
   if (guard.blockedSummary) {
     return { ...preview, status: 'clarification', summary: guard.blockedSummary, assumptions };
   }
@@ -1027,15 +1244,81 @@ function relativeMinutes(text: string): number | null {
   return Math.round(minutes) * (match[3].toLowerCase() === 'earlier' ? -1 : 1);
 }
 
+function previewForMoveEvent(
+  command: string,
+  context: ScheduleCommandContext,
+  preview: ScheduleCommandPreview,
+  event: ScheduleCommandBusyInterval,
+): ScheduleCommandPreview {
+  if (!event.commitmentId || !event.occurrenceDate) return preview;
+  const currentStart = new Date(event.startAt);
+  const currentEnd = new Date(event.endAt);
+  if (Number.isNaN(currentStart.getTime()) || Number.isNaN(currentEnd.getTime()) || currentEnd <= currentStart) {
+    return { ...preview, status: 'clarification', summary: `“${event.title}” has an invalid saved time.` };
+  }
+  const date = parseNaturalDate(command, context);
+  const range = parseTimeRange(command);
+  if (range.ambiguous) return { ...preview, status: 'clarification', summary: 'Is that AM or PM?' };
+  const currentParts = localDateParts(currentStart, context.timeZone);
+  let targetDate = date.explicit ? date.date : currentParts.date;
+  let targetTime = range.start?.time || currentParts.time;
+  const relative = relativeMinutes(command);
+  if (relative !== null) {
+    const moved = new Date(currentStart.getTime() + relative * 60_000);
+    const movedParts = localDateParts(moved, context.timeZone);
+    targetDate = movedParts.date;
+    targetTime = movedParts.time;
+  }
+  const startAt = localDateTimeToIso(targetDate, `${targetTime}:00`, context.timeZone);
+  if (!startAt) return { ...preview, summary: 'That local date or time does not exist in your timezone.' };
+  const explicitDuration = normalizedDuration(parseDuration(command), preview.assumptions);
+  const durationSeconds = explicitDuration || Math.round((currentEnd.getTime() - currentStart.getTime()) / 1_000);
+  const placement: ScheduleEntryInput = {
+    scheduledDate: targetDate,
+    startAt,
+    durationSeconds,
+    recurrence: 'none',
+    recurrenceDays: null,
+    recurrenceEndDate: null,
+  };
+  const guard = guardSchedulePlacement(command, {
+    ...context,
+    busy: (context.busy || []).filter(item => item.id !== event.id),
+  }, null, event.title, placement);
+  if (guard.blockedSummary) return { ...preview, status: 'clarification', summary: guard.blockedSummary };
+  if (guard.assumption) preview.assumptions.push(guard.assumption);
+  preview.status = 'ready';
+  preview.summary = `Move event “${event.title}” to ${targetDate} at ${targetTime}.`;
+  preview.actions = [{
+    type: 'update_event',
+    commitmentId: event.commitmentId,
+    occurrenceDate: event.occurrenceDate,
+    title: event.title,
+    schedule: placement,
+  }];
+  preview.occurrences = [{
+    taskId: null,
+    title: event.title,
+    date: targetDate,
+    startAt,
+    durationSeconds,
+  }];
+  return preview;
+}
+
 function previewForMove(command: string, context: ScheduleCommandContext): ScheduleCommandPreview {
   const preview = emptyPreview(command);
   preview.kind = 'move';
   const resolved = resolveTask(command, context);
   if (!resolved.task) {
+    const resolvedEvent = resolveScheduledEvent(command, context);
+    if (resolvedEvent.event) return previewForMoveEvent(command, context, preview, resolvedEvent.event);
     return {
       ...preview,
       status: 'clarification',
-      summary: resolved.candidates.length ? 'Which task should I move?' : 'I could not find that task in your schedule.',
+      summary: resolved.candidates.length || resolvedEvent.candidates.length
+        ? 'Which task or event should I move?'
+        : 'I could not find that task or event in your schedule.',
       candidates: resolved.candidates.map(task => ({ taskId: task.id, title: task.title })),
     };
   }
@@ -1086,10 +1369,44 @@ function previewForResize(command: string, context: ScheduleCommandContext): Sch
   preview.kind = 'resize';
   const resolved = resolveTask(command, context);
   if (!resolved.task) {
+    const resolvedEvent = resolveScheduledEvent(command, context);
+    if (resolvedEvent.event?.commitmentId && resolvedEvent.event.occurrenceDate) {
+      const duration = normalizedDuration(parseDuration(command), preview.assumptions);
+      const start = new Date(resolvedEvent.event.startAt);
+      if (!duration) return { ...preview, status: 'clarification', summary: 'What should the new event duration be?' };
+      if (Number.isNaN(start.getTime())) return { ...preview, status: 'clarification', summary: 'That event has an invalid saved time.' };
+      const parts = localDateParts(start, context.timeZone);
+      const placement: ScheduleEntryInput = {
+        scheduledDate: parts.date,
+        startAt: start.toISOString(),
+        durationSeconds: duration,
+        recurrence: 'none',
+        recurrenceDays: null,
+        recurrenceEndDate: null,
+      };
+      const guard = guardSchedulePlacement(command, {
+        ...context,
+        busy: (context.busy || []).filter(item => item.id !== resolvedEvent.event?.id),
+      }, null, resolvedEvent.event.title, placement);
+      if (guard.blockedSummary) return { ...preview, status: 'clarification', summary: guard.blockedSummary };
+      preview.status = 'ready';
+      preview.summary = `Set event “${resolvedEvent.event.title}” to ${formatDuration(duration)}.`;
+      preview.actions = [{
+        type: 'update_event',
+        commitmentId: resolvedEvent.event.commitmentId,
+        occurrenceDate: resolvedEvent.event.occurrenceDate,
+        title: resolvedEvent.event.title,
+        schedule: placement,
+      }];
+      preview.occurrences = [{ taskId: null, title: resolvedEvent.event.title, date: parts.date, startAt: start.toISOString(), durationSeconds: duration }];
+      return preview;
+    }
     return {
       ...preview,
       status: 'clarification',
-      summary: resolved.candidates.length ? 'Which task should change duration?' : 'I could not find that scheduled task.',
+      summary: resolved.candidates.length || resolvedEvent.candidates.length
+        ? 'Which task or event should change duration?'
+        : 'I could not find that scheduled task or event.',
       candidates: resolved.candidates.map(task => ({ taskId: task.id, title: task.title })),
     };
   }
@@ -1202,10 +1519,28 @@ function previewForDelete(command: string, context: ScheduleCommandContext): Sch
   preview.kind = 'delete';
   const resolved = resolveTask(command, context);
   if (!resolved.task) {
+    const resolvedEvent = resolveScheduledEvent(command, context);
+    if (resolvedEvent.event?.commitmentId && resolvedEvent.event.occurrenceDate) {
+      const wholeSeries = /\b(?:all|every|series|entire)\b/i.test(command);
+      preview.status = 'ready';
+      preview.summary = wholeSeries
+        ? `Delete every occurrence of event “${resolvedEvent.event.title}”.`
+        : `Delete the ${resolvedEvent.event.occurrenceDate} occurrence of event “${resolvedEvent.event.title}”.`;
+      preview.actions = [{
+        type: 'remove_event',
+        commitmentId: resolvedEvent.event.commitmentId,
+        occurrenceDate: resolvedEvent.event.occurrenceDate,
+        title: resolvedEvent.event.title,
+        wholeSeries,
+      }];
+      return preview;
+    }
     return {
       ...preview,
       status: 'clarification',
-      summary: resolved.candidates.length ? 'Which task should I unschedule?' : 'I could not find that scheduled task.',
+      summary: resolved.candidates.length || resolvedEvent.candidates.length
+        ? 'Which task or event should I remove?'
+        : 'I could not find that scheduled task or event.',
       candidates: resolved.candidates.map(task => ({ taskId: task.id, title: task.title })),
     };
   }
