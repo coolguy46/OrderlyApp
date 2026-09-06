@@ -51,6 +51,7 @@ test('atomic completion validates successor subject ownership', async () => {
   assert.match(sql, /successor_subject_id UUID/);
   assert.match(sql, /subject\.user_id = current_task\.user_id/);
   assert.match(sql, /Recurring successor subject is not owned by the task owner/);
+  assert.match(sql, /NULLIF\(p_successor->'recurrence_days', 'null'::JSONB\)/);
   assert.match(sql, /BEGIN;[\s\S]*COMMIT;/);
 });
 

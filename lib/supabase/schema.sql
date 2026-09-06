@@ -1109,7 +1109,7 @@ BEGIN
       END,
       NULLIF(p_successor->>'due_time', ''),
       COALESCE(NULLIF(p_successor->>'recurrence', ''), 'none'),
-      p_successor->'recurrence_days',
+      NULLIF(p_successor->'recurrence_days', 'null'::JSONB),
       NULL
     )
     RETURNING * INTO successor_task;

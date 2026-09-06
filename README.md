@@ -58,8 +58,9 @@ the non-lease columns it queries exist:
       timer table, including `pending_session`)
    3. `task-scheduling-migration.sql`
    4. `planner-migration.sql`
-   5. `task-completion-atomic-migration.sql` (all task completion paths call
-      `complete_task_with_successor`, even for non-recurring tasks)
+   5. `task-completion-atomic-migration.sql` (required for atomic repeating-task
+      completion and successor creation; ordinary completion uses a conditional
+      row update and does not depend on this RPC)
    6. `friendship-rls-hardening-migration.sql` after its non-destructive
       duplicate/self-row preflight succeeds
    7. `profile-integrity-migration.sql` after reviewing its bounded counter

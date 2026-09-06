@@ -28,7 +28,7 @@
     "test:calendar-segments": "node --test --experimental-strip-types tests/calendar-segments.test.mjs",
     "test:user-scoped-storage": "node --test --experimental-strip-types tests/user-scoped-storage.test.mjs",
     "test:user-data-load": "node --test --experimental-strip-types tests/user-data-load.test.mjs",
-    "test:store-account-safety": "node --test --experimental-strip-types tests/store-account-safety.test.mjs",
+    "test:store-account-safety": "node --test --experimental-strip-types tests/store-account-safety.test.mjs tests/task-completion.test.mjs",
     "test:timer-clock": "node --test --experimental-strip-types tests/timer-clock.test.mjs",
     "test:timer-recovery": "node --test --experimental-strip-types tests/timer-recovery.test.mjs",
     "test:timer-settings": "node --test --experimental-strip-types tests/timer-settings.test.mjs",

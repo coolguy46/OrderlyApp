@@ -961,9 +961,13 @@ export const useAppStore = create<AppState>()(
             return false;
           }
           if (!result.changed) {
+            set((state) => ({
+              tasks: state.tasks.map(task => task.id === id ? result.completedTask : task),
+            }));
             toast.info('This task was already completed in another tab.');
-            await get().loadUserData(accountId);
-            return false;
+            // Reconcile the saved result and let the dialog close. An
+            // idempotent retry is a success, not a failed completion.
+            return true;
           }
 
           set((state) => ({
@@ -1010,10 +1014,15 @@ export const useAppStore = create<AppState>()(
 
           // Database triggers maintain profile counters atomically from the
           // task source of truth; refresh the profile after completion.
-          const updatedProfile = await db.getProfile(accountId);
-          if (updatedProfile && get().user?.id === accountId) {
-            set({ user: updatedProfile });
-          }
+          void db.getProfile(accountId).then(updatedProfile => {
+            if (updatedProfile && get().user?.id === accountId) {
+              set({ user: updatedProfile });
+            }
+          }).catch(error => {
+            // Completion has already saved. A secondary stats refresh must
+            // not hold the button busy or report the task as failed.
+            console.warn('Profile refresh after task completion failed:', error);
+          });
           return true;
         } catch {
           if (get().user?.id === accountId) toast.error('Failed to complete task');

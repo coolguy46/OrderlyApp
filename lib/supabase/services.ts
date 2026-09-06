@@ -19,6 +19,8 @@ import type {
 } from './types';
 import { AUTH_ACTION_TIMEOUT_MS, authCallbackUrl, withTimeout } from '@/lib/auth/lifecycle';
 import { deleteOwnedTaskWithToken } from './task-compensation';
+import { persistTaskCompletion, type TaskCompletionResult, type TaskSuccessorInput } from './task-completion';
+export type { TaskCompletionResult, TaskSuccessorInput } from './task-completion';
 import {
   hasCompletedSetupMetadata,
   setupCompletionMetadataUpdate,
@@ -301,24 +303,6 @@ export async function deleteTaskWithAccessToken(
   });
 }
 
-export type TaskSuccessorInput = Pick<
-  Task,
-  | 'title'
-  | 'description'
-  | 'priority'
-  | 'subject_id'
-  | 'due_date'
-  | 'due_time'
-  | 'recurrence'
-  | 'recurrence_days'
->;
-
-export interface TaskCompletionResult {
-  changed: boolean;
-  completedTask: Task;
-  successorTask: Task | null;
-}
-
 /**
  * Complete a task and, when requested, create its next occurrence in one
  * database transaction. This prevents a transient insert failure from leaving
@@ -329,27 +313,15 @@ export async function completeTask(
   id: string,
   successor: TaskSuccessorInput | null = null,
 ): Promise<TaskCompletionResult | null> {
-  const { data, error } = await db.rpc('complete_task_with_successor', {
-    p_task_id: id,
-    p_successor: successor,
-  });
-  if (error) {
-    console.error('Error completing task:', error);
+  try {
+    return await persistTaskCompletion(db, id, successor);
+  } catch (error) {
+    // Serialize the useful fields: logging the SDK object alone hides the
+    // database error behind "Object" in browser diagnostics.
+    const detail = error as { code?: string; message?: string; details?: string };
+    console.error('Error completing task:', detail.code, detail.message, detail.details);
     return null;
   }
-  if (!data || typeof data !== 'object') return null;
-
-  const payload = data as {
-    changed?: boolean;
-    completed?: Task;
-    successor?: Task | null;
-  };
-  if (!payload.completed) return null;
-  return {
-    changed: payload.changed === true,
-    completedTask: payload.completed,
-    successorTask: payload.successor || null,
-  };
 }
 
 // Get task by external ID (for Canvas integration)
