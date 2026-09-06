@@ -223,7 +223,11 @@ export function compileConversation(intent: ConversationIntent, calendar: Conver
     const rangeEnd = addLocalDays(startDate, intent.plan.horizonDays);
     const entries = scheduleEntriesFromTasks(working.snapshot.tasks, calendar.userId);
     const occurrences = buildScheduleOccurrences({ tasks: working.snapshot.tasks.filter(t => t.status !== 'completed'), entries, timeZone: zone, startDate, endDate: rangeEnd });
-    const preview = buildAssistantTaskPlan({ request: intent.plan, now: calendar.now, timeZone: zone, tasks: working.snapshot.tasks, entries,
+    // Fixed times in this same request are already reserved. A broad replan
+    // must not select and relocate those items again; keep their occurrences
+    // as busy intervals while planning the remaining work around them.
+    const fixedTaskIds = new Set(items.filter(item => item.entity === 'task').map(item => item.id));
+    const preview = buildAssistantTaskPlan({ request: intent.plan, now: calendar.now, timeZone: zone, tasks: working.snapshot.tasks.filter(task => !fixedTaskIds.has(task.id)), entries,
       occurrences: [...occurrences.timed, ...occurrences.untimed], busy: calendarIntervals(working, startDate, rangeEnd).filter(i => i.owner.startsWith('event:')), settings: calendar.settings });
     if (preview.status !== 'ready') throw new Error(`${preview.summary} ${preview.assumptions.join(' ')} Suggest a specific alternative without dropping the constraints.`);
     // Do not save an incomplete mixed request as if all requirements succeeded.

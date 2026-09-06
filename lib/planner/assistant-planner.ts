@@ -371,7 +371,7 @@ export function buildAssistantTaskPlan(input: AssistantTaskPlanInput): ScheduleC
   // put tomorrow's work on today. An explicit valid future date always wins.
   const startDate = requestedStartDate
     || (input.request.taskScope === 'tomorrow' ? addLocalDays(today, 1) : today);
-  const horizonDays = Math.max(1, Math.min(7, Math.trunc(input.request.horizonDays || 7)));
+  const horizonDays = Math.max(1, Math.min(14, Math.trunc(input.request.horizonDays || 7)));
   const horizonDates = Array.from({ length: horizonDays }, (_, index) => addLocalDays(startDate, index));
   const horizonEndDate = horizonDates[horizonDates.length - 1];
   const selectedTasks = selectTasks(

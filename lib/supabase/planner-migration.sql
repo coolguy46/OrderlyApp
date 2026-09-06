@@ -477,6 +477,8 @@ BEGIN
   IF v_user_id IS NULL THEN
     RAISE EXCEPTION 'Authentication is required.' USING ERRCODE = '42501';
   END IF;
+  -- Share the conversational writer's account lock before locking preferences.
+  PERFORM pg_advisory_xact_lock(hashtextextended(v_user_id::TEXT, 19));
   IF p_expected_revision < 0 OR jsonb_typeof(p_snapshot) <> 'object' THEN
     RAISE EXCEPTION 'Invalid planner snapshot.' USING ERRCODE = '22023';
   END IF;

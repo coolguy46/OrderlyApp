@@ -2,6 +2,15 @@
 -- Run after planner-migration.sql and task-scheduling-migration.sql.
 begin;
 
+-- CREATE FUNCTION does not validate every referenced column. Fail deployment
+-- clearly instead of shipping against an older, browser-local planner schema.
+do $$ begin
+  if to_regprocedure('public.replace_planner_snapshot(bigint,jsonb,boolean)') is null
+    or not exists (select 1 from information_schema.columns where table_schema='public' and table_name='planner_preferences' and column_name='revision') then
+    raise exception 'Apply the current planner-migration.sql before assistant-conversation-migration.sql';
+  end if;
+end $$;
+
 create table if not exists public.assistant_action_receipts (
   user_id uuid not null references auth.users(id) on delete cascade,
   request_id uuid not null,
@@ -102,6 +111,13 @@ begin
     else raise exception 'Unknown entity'; end if;
     inverse_ops := jsonb_build_array(jsonb_build_object('entity',item->>'entity','id',item->>'id','op',case when previous_row is null then 'delete' else 'put' end,'data',previous_row)) || inverse_ops;
   end loop;
+  -- The legacy whole-planner outbox also writes events. Advance its CAS
+  -- revision so an older tab cannot reconcile-delete newly saved chat events.
+  if exists (select 1 from jsonb_array_elements(p_operations) op where op->>'entity'='event') then
+    insert into public.planner_preferences(user_id,revision,time_zone)
+    values(owner_id,1,coalesce((select time_zone from public.recurring_commitments where user_id=owner_id order by updated_at desc limit 1),'UTC'))
+    on conflict(user_id) do update set revision=public.planner_preferences.revision+1;
+  end if;
   result := p_response || jsonb_build_object('requestId',p_request_id,'saved',jsonb_array_length(p_operations)>0,
     'undoOperations',inverse_ops,'revision',public.assistant_calendar_snapshot()->>'revision');
   insert into public.assistant_action_receipts(user_id,request_id,conversation_id,response) values(owner_id,p_request_id,p_conversation_id,result);

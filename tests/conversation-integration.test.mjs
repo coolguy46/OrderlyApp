@@ -52,10 +52,9 @@ before(async () => {
     await db.exec(ddl);
   }
   const planner = await readFile(join(root, 'lib/supabase/planner-migration.sql'), 'utf8');
-  for (const table of ['planner_preferences', 'recurring_commitments']) {
-    await db.exec(planner.match(new RegExp(`CREATE TABLE IF NOT EXISTS ${table} \\([\\s\\S]*?\\n\\);`))[0]);
-  }
-  await db.exec('create unique index on recurring_commitments(user_id,client_commitment_id);');
+  // PGlite provides gen_random_uuid in core. Exercise the complete planner
+  // migration, including the older outbox RPC that shares these event rows.
+  await db.exec(planner.replace('CREATE EXTENSION IF NOT EXISTS pgcrypto;', ''));
   await db.exec(await readFile(join(root, 'lib/supabase/task-scheduling-migration.sql'), 'utf8'));
   for (const table of ['tasks', 'exams', 'planner_preferences', 'recurring_commitments']) {
     await db.exec(`alter table ${table} enable row level security; create policy owner_only on ${table} for all to authenticated using(user_id=auth.uid()) with check(user_id=auth.uid()); grant select,insert,update,delete on ${table} to authenticated;`);
@@ -126,6 +125,43 @@ test('discussion has no writes; malformed discussion-with-actions is rejected', 
   assert.equal(result.receipt.saved, false);
   assert.equal(result.state.revision, before.revision);
   assert.throws(() => intent([{ action: 'create', entity: 'event', title: 'Oops' }], { mode: 'discuss' }), /Discussion cannot/);
+});
+
+test('older planner snapshots cannot erase a newly created chat event', async () => {
+  const before = await snapshot();
+  const result = await turn('add a test event', [{ action: 'create', entity: 'event', title: 'Cross-tab event', date: '2026-09-06', start: '18:00', durationMinutes: 20 }]);
+  assert.equal(result.state.preferences.revision, before.preferences.revision + 1);
+  const stalePayload = { preferences: before.preferences, commitments: before.events, plans: [], feedback: [], adjustments: [] };
+  const stale = await db.query('select replace_planner_snapshot($1,$2,true) as revision', [before.preferences.revision, JSON.stringify(stalePayload)]);
+  assert.equal(stale.rows[0].revision, null);
+  await db.query('select replace_planner_snapshot($1,$2,false)', [result.state.preferences.revision, JSON.stringify(stalePayload)]);
+  const after = await snapshot();
+  assert.equal(after.events.filter(event => event.title === 'Cross-tab event').length, 1);
+  await apply({ writes: [{ entity: 'event', op: 'delete', id: result.receipt.items[0].id }], reply: 'cleanup', items: [] }, after.revision);
+});
+
+test('a broad replan preserves fixed items added in the same request', async () => {
+  const state = await snapshot();
+  const parsed = intent([{ action: 'create', entity: 'task', title: 'Fixed essay', date: '2026-09-06', start: '22:00', durationMinutes: 60 }], { mode: 'plan', plan: {
+    taskScope: 'all_pending', taskIds: [], startDate: '2026-09-06', horizonDays: 7, todayLoad: 'normal', includeAlreadyScheduled: true,
+    additionalTasks: [{ title: 'Flexible reading', durationMinutes: 30 }],
+  } });
+  const compiled = compileConversation(parsed, calendarFromSnapshot(state, owner, NOW, zone));
+  const fixed = compiled.items.find(item => item.title === 'Fixed essay');
+  assert.equal(compiled.writes.filter(write => write.id === fixed.id).length, 1);
+  assert.equal(compiled.writes.find(write => write.id === fixed.id).data.scheduled_start_at, '2026-09-07T05:00:00.000Z');
+});
+
+test('two-week planning does not silently truncate the second week', async () => {
+  const state = await snapshot();
+  const calendar = calendarFromSnapshot(state, owner, NOW, zone);
+  const parsed = intent([], { mode: 'plan', plan: {
+    taskScope: 'task_ids', taskIds: [], startDate: '2026-09-06', horizonDays: 14, todayLoad: 'normal', includeAlreadyScheduled: false,
+    excludedDates: ['2026-09-06','2026-09-07','2026-09-08','2026-09-09','2026-09-10','2026-09-11','2026-09-12'],
+    additionalTasks: [{ title: 'Second-week reading', durationMinutes: 30 }],
+  } });
+  const compiled = compileConversation(parsed, calendar);
+  assert.equal(compiled.writes[0].data.scheduled_date, '2026-09-13');
 });
 
 test('school interval is real: 10–11 PM works, 10–11 AM conflicts', async () => {

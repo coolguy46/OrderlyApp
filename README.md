@@ -186,6 +186,11 @@ conversational Assistant. It depends on `planner-migration.sql`,
 `task-scheduling-migration.sql`, and the existing assistant usage migration.
 It creates only an owner-scoped receipt table and two security-invoker RPCs;
 it does not rewrite existing assignments. A Git push does not run SQL migrations.
+Check that `replace_planner_snapshot(bigint,jsonb,boolean)` and
+`planner_preferences.revision` actually exist; older installations can have the
+planner tables without the newer persistence upgrade. The conversation migration
+now refuses that incomplete setup. Both writers share an account lock, and chat
+event changes advance the planner revision so older tabs cannot erase them.
 
 The current chat UI uses `/api/planner/conversation`. The older `/chat` and
 `/command` endpoints remain compatible with already-open older clients and stored
