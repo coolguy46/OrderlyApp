@@ -293,7 +293,7 @@ export function AssistantChat({
             )}
           </div>
           <p className="mt-2 text-center text-[11px] text-muted-foreground">
-            Orderly can make mistakes. Calendar drafts are saved only after you confirm them.
+            Orderly can make mistakes. Requested changes save directly to your calendar; check the confirmation and use Undo if needed.
           </p>
         </div>
       </div>

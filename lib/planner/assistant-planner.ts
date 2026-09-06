@@ -36,6 +36,7 @@ export type AssistantTaskPlanScope =
 export interface AssistantTaskPlanAdditionalTask {
   title: string;
   durationSeconds: number;
+  estimated?: boolean;
 }
 /**
  * High-level intent produced by the language model. Clock arithmetic and task
@@ -51,6 +52,9 @@ export interface AssistantTaskPlanRequest {
   availableAfter?: string | null;
   availableBefore?: string | null;
   additionalTasks?: readonly AssistantTaskPlanAdditionalTask[];
+  allowedWeekdays?: number[];
+  excludedDates?: string[];
+  maxDailyMinutes?: number;
 }
 
 export interface AssistantTaskPlanInput {
@@ -451,7 +455,10 @@ export function buildAssistantTaskPlan(input: AssistantTaskPlanInput): ScheduleC
       input.estimateCache || {},
       input.feedbackMultipliers || {},
     );
-    const minutes = roundMinutesToSlot(estimate.finalMinutes, settings.slotMinutes);
+    const savedSeconds = task.duration_seconds;
+    const minutes = typeof savedSeconds === 'number' && savedSeconds > 0 && savedSeconds <= 86400
+      ? savedSeconds / 60
+      : roundMinutesToSlot(estimate.finalMinutes, settings.slotMinutes);
     return {
       key: `task-${task.id}`,
       title: task.title,
@@ -494,6 +501,8 @@ export function buildAssistantTaskPlan(input: AssistantTaskPlanInput): ScheduleC
       if (requireDeadline && (item.deadline === null || item.deadline < now)) continue;
       for (const date of horizonDates) {
         if (placement) break;
+        if (input.request.excludedDates?.includes(date)) continue;
+        if (input.request.allowedWeekdays && !input.request.allowedWeekdays.includes(localDayOfWeek(date))) continue;
         const availability = availabilityForDate(
           date,
           settings,
@@ -517,7 +526,7 @@ export function buildAssistantTaskPlan(input: AssistantTaskPlanInput): ScheduleC
         if (start === null) continue;
         const placementDate = localDateFromIso(new Date(start).toISOString(), settings.timeZone) || date;
         if (placementDate < startDate || placementDate > horizonEndDate) continue;
-        const normalCap = settings.maxDailyMinutes;
+        const normalCap = input.request.maxDailyMinutes ?? settings.maxDailyMinutes;
         const scheduledForDay = scheduledMinutes.get(placementDate) || 0;
         // In a one-day mixed request, an explicit availability boundary is a
         // stronger statement than the user's usual workload target. The real
@@ -526,7 +535,7 @@ export function buildAssistantTaskPlan(input: AssistantTaskPlanInput): ScheduleC
           + Math.floor((availability.end - availability.start) / MINUTE_MS);
         const requestedCap = placementDate === today && input.request.todayLoad === 'skip'
           ? 0
-          : softCompositeDailyLimit
+          : softCompositeDailyLimit && input.request.maxDailyMinutes === undefined
             ? constrainedWindowCap
           : placementDate === today && input.request.todayLoad === 'light'
             ? Math.min(60, Math.max(settings.slotMinutes, roundMinutesToSlot(normalCap / 4, settings.slotMinutes)))

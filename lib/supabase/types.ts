@@ -72,6 +72,11 @@ export interface Database {
           color?: string;
         };
       };
+      assistant_action_receipts: {
+        Row: { user_id: string; request_id: string; conversation_id: string; response: Json; created_at: string };
+        Insert: { user_id: string; request_id: string; conversation_id: string; response: Json; created_at?: string };
+        Update: { response?: Json };
+      };
       tasks: {
         Row: {
           id: string;

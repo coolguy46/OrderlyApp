@@ -41,34 +41,20 @@ import {
   type AssistantTaskPlanRequest,
 } from '@/lib/planner/assistant-planner';
 import {
-  inferPlannerChatPlanRequest,
-  plannerChatNormalizedCommandsPreserveIntent,
-  plannerChatPlanRequestPreservesIntent,
   sanitizePlannerChatPlanRequest,
-  type PlannerCommandAIContext,
   type PlannerChatPlanRequest,
 } from '@/lib/planner/deepseek-command';
-import {
-  resolveAssistantTaskQuery,
-} from '@/lib/planner/assistant-task-query';
 import {
   deleteCreatedTasks,
   plannerMutationIsCurrent,
 } from '@/lib/planner/assistant-mutation';
 import {
-  describeScheduleCommandDraft,
-  interpretDirectScheduleRequest,
-  interpretScheduleCommand,
   interpretScheduleCommands,
   scheduleEventActionToCommitment,
   type ScheduleCommandBusyInterval,
   type ScheduleCommandContext,
   type ScheduleCommandPreview,
 } from '@/lib/schedule/commands';
-import {
-  isUnverifiedCalendarOutcome,
-  recoverExplicitRangeFromFalseSchoolConflict,
-} from '@/lib/schedule/assistant-command-fallback';
 import {
   addLocalDays,
   buildScheduleOccurrences,
@@ -87,6 +73,7 @@ import { Button } from '@/components/ui/Button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { cn } from '@/lib/utils';
 import { WeekTimeGrid, type PlannerBlockView } from '@/components/planner';
+import type { ConversationRequest, ConversationResult } from '@/lib/planner/conversation';
 import { AssistantChat } from '@/components/planner/assistant/AssistantChat';
 import { TaskForm } from '@/components/tasks/TaskForm';
 import type { UntimedScheduleItem } from '@/components/schedule/UntimedTaskShelf';
@@ -169,7 +156,6 @@ const CHAT_CONTEXT_LIMIT = 14;
 const CHAT_DISPLAY_LIMIT = 50;
 const CHAT_STORAGE_LIMIT = 20;
 const CHAT_STORAGE_CHARACTER_LIMIT = 20_000;
-const CHAT_TIMEOUT_MS = 25_000;
 const CHAT_STORAGE_PREFIX = 'orderly:assistant-chat:v2:';
 const LEGACY_CHAT_STORAGE_PREFIX = 'orderly:assistant-chat:v1:';
 const DRAFT_STORAGE_PREFIX = 'orderly:assistant-calendar-draft:v2:';
@@ -310,31 +296,6 @@ function nextAssistantQuotaReset(usage: NonNullable<AssistantChatResponse['usage
     return Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1);
   }
   return null;
-}
-
-function cleanAssistantText(value: string | null | undefined, limit = 700): string {
-  return (value || '')
-    .replace(/<[^>]*>/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, limit);
-}
-
-function isAssistantChatResponse(value: unknown): value is AssistantChatResponse {
-  if (!value || typeof value !== 'object') return false;
-  const candidate = value as Partial<AssistantChatResponse>;
-  return typeof candidate.reply === 'string'
-    && Array.isArray(candidate.normalizedCommands)
-    && candidate.normalizedCommands.length <= 8
-    && candidate.normalizedCommands.every(command => typeof command === 'string' && command.trim().length > 0)
-    && (candidate.planRequest === null || sanitizePlannerChatPlanRequest(candidate.planRequest) !== null)
-    && (candidate.usage === null || (
-      typeof candidate.usage === 'object'
-      && candidate.usage !== null
-      && typeof candidate.usage.remainingDaily === 'number'
-      && typeof candidate.usage.remainingMonthly === 'number'
-    ))
-    && typeof candidate.aiUsed === 'boolean';
 }
 
 function localDate(value: Date): LocalDate {
@@ -548,17 +509,6 @@ function scheduleDraftBlocks(
   });
 }
 
-function previewReply(preview: ScheduleCommandPreview): string {
-  const details: string[] = [preview.summary];
-  if (preview.candidates.length > 1) {
-    details.push(`Which task did you mean?\n${preview.candidates.map(candidate => `- ${candidate.title}`).join('\n')}`);
-  }
-  if (preview.assumptions.length > 0) {
-    details.push(preview.assumptions.map(assumption => `- ${assumption}`).join('\n'));
-  }
-  return details.join('\n\n');
-}
-
 function scheduledPlacementStarts(preview: ScheduleCommandPreview): string[] {
   return preview.actions.flatMap(action => {
     if (action.type === 'create_task' || action.type === 'create_event' || action.type === 'update_event') {
@@ -649,7 +599,6 @@ export function Planner() {
     user,
     tasks,
     subjects,
-    exams,
     addTask,
     deleteTask,
     finalizeTaskCreations,
@@ -715,10 +664,16 @@ export function Planner() {
   const activeUndoRef = useRef<UndoState | null>(null);
   const inFlightUndoRef = useRef<UndoState | null>(null);
   const activeUserIdRef = useRef<string | null>(userId);
+  const chatSendLockRef = useRef(false);
+  const conversationIdRef = useRef<string | null>(null);
+  const retryRequestRef = useRef<ConversationRequest | null>(null);
+  const [retryPending, setRetryPending] = useState(false);
+  const [lastChatReceipt, setLastChatReceipt] = useState<{ userId: string; requestId: string; conversationId: string } | null>(null);
   const chatHydratedUserRef = useRef<string | null>(null);
   const draftHydratedUserRef = useRef<string | null>(null);
 
   const installUndoState = useCallback((next: UndoState) => {
+    setLastChatReceipt(null);
     const previous = activeUndoRef.current;
     if (previous && previous !== inFlightUndoRef.current) {
       // A single-level Undo must never retain deletion authority after a newer
@@ -768,7 +723,16 @@ export function Planner() {
     chatAbortRef.current = null;
     chatHydratedUserRef.current = null;
     draftHydratedUserRef.current = null;
-    if (userId) clearLegacyAssistantChatStorage(userId);
+    conversationIdRef.current = null;
+    retryRequestRef.current = null;
+    chatSendLockRef.current = false;
+    if (userId) {
+      try {
+        const pending = JSON.parse(window.sessionStorage.getItem(`orderly:pending-chat:${userId}`) || 'null') as ConversationRequest | null;
+        if (pending?.requestId && pending?.conversationId) retryRequestRef.current = pending;
+      } catch {}
+      clearLegacyAssistantChatStorage(userId);
+    }
     const restored = userId ? readStoredAssistantMessages(userId) : [];
     const previousUndo = activeUndoRef.current;
     if (previousUndo && previousUndo !== inFlightUndoRef.current) {
@@ -779,6 +743,8 @@ export function Planner() {
       if (cancelled) return;
       setUndoState(null);
       setUsage(null);
+      setRetryPending(Boolean(retryRequestRef.current));
+      setLastChatReceipt(null);
       setIsThinking(false);
       setApplying(false);
       setPreview(null);
@@ -938,18 +904,6 @@ export function Planner() {
   // relevance-aware so selected, overdue, and imminent work cannot be hidden
   // behind older low-priority rows. The deterministic planner below still
   // receives the complete local task collection.
-  const assistantContextTasks = useMemo(() => [...pendingTasks].sort((left, right) => {
-    if (left.id === selectedTaskId) return -1;
-    if (right.id === selectedTaskId) return 1;
-    const leftDeadline = plannerTaskDeadline(left, timeZone);
-    const rightDeadline = plannerTaskDeadline(right, timeZone);
-    const leftTime = leftDeadline ? new Date(leftDeadline).getTime() : Number.POSITIVE_INFINITY;
-    const rightTime = rightDeadline ? new Date(rightDeadline).getTime() : Number.POSITIVE_INFINITY;
-    return leftTime - rightTime
-      || left.title.localeCompare(right.title)
-      || left.id.localeCompare(right.id);
-  }), [pendingTasks, selectedTaskId, timeZone]);
-
   useEffect(() => {
     if (!userId || !dataLoaded || chatOwnerUserId !== userId || draftHydratedUserRef.current === userId) return;
     draftHydratedUserRef.current = userId;
@@ -1117,448 +1071,110 @@ export function Planner() {
     chatAbortRef.current?.abort();
     chatAbortRef.current = null;
     setIsThinking(false);
+    setApplying(false);
+    chatSendLockRef.current = false;
   }, []);
 
-  const presentCommandPreview = useCallback((
-    nextPreview: ScheduleCommandPreview,
-    plannedAt = new Date().toISOString(),
-  ): string => {
-    if (nextPreview.status === 'ready' && nextPreview.actions.length > 0) {
-      setPreviewPlanRequest(null);
-      setPreviewPlanNow(plannedAt);
-      setPreviewAnchorDate(nextPreview.occurrences[0]?.date || localDate(selectedDate));
-      setPreview(nextPreview);
-      setPreviewValidatedLocalDate(localDate(dateCarrierInTimeZone(timeZone)));
-      const firstOccurrence = nextPreview.occurrences[0];
-      if (firstOccurrence) {
-        const nextDate = localDateCarrier(firstOccurrence.date);
-        setSelectedDate(nextDate);
-        setWeekStart(startOfWeek(nextDate, { weekStartsOn: 1 }));
-      }
-      setCalendarOpen(true);
-      return `${describeScheduleCommandDraft(nextPreview, timeZone)}\n\nReview it on the calendar, then select **Save changes** to apply it.`;
-    }
-
-    // A question or clarification must not erase a different unsaved draft.
-    // Only a new, fully validated mutation replaces the active draft; users
-    // can explicitly discard it with the calendar control.
-    return previewReply(nextPreview);
-  }, [selectedDate, timeZone]);
-
-  const presentTaskPlanPreview = useCallback((
-    request: AssistantTaskPlanRequest,
-    nextPreview: ScheduleCommandPreview,
-    plannedAt: string,
-  ): string => {
-    if (nextPreview.status !== 'ready' || nextPreview.actions.length === 0) {
-      // A failed follow-up must not erase a different draft the user has not
-      // saved yet. The existing draft remains visible until it is replaced by
-      // a fully validated plan or explicitly discarded.
-      return previewReply(nextPreview);
-    }
-    setPreviewPlanRequest(request);
-    setPreviewPlanNow(plannedAt);
-    setPreviewAnchorDate(null);
-    setPreview(nextPreview);
-    setPreviewValidatedLocalDate(localDate(dateCarrierInTimeZone(timeZone)));
-    const firstOccurrence = nextPreview.occurrences[0];
-    if (firstOccurrence) {
-      const nextDate = localDateCarrier(firstOccurrence.date);
-      setSelectedDate(nextDate);
-      setWeekStart(startOfWeek(nextDate, { weekStartsOn: 1 }));
-    }
-    setCalendarOpen(true);
-    return [
-      nextPreview.summary,
-      ...nextPreview.assumptions,
-      'I placed this plan on your calendar as one draft. Select **Save changes** to apply it.',
-    ].filter(Boolean).join('\n\n');
-  }, [timeZone]);
-
-  const submitCommand = useCallback(async (value = command, taskId = selectedTaskId) => {
+  const submitCommand = useCallback(async (value = command, _taskId = selectedTaskId, retry = false) => {
     const normalized = value.trim();
-    if (!normalized || isThinking || chatOwnerUserId !== userId) return;
-
-    const userMessage: ConversationMessage = {
-      id: `user-${Date.now()}`,
-      role: 'user',
-      content: normalized,
-    };
-    const conversation = [...messages, userMessage].slice(-CHAT_CONTEXT_LIMIT);
-    setMessages(previous => [...previous, userMessage].slice(-CHAT_DISPLAY_LIMIT));
-    setCommand('');
-
-    // Exact user-authored calendar operations go through the deterministic
-    // scheduler before any model request. The model must never decide whether
-    // 10 PM means 10 AM, whether two ISO intervals overlap, or whether a
-    // calendar change happened. This also avoids charging for requests the
-    // local scheduler can answer completely.
-    const commandContext = {
-      ...context,
-      now: new Date().toISOString(),
-      selectedTaskId: taskId,
-      selectedEventId,
-    };
-
-    const queryTerms = normalized.toLocaleLowerCase().match(/[a-z0-9]{3,}/g) || [];
-    const providerTasks = [...assistantContextTasks].sort((left, right) => {
-      const leftText = `${left.title} ${left.course_name || ''}`.toLocaleLowerCase();
-      const rightText = `${right.title} ${right.course_name || ''}`.toLocaleLowerCase();
-      const leftMatches = queryTerms.reduce((count, term) => count + (leftText.includes(term) ? 1 : 0), 0);
-      const rightMatches = queryTerms.reduce((count, term) => count + (rightText.includes(term) ? 1 : 0), 0);
-      return rightMatches - leftMatches;
-    });
-    const commandNow = new Date(commandContext.now).getTime();
-    const scheduledTaskIds = new Set(entries
-      .filter(entry => Boolean(entry.scheduledDate && entry.startAt))
-      .map(entry => entry.taskId));
-    const taskSummary = {
-      pendingTotal: pendingTasks.length,
-      overdueTotal: pendingTasks.filter(task => {
-        const deadline = plannerTaskDeadline(task, timeZone);
-        return deadline !== null && new Date(deadline).getTime() < commandNow;
-      }).length,
-      scheduledTotal: pendingTasks.filter(task => scheduledTaskIds.has(task.id)).length,
-      includedTotal: Math.min(30, providerTasks.length),
-    };
-    // Send only the currently visible exact draft for conversational
-    // corrections/confirmations. Broad plans carry richer constraints in
-    // previewPlanRequest and must not be flattened into this smaller shape.
-    const activeExactDraft = preview?.status === 'ready'
-      && preview.actions.length > 0
-      && previewPlanRequest === null
-      ? {
-          kind: 'exact_commands' as const,
-          summary: preview.summary,
-          taskScope: null,
-          taskIds: [],
-          normalizedCommands: preview.commands,
-          createdAt: previewPlanNow,
-        }
-      : null;
-    // This local context lets the deterministic intent resolver understand
-    // relative clocks and named work before either the read-only query path or
-    // the external provider can reinterpret the request.
-    const browserIntentContext: PlannerCommandAIContext = {
-      now: commandContext.now,
-      timeZone,
-      selectedTaskId: taskId,
-      selectedDate: localDate(selectedDate),
-      availableStartTime: plannerSettings.weekendAvailableStart,
-      availableEndTime: plannerSettings.bedtime,
-      tasks: providerTasks.slice(0, 30).map(task => ({
-        id: task.id,
-        title: cleanAssistantText(task.title, 180),
-        description: null,
-        dueDate: task.due_date,
-        dueTime: task.due_time,
-      })),
-      taskSummary,
-      exams: [],
-      occurrences: [],
-      busy: [],
-      activeDraft: activeExactDraft,
-    };
-
-    // Mutations take precedence over factual keyword matching. This matters
-    // for natural requests such as “schedule my overdue work, which will take
-    // four hours”: the relative word “which” must not turn the request into a
-    // read-only overdue query.
-    const localPlanRequest = inferPlannerChatPlanRequest(
-      conversation.map(message => ({ role: message.role, content: message.content })),
-      browserIntentContext,
-    );
-    if (localPlanRequest) {
-      const nextPreview = buildAssistantTaskPlan({
-        request: localPlanRequest,
-        now: commandContext.now,
-        timeZone,
-        tasks,
-        entries,
-        occurrences: context.occurrences,
-        busy: context.busy,
-        settings: plannerSettings,
-        estimateCache: plannerRecord?.estimateCache || {},
-        feedbackMultipliers: plannerRecord?.feedbackMultipliers || {},
-      });
-      const assistantReply = presentTaskPlanPreview(localPlanRequest, nextPreview, commandContext.now);
-      setMessages(previous => [...previous, {
-        id: `assistant-${Date.now()}`,
-        role: 'assistant' as const,
-        content: assistantReply,
-      }].slice(-CHAT_DISPLAY_LIMIT));
+    if (!userId || chatOwnerUserId !== userId || chatSendLockRef.current || (!normalized && !retry)) return;
+    if (retryRequestRef.current && !retry) {
+      toast.info('Check the last request first so it cannot be added twice.');
       return;
     }
-
-    const factualResult = resolveAssistantTaskQuery({
-      message: normalized,
-      now: commandContext.now,
-      timeZone,
-      tasks,
-    });
-    if (factualResult) {
-      setMessages(previous => [...previous, {
-        id: `assistant-${Date.now()}`,
-        role: 'assistant' as const,
-        content: factualResult.reply,
-      }].slice(-CHAT_DISPLAY_LIMIT));
-      return;
-    }
-
-    // Resolve "schedule them/those" from the immediately preceding factual
-    // task answer using stable local task IDs. This cannot revive an older
-    // request because both the last assistant reply and its preceding user
-    // question must match the freshly derived local result.
-    const lastAssistantMessage = messages.at(-1);
-    const priorUserMessage = [...messages].reverse().find(message => message.role === 'user');
-    const priorTaskResult = priorUserMessage
-      ? resolveAssistantTaskQuery({
-          message: priorUserMessage.content,
-          now: commandContext.now,
-          timeZone,
-          tasks,
-        })
-      : null;
-    const schedulesReferencedTasks = /\b(?:fit|move|plan|rebalance|replan|reschedule|schedule|spread)\b[\s\S]*\b(?:them|those|these)\b/i.test(normalized);
-    if (
-      schedulesReferencedTasks
-      && priorTaskResult
-      && priorTaskResult.taskIds.length > 0
-      && lastAssistantMessage?.role === 'assistant'
-      && lastAssistantMessage.content === priorTaskResult.reply
-    ) {
-      const referencedRequest: AssistantTaskPlanRequest = {
-        taskScope: 'task_ids',
-        taskIds: priorTaskResult.taskIds,
-        startDate: null,
-        horizonDays: 7,
-        todayLoad: /\b(?:skip|avoid) today\b|\bnot today\b/i.test(normalized)
-          ? 'skip'
-          : /\b(?:busy today|keep today light|do not overload today|don't overload today)\b/i.test(normalized)
-            ? 'light'
-            : 'normal',
-        includeAlreadyScheduled: /\b(?:rebalance|replan|reschedule|move)\b/i.test(normalized),
-        availableAfter: null,
-        availableBefore: null,
-        additionalTasks: [],
-      };
-      const referencedPreview = buildAssistantTaskPlan({
-        request: referencedRequest,
-        now: commandContext.now,
-        timeZone,
-        tasks,
-        entries,
-        occurrences: context.occurrences,
-        busy: context.busy,
-        settings: plannerSettings,
-        estimateCache: plannerRecord?.estimateCache || {},
-        feedbackMultipliers: plannerRecord?.feedbackMultipliers || {},
-      });
-      const assistantReply = presentTaskPlanPreview(
-        referencedRequest,
-        referencedPreview,
-        commandContext.now,
-      );
-      setMessages(previous => [...previous, {
-        id: `assistant-${Date.now()}`,
-        role: 'assistant' as const,
-        content: assistantReply,
-      }].slice(-CHAT_DISPLAY_LIMIT));
-      return;
-    }
-
-    const directPreview = interpretDirectScheduleRequest(normalized, commandContext);
-    if (directPreview) {
-      const assistantReply = presentCommandPreview(directPreview, commandContext.now);
-      setMessages(previous => [...previous, {
-        id: `assistant-${Date.now()}`,
-        role: 'assistant' as const,
-        content: assistantReply,
-      }].slice(-CHAT_DISPLAY_LIMIT));
-      return;
-    }
-
-    setIsThinking(true);
-
-    chatAbortRef.current?.abort();
+    chatSendLockRef.current = true;
+    const owner = userId;
+    const requestSequence = ++chatRequestIdRef.current;
+    const isCurrent = () => activeUserIdRef.current === owner && chatRequestIdRef.current === requestSequence;
     const controller = new AbortController();
     chatAbortRef.current = controller;
-    const requestId = chatRequestIdRef.current + 1;
-    chatRequestIdRef.current = requestId;
-    let timedOut = false;
-    const timeout = window.setTimeout(() => {
-      timedOut = true;
-      controller.abort();
-    }, CHAT_TIMEOUT_MS);
-
-    try {
-      const response = await fetch('/api/planner/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        cache: 'no-store',
-        signal: controller.signal,
-        body: JSON.stringify({
-          messages: conversation.map(message => ({ role: message.role, content: message.content })),
-          context: {
-            now: new Date().toISOString(),
-            timeZone,
-            selectedTaskId: taskId,
-            selectedDate: localDate(selectedDate),
-            availableStartTime: plannerSettings.weekendAvailableStart,
-            availableEndTime: plannerSettings.bedtime,
-            tasks: providerTasks.slice(0, 30).map(task => ({
-              id: task.id,
-              title: cleanAssistantText(task.title, 180),
-              description: cleanAssistantText(task.description),
-              dueDate: task.due_date,
-              dueTime: task.due_time,
-            })),
-            taskSummary,
-            exams: [...exams]
-              .sort((left, right) => left.exam_date.localeCompare(right.exam_date))
-              .slice(0, 20)
-              .map(exam => ({
-                id: exam.id,
-                title: cleanAssistantText(exam.title, 180),
-                description: cleanAssistantText(exam.description),
-                examDate: exam.exam_date,
-                subject: cleanAssistantText(
-                  subjects.find(subject => subject.id === exam.subject_id)?.name,
-                  120,
-                ) || null,
-              })),
-            occurrences: context.occurrences.slice(0, 80).map(occurrence => ({
-              id: occurrence.id,
-              taskId: occurrence.taskId,
-              title: cleanAssistantText(occurrence.title, 180),
-              date: occurrence.date,
-              startAt: occurrence.startAt,
-              endAt: occurrence.endAt,
-              durationSeconds: occurrence.durationSeconds,
-              recurrence: occurrence.recurrence,
-            })),
-            busy: (context.busy || []).slice(0, 80).map(interval => ({
-              id: interval.id,
-              title: cleanAssistantText(interval.title, 180),
-              startAt: interval.startAt,
-              endAt: interval.endAt,
-            })),
-            activeDraft: browserIntentContext.activeDraft,
-          },
-        }),
-      });
-
-      const payload: unknown = await response.json().catch(() => null);
-      if (requestId !== chatRequestIdRef.current) return;
-      const validPayload = isAssistantChatResponse(payload);
-      if (!response.ok || !validPayload) {
-        if (validPayload) setUsage(payload.usage);
-        const errorReply = payload && typeof payload === 'object' && 'reply' in payload
-          && typeof (payload as { reply?: unknown }).reply === 'string'
-          ? (payload as { reply: string }).reply
-          : response.status === 429
-            ? 'You have reached your Assistant limit for now. Try again when your allowance resets.'
-            : 'I could not answer that right now. Please try again.';
-        throw new Error(errorReply);
+    const userMessage: ConversationMessage = { id: crypto.randomUUID(), role: 'user', content: normalized };
+    let body = retry ? retryRequestRef.current : null;
+    if (!body) {
+      let conversationId = conversationIdRef.current;
+      if (!conversationId) {
+        try { conversationId = window.sessionStorage.getItem(`orderly:conversation-id:${owner}`); } catch {}
+        conversationId ||= crypto.randomUUID();
+        conversationIdRef.current = conversationId;
+        try { window.sessionStorage.setItem(`orderly:conversation-id:${owner}`, conversationId); } catch {}
       }
-
-      setUsage(payload.usage);
-
-      const assistantMessageId = `assistant-${Date.now()}`;
-      let assistantReply = payload.reply.trim() || 'Here is what I found.';
-      if (payload.planRequest) {
-        const planRequest = sanitizePlannerChatPlanRequest(payload.planRequest);
-        if (!planRequest) throw new Error('The Assistant returned an invalid planning request. Please try again.');
-        if (!plannerChatPlanRequestPreservesIntent(
-          conversation.map(message => ({ role: message.role, content: message.content })),
-          planRequest,
-          browserIntentContext,
-        )) {
-          assistantReply = 'I understood the main planning request, but I could not preserve every constraint safely, so I did not make a looser plan. Rephrase it as separate changes or give me the exact tasks and times.';
-          setMessages(previous => [...previous, {
-            id: assistantMessageId,
-            role: 'assistant' as const,
-            content: assistantReply,
-          }].slice(-CHAT_DISPLAY_LIMIT));
-          return;
-        }
-        const nextPreview = buildAssistantTaskPlan({
-          request: planRequest,
-          now: commandContext.now,
-          timeZone,
-          tasks,
-          entries,
-          occurrences: context.occurrences,
-          busy: context.busy,
-          settings: plannerSettings,
-          estimateCache: plannerRecord?.estimateCache || {},
-          feedbackMultipliers: plannerRecord?.feedbackMultipliers || {},
-        });
-        assistantReply = presentTaskPlanPreview(planRequest, nextPreview, commandContext.now);
-      } else if (payload.normalizedCommands.length > 0) {
-        // Treat even our own API response as untrusted input. The server
-        // performs the same check, but this second boundary prevents a stale,
-        // cached, or tampered response from staging a different operation,
-        // clock, duration, date, or target in the browser.
-        if (!plannerChatNormalizedCommandsPreserveIntent(
-          conversation.map(message => ({ role: message.role, content: message.content })),
-          payload.normalizedCommands,
-          browserIntentContext,
-        )) {
-          assistantReply = 'I could not preserve every exact detail in that request, so I made no calendar changes. Rephrase it or give me the exact item, date, time, and duration.';
-          setMessages(previous => [...previous, {
-            id: assistantMessageId,
-            role: 'assistant' as const,
-            content: assistantReply,
-          }].slice(-CHAT_DISPLAY_LIMIT));
-          return;
-        }
-        let nextPreview = interpretScheduleCommands(payload.normalizedCommands, commandContext);
-        if (payload.normalizedCommands.length === 1) {
-          const normalizedCommand = payload.normalizedCommands[0];
-          const recovery = recoverExplicitRangeFromFalseSchoolConflict({
-            messages: conversation,
-            normalizedCommand,
-            normalizedPreview: interpretScheduleCommand(normalizedCommand, commandContext),
-            interpret: candidate => interpretScheduleCommand(candidate, commandContext),
-          });
-          if (recovery.recovered) {
-            nextPreview = interpretScheduleCommands([recovery.command], commandContext);
-          }
-        }
-        assistantReply = presentCommandPreview(nextPreview, commandContext.now);
-      } else if (isUnverifiedCalendarOutcome(assistantReply)) {
-        // A prose-only model response has no validated action or collision
-        // result behind it. Never present such a claim as calendar truth.
-        assistantReply = 'I could not verify that calendar claim, so I did not use it. Tell me the item, date, start time, and either an end time or duration, and Orderly will check the real calendar directly.';
-      }
-      setMessages(previous => [...previous, {
-        id: assistantMessageId,
-        role: 'assistant' as const,
-        content: assistantReply,
-      }].slice(-CHAT_DISPLAY_LIMIT));
-    } catch (error) {
-      if (requestId !== chatRequestIdRef.current) return;
-      if (controller.signal.aborted && !timedOut) return;
-      const content = timedOut
-        ? 'That took too long, so I stopped the request. Please try again.'
-        : error instanceof Error
-          ? error.message
-          : 'I could not answer that right now. Please try again.';
-      setMessages(previous => [...previous, {
-        id: `assistant-error-${Date.now()}`,
-        role: 'assistant' as const,
-        content,
-      }].slice(-CHAT_DISPLAY_LIMIT));
-      setCommand(current => current.trim() ? current : normalized);
-    } finally {
-      window.clearTimeout(timeout);
-      if (requestId === chatRequestIdRef.current) {
-        chatAbortRef.current = null;
-        setIsThinking(false);
-      }
+      body = { requestId: crypto.randomUUID(), conversationId, timeZone,
+        localBusy: commandEvents.busy.map(({ id, title, startAt, endAt }) => ({ id, title, startAt, endAt })),
+        messages: [...messages, userMessage].slice(-CHAT_CONTEXT_LIMIT).map(({role, content}) => ({role, content})) };
+      setMessages(previous => [...previous, userMessage].slice(-CHAT_DISPLAY_LIMIT));
+      setCommand('');
     }
-  }, [assistantContextTasks, chatOwnerUserId, command, context, entries, exams, isThinking, messages, pendingTasks, plannerRecord, plannerSettings, presentCommandPreview, presentTaskPlanPreview, preview, previewPlanNow, previewPlanRequest, selectedDate, selectedEventId, selectedTaskId, subjects, tasks, timeZone, userId]);
+    retryRequestRef.current = body;
+    setRetryPending(true);
+    try { window.sessionStorage.setItem(`orderly:pending-chat:${owner}`, JSON.stringify(body)); } catch {}
+    setIsThinking(true);
+    setApplying(true);
+    const timeout = setTimeout(() => controller.abort(), 55_000);
+    try {
+      const [scheduleReady, eventsReady] = await Promise.all([
+        waitForSchedulePersistence(owner),
+        waitForPlannerPersistence(owner),
+      ]);
+      if (!isCurrent()) return;
+      if (!scheduleReady || !eventsReady) throw new Error('Your latest calendar edits have not synced yet. Check this request after the connection recovers.');
+      const response = await fetch('/api/planner/conversation', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body), signal: controller.signal,
+      });
+      const result = await response.json() as ConversationResult & { retryable?: boolean };
+      if (!isCurrent()) return;
+      if (!response.ok) {
+        if (!result.retryable && response.status !== 409) {
+          retryRequestRef.current = null;
+          setRetryPending(false);
+          try { window.sessionStorage.removeItem(`orderly:pending-chat:${owner}`); } catch {}
+        }
+        throw new Error(result.reply || 'I could not confirm that request.');
+      }
+      if (typeof result.reply !== 'string' || typeof result.saved !== 'boolean') throw new Error('The response was incomplete. Check this request again.');
+      retryRequestRef.current = null;
+      setRetryPending(false);
+      try { window.sessionStorage.removeItem(`orderly:pending-chat:${owner}`); } catch {}
+      setMessages(previous => [...previous, { id: result.requestId, role: 'assistant' as const, content: result.reply }].slice(-CHAT_DISPLAY_LIMIT));
+      if (result.saved) {
+        if (activeUndoRef.current) finalizeTaskCreations(activeUndoRef.current.createdTaskIds);
+        activeUndoRef.current = null;
+        setUndoState(null);
+        setLastChatReceipt({ userId: owner, requestId: result.requestId, conversationId: body.conversationId });
+        setPreview(null); setPreviewPlanRequest(null); setPreviewPlanNow(null);
+        setPreviewAnchorDate(null); setPreviewValidatedLocalDate(null);
+        setCalendarOpen(true);
+        try {
+          await useAppStore.getState().refreshData();
+          if (isCurrent()) {
+            const first = result.items?.[0];
+            const savedTask = first?.entity === 'task' ? useAppStore.getState().tasks.find(task => task.id === first.id) : null;
+            const savedEvent = first?.entity === 'event' ? usePlannerStore.getState().users[owner]?.commitments.find(event => event.id === first.id) : null;
+            const date = savedTask?.scheduled_date || savedEvent?.startDate;
+            if (date) selectDay(localDateCarrier(date));
+          }
+        } catch {
+          if (isCurrent()) toast.warning('Saved, but the calendar could not refresh. Reload when your connection returns.');
+        }
+      }
+    } catch (error) {
+      if (isCurrent()) setMessages(previous => [...previous, { id: `uncertain-${body!.requestId}`, role: 'assistant' as const,
+        content: error instanceof Error && error.name !== 'AbortError' ? error.message : 'I stopped waiting. The result is not confirmed yet—use Check last request to recover it safely.' }].slice(-CHAT_DISPLAY_LIMIT));
+    } finally {
+      clearTimeout(timeout);
+      if (isCurrent()) { chatSendLockRef.current = false; setIsThinking(false); setApplying(false); chatAbortRef.current = null; }
+    }
+  }, [chatOwnerUserId, command, commandEvents.busy, finalizeTaskCreations, messages, selectedTaskId, selectDay, timeZone, userId, waitForPlannerPersistence, waitForSchedulePersistence]);
+
+  const undoChatChange = useCallback(async () => {
+    if (!lastChatReceipt || lastChatReceipt.userId !== userId || chatSendLockRef.current) return;
+    const receipt = lastChatReceipt;
+    const body: ConversationRequest = { requestId: crypto.randomUUID(), conversationId: receipt.conversationId,
+      timeZone, messages: [{ role: 'user', content: 'Undo the last saved change.' }], undoRequestId: receipt.requestId };
+    retryRequestRef.current = body;
+    await submitCommand('', null, true);
+    if (!retryRequestRef.current) setLastChatReceipt(null);
+  }, [lastChatReceipt, submitCommand, timeZone, userId]);
 
   const applyPreview = useCallback(async () => {
     if (!userId || !preview || preview.status !== 'ready' || preview.actions.length === 0) return;
@@ -2155,6 +1771,11 @@ export function Planner() {
   }, [applying, entries, installUndoState, occurrenceById, setOccurrenceOverride, timeZone, upsertTaskSchedule, userId]);
 
   const startNewChat = useCallback(() => {
+    if (retryRequestRef.current) { toast.info('Check the last request before starting a new chat.'); return; }
+    conversationIdRef.current = crypto.randomUUID();
+    if (userId) {
+      try { window.sessionStorage.setItem(`orderly:conversation-id:${userId}`, conversationIdRef.current); } catch {}
+    }
     stopThinking();
     if (userId) {
       try {
@@ -2206,7 +1827,7 @@ export function Planner() {
           </span>
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Assistant</h1>
-            <p className="text-sm text-muted-foreground">Draft changes directly on your calendar, then save them.</p>
+            <p className="text-sm text-muted-foreground">Talk through your plans, or ask me to update your calendar.</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -2230,6 +1851,16 @@ export function Planner() {
         </div>
       </header>
 
+      {retryPending && chatReady && (
+        <Button type="button" variant="outline" disabled={activeIsThinking} onClick={() => void submitCommand('', null, true)}>
+          Check last request
+        </Button>
+      )}
+      {lastChatReceipt?.userId === userId && (
+        <Button type="button" variant="outline" disabled={activeIsThinking} onClick={() => void undoChatChange()}>
+          <Undo2 className="h-4 w-4" /> Undo last chat change
+        </Button>
+      )}
       <AssistantChat
         messages={activeMessages}
         command={activeCommand}

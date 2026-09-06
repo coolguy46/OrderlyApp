@@ -5,30 +5,20 @@ import test from 'node:test';
 const plannerUrl = new URL('../components/planner/Planner.tsx', import.meta.url);
 const chatUrl = new URL('../components/planner/assistant/AssistantChat.tsx', import.meta.url);
 
-test('Assistant uses the bounded multi-turn chat API contract', async () => {
+test('Assistant sends natural conversation to one semantic API, without parser interception', async () => {
   const source = await readFile(plannerUrl, 'utf8');
-
-  assert.match(source, /fetch\('\/api\/planner\/chat'/);
-  assert.match(source, /messages: conversation\.map\(message => \(\{ role: message\.role, content: message\.content \}\)\)/);
-  assert.match(source, /const assistantContextTasks = useMemo/);
-  assert.match(source, /tasks: providerTasks\.slice\(0, 30\)/);
-  assert.match(source, /taskSummary,/);
-  assert.match(source, /dueDate: task\.due_date/);
-  assert.match(source, /dueTime: task\.due_time/);
-  assert.match(source, /\.slice\(0, 20\)[\s\S]*examDate: exam\.exam_date/);
-  assert.match(source, /occurrences: context\.occurrences\.slice\(0, 80\)/);
-  assert.match(source, /busy: \(context\.busy \|\| \[\]\)\.slice\(0, 80\)/);
-  assert.match(source, /activeDraft: browserIntentContext\.activeDraft/);
-  assert.match(source, /interpretScheduleCommands\(payload\.normalizedCommands/);
-  assert.match(source, /payload\.normalizedCommands\.length > 0/);
-  assert.match(source, /describeScheduleCommandDraft\(nextPreview, timeZone\)/);
-  assert.match(source, /interpretDirectScheduleRequest\(normalized, commandContext\)/);
-  assert.ok(
-    source.indexOf('interpretDirectScheduleRequest(normalized, commandContext)')
-      < source.indexOf("fetch('/api/planner/chat'"),
-    'direct calendar commands must be validated before the paid AI request',
-  );
-  assert.match(source, /isUnverifiedCalendarOutcome\(assistantReply\)/);
+  const submit = source.slice(source.indexOf('const submitCommand'), source.indexOf('const undoChatChange'));
+  assert.match(submit, /fetch\('\/api\/planner\/conversation'/);
+  assert.match(submit, /messages: \[\.\.\.messages, userMessage\]\.slice\(-CHAT_CONTEXT_LIMIT\)/);
+  assert.match(submit, /chatSendLockRef\.current/);
+  assert.match(submit, /requestId: crypto\.randomUUID\(\)/);
+  assert.match(submit, /retryRequestRef\.current = body/);
+  assert.doesNotMatch(submit, /interpretDirectScheduleRequest|normalizedCommands|PreserveIntent|resolveAssistantTaskQuery/);
+  const route = await readFile(new URL('../app/api/planner/conversation/route.ts', import.meta.url), 'utf8');
+  assert.match(route, /assistant_calendar_snapshot/);
+  assert.match(route, /conversationFacts\(calendar, receipts\)/);
+  assert.match(route, /parseConversationIntent\(raw\)/);
+  assert.match(route, /compileConversation\(intent, calendar\)/);
 });
 
 test('Assistant history is account-scoped and bounded', async () => {
@@ -102,7 +92,7 @@ test('Assistant stages changes on the calendar and revalidates before saving', a
   const source = await readFile(plannerUrl, 'utf8');
   const applySection = source.slice(
     source.indexOf('const applyPreview'),
-    source.indexOf('const undo'),
+    source.indexOf('const undo ='),
   );
 
   assert.match(applySection, /const saveNow = new Date\(\)\.toISOString\(\)/);
@@ -129,7 +119,7 @@ test('Assistant persists events as calendar commitments with rollback and undo',
   const source = await readFile(plannerUrl, 'utf8');
   const applySection = source.slice(
     source.indexOf('const applyPreview'),
-    source.indexOf('const undo'),
+    source.indexOf('const undo ='),
   );
 
   assert.match(source, /scheduleEventActionToCommitment/);
@@ -186,10 +176,10 @@ test('Undo conditionally completes account-keyed rollback before guarding active
   const source = await readFile(plannerUrl, 'utf8');
   const applySection = source.slice(
     source.indexOf('const applyPreview'),
-    source.indexOf('const undo'),
+    source.indexOf('const undo ='),
   );
   const undoSection = source.slice(
-    source.indexOf('const undo'),
+    source.indexOf('const undo ='),
     source.indexOf('const persistCommitmentOccurrence'),
   );
 
@@ -243,50 +233,35 @@ test('schedule Undo snapshots capture the applied state after synchronous drag m
   );
 });
 
-test('follow-up chat keeps an unsaved calendar draft and accepts atomic command bundles', async () => {
+test('chat displays success only from confirmed saved results, and refreshes the main calendar', async () => {
   const source = await readFile(plannerUrl, 'utf8');
-  const submitSection = source.slice(
-    source.indexOf('const submitCommand'),
-    source.indexOf('const applyPreview'),
-  );
-  const presentationSection = source.slice(
-    source.indexOf('const presentCommandPreview'),
-    source.indexOf('const submitCommand'),
-  );
-
-  const mutationBranch = submitSection.slice(submitSection.indexOf('if (payload.planRequest)'));
-  const questionOnlyPath = submitSection.slice(0, submitSection.indexOf('if (payload.planRequest)'));
-
-  assert.doesNotMatch(questionOnlyPath, /setPreview\(null\)/);
-  assert.match(mutationBranch, /if \(payload\.planRequest\)/);
-  assert.match(mutationBranch, /else if \(payload\.normalizedCommands\.length > 0\)/);
-  assert.match(presentationSection, /setPreview\(nextPreview\)/);
-  assert.doesNotMatch(presentationSection, /setPreview\(null\)/);
-  assert.match(submitSection, /presentCommandPreview\(nextPreview/);
-  assert.match(submitSection, /presentTaskPlanPreview\(planRequest, nextPreview/);
-  assert.match(presentationSection, /one draft/);
+  const submit = source.slice(source.indexOf('const submitCommand'), source.indexOf('const undoChatChange'));
+  assert.match(submit, /if \(result.saved\)/);
+  assert.match(submit, /refreshData\(\)/);
+  assert.match(submit, /content: result.reply/);
+  assert.match(submit, /setCalendarOpen\(true\)/);
+  assert.match(submit, /selectDay\(localDateCarrier\(date\)\)/);
+  assert.match(submit, /window.sessionStorage.setItem/);
+  assert.match(source, /Check last request/);
+  assert.match(source, /Undo last chat change/);
+  assert.doesNotMatch(submit, /presentCommandPreview|presentTaskPlanPreview/);
 });
 
-test('a factual task answer can be scheduled by an immediate grounded follow-up', async () => {
-  const source = await readFile(plannerUrl, 'utf8');
-  const submitSection = source.slice(
-    source.indexOf('const submitCommand'),
-    source.indexOf('const applyPreview'),
-  );
-
-  assert.match(submitSection, /const factualResult = resolveAssistantTaskQuery/);
-  assert.match(submitSection, /const priorTaskResult = priorUserMessage/);
-  assert.match(submitSection, /taskScope: 'task_ids'/);
-  assert.match(submitSection, /taskIds: priorTaskResult\.taskIds/);
-  assert.match(submitSection, /lastAssistantMessage\.content === priorTaskResult\.reply/);
-  assert.match(submitSection, /presentTaskPlanPreview\(/);
+test('follow-ups use confirmed server receipts rather than matching old assistant prose', async () => {
+  const source = await readFile(new URL('../app/api/planner/conversation/route.ts', import.meta.url), 'utf8');
+  assert.match(source, /eq\('conversation_id', input.conversationId\)/);
+  assert.match(source, /confirmed|receipts/);
+  assert.match(source, /\.\.\.input.messages/);
+  assert.match(source, /attempt < 2/);
+  assert.match(source, /Validation feedback/);
+  assert.doesNotMatch(source, /lastAssistantMessage.content ===|inferPlannerChat|normalizedCommands/);
 });
 
 test('Assistant drafts expire safely across a local-date boundary', async () => {
   const source = await readFile(plannerUrl, 'utf8');
   const applySection = source.slice(
     source.indexOf('const applyPreview'),
-    source.indexOf('const undo'),
+    source.indexOf('const undo ='),
   );
 
   assert.match(source, /type StoredAssistantDraft =/);
@@ -301,15 +276,12 @@ test('Assistant drafts expire safely across a local-date boundary', async () => 
   assert.match(applySection, /setPreview\(null\);\s+setPreviewPlanRequest\(null\);\s+setPreviewPlanNow\(null\);\s+setPreviewAnchorDate\(null\);\s+setPreviewValidatedLocalDate\(null\)/);
 });
 
-test('Assistant client rejects malformed plan requests before planning', async () => {
-  const source = await readFile(plannerUrl, 'utf8');
-
-  assert.match(
-    source,
-    /candidate\.planRequest === null \|\| sanitizePlannerChatPlanRequest\(candidate\.planRequest\) !== null/,
-  );
-  assert.match(source, /const planRequest = sanitizePlannerChatPlanRequest\(payload\.planRequest\)/);
-  assert.match(source, /if \(!planRequest\) throw new Error\('The Assistant returned an invalid planning request/);
+test('semantic protocol rejects invalid plans and separates discussion from writes', async () => {
+  const source = await readFile(new URL('../lib/planner/conversation.ts', import.meta.url), 'utf8');
+  assert.match(source, /Discussion cannot contain writes/);
+  assert.match(source, /Existing item ID required/);
+  assert.match(source, /number\(p.horizonDays, 1, 14\)/);
+  assert.match(source, /new Intl.DateTimeFormat\('en', \{ timeZone \}\)/);
 });
 
 test('Assistant save guard cannot apply a newly placed block in the past', async () => {
@@ -337,7 +309,7 @@ test('chat UI keeps the composer visible and calendar controls secondary', async
   assert.match(chatSource, /sticky bottom-0/);
   assert.match(chatSource, /New chat/);
   assert.match(chatSource, /Stop response/);
-  assert.match(chatSource, /Calendar drafts are saved only after you confirm them/);
+  assert.match(chatSource, /Requested changes save directly to your calendar/);
   assert.doesNotMatch(chatSource, /Proposed schedule change/);
   assert.match(plannerSource, /aria-expanded=\{calendarOpen\}/);
   assert.match(plannerSource, /setCalendarExpanded/);

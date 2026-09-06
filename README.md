@@ -179,6 +179,43 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## Conversational Assistant rollout
+
+Apply `lib/supabase/assistant-conversation-migration.sql` **before deploying** the
+conversational Assistant. It depends on `planner-migration.sql`,
+`task-scheduling-migration.sql`, and the existing assistant usage migration.
+It creates only an owner-scoped receipt table and two security-invoker RPCs;
+it does not rewrite existing assignments. A Git push does not run SQL migrations.
+
+The current chat UI uses `/api/planner/conversation`. The older `/chat` and
+`/command` endpoints remain compatible with already-open older clients and stored
+drafts, but are no longer part of the new conversational interpretation path.
+Refresh the browser after deployment.
+
+The new path loads authenticated task/event/preferences data, asks DeepSeek for
+typed intent, validates the complete resulting calendar, and saves a bundle in
+one transaction. There is at most one interpretation repair using real validation
+feedback. The same request ID retrieves a durable receipt on retry rather than
+buying another model call or creating a duplicate. The UI refreshes from saved
+data; **Check last request** recovers uncertain responses and **Undo last chat
+change** uses the recorded inverse bundle, refusing to overwrite newer edits.
+The provider/model and configured user quotas are unchanged.
+
+Run `npm run test:assistant` for conversational regression tests, including an
+isolated PostgreSQL database via the development-only PGlite dependency. Bulk
+language responses are mocked; those tests validate typed interpretation,
+planning, actual database state, rollback, idempotency, and RLS—not model quality.
+Production smoke tests must use explicitly labeled disposable tasks/events and
+verify the saved calendar again after refreshing.
+
+Known boundaries: broad plans cover up to 14 days; exact additions up to a year.
+Events support one-time, daily and weekly repeats. Chat does not delete imported
+assignments or convert repeating/completed/dated assignments into events, because
+that would discard assignment history. Completion remains in the Tasks UI.
+Browser-only legacy events reserve their supplied calendar intervals but must be
+edited through their existing UI. Ambiguous DST repeated hours require a clearer
+time. The model can still misunderstand language; it is not guaranteed perfect.
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:
