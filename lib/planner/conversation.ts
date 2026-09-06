@@ -179,8 +179,11 @@ export function parseConversationIntent(raw: string): ConversationIntent {
   }
   if ((mode === 'discuss' || mode === 'clarify') && (operations.length || plan)) throw new Error('Discussion cannot contain writes');
   if (mode === 'plan' && !plan) throw new Error('Missing plan');
-  if (mode === 'act' && (!operations.length || plan)) throw new Error('Missing actions or conflicting modes');
-  return { mode, reply, assumptions, operations, plan };
+  if (mode === 'act' && !operations.length && !plan) throw new Error('Missing actions');
+  // ACT and PLAN are both authorized mutation responses. A valid mixed bundle
+  // must not fail merely because the model labeled its edit+plan as ACT.
+  // Discussion/clarification still strictly reject any proposed writes above.
+  return { mode: mode === 'act' && plan ? 'plan' : mode, reply, assumptions, operations, plan };
 }
 
 export function conversationSystemPrompt(context: unknown): string {

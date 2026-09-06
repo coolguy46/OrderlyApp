@@ -164,6 +164,21 @@ test('two-week planning does not silently truncate the second week', async () =>
   assert.equal(compiled.writes[0].data.scheduled_date, '2026-09-13');
 });
 
+test('mixed edits and planning are valid under either mutation label', async () => {
+  const state = await snapshot();
+  const payload = {
+    taskScope: 'task_ids', taskIds: [], startDate: '2026-09-07', horizonDays: 7,
+    todayLoad: 'normal', includeAlreadyScheduled: false, availableAfter: '17:00',
+    allowedWeekdays: [0,2,3,4,6], additionalTasks: [{ title: 'Reading', durationMinutes: 30 }],
+  };
+  const parsed = intent([{ action: 'create', entity: 'event', title: 'Call', date: '2026-09-07', start: '20:00', durationMinutes: 20 }], { mode: 'act', plan: payload });
+  assert.equal(parsed.mode, 'plan');
+  const compiled = compileConversation(parsed, calendarFromSnapshot(state, owner, NOW, zone));
+  assert.equal(compiled.writes.length, 2);
+  assert.equal(compiled.writes.find(write => write.entity === 'task').data.scheduled_date, '2026-09-08');
+  assert.throws(() => intent(parsed.operations, { mode: 'discuss', plan: payload }), /Discussion cannot/);
+});
+
 test('school interval is real: 10–11 PM works, 10–11 AM conflicts', async () => {
   const state = await snapshot();
   const calendar = calendarFromSnapshot(state, owner, NOW, zone);
