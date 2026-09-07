@@ -13,13 +13,14 @@ import {
   SheetContent,
 } from '@/components/ui/sheet';
 import { useMediaQuery } from '@/lib/use-hydrated';
+import { TutorialProvider, TutorialInvitation } from '@/components/tutorial/Tutorial';
 
 interface MainLayoutProps {
   children: React.ReactNode;
 }
 
 export function MainLayout({ children }: MainLayoutProps) {
-  const { sidebarOpen } = useAppStore();
+  const { sidebarOpen, user } = useAppStore();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const isDesktop = useMediaQuery('(min-width: 1024px)');
   const pathname = usePathname();
@@ -31,6 +32,7 @@ export function MainLayout({ children }: MainLayoutProps) {
   }
 
   return (
+    <TutorialProvider userId={user?.id}>
     <div className="min-h-dvh bg-background bg-grain mesh-gradient">
       {/* Desktop sidebar */}
       <div className="hidden lg:block">
@@ -52,6 +54,7 @@ export function MainLayout({ children }: MainLayoutProps) {
       >
         <Header />
         <main className="flex-1 px-4 pt-4 pb-20 sm:px-6 sm:pb-6 lg:px-10 lg:pb-10 lg:pt-6 relative">
+          {pathname === '/' && <TutorialInvitation />}
           <ErrorBoundary>
             <AnimatePresence mode="wait">
               <motion.div
@@ -71,5 +74,6 @@ export function MainLayout({ children }: MainLayoutProps) {
       {/* Mobile bottom navigation */}
       <BottomNav onMoreTap={() => setMobileMenuOpen(true)} />
     </div>
+    </TutorialProvider>
   );
 }

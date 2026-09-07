@@ -30,6 +30,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import Image from 'next/image';
+import { TutorialHelpButton } from '@/components/tutorial/Tutorial';
 
 export function Header() {
   const router = useRouter();
@@ -296,6 +297,7 @@ export function Header() {
             </Button>
 
             {/* User Menu */}
+            <TutorialHelpButton />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" className="gap-2 px-2 h-10">

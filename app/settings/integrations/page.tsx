@@ -6,6 +6,7 @@ import { Card, CardContent, Button, Input } from '@/components/ui';
 import { useCanvasSyncSupabase, formatTimeUntilSync, formatLastSync } from '@/lib/integrations/useCanvasSyncSupabase';
 import { useAppStore } from '@/lib/store';
 import { useCurrentTime } from '@/lib/use-current-time';
+import CanvasGuide from '@/components/tutorial/CanvasGuide';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Link2,
@@ -431,7 +432,7 @@ export default function IntegrationsPage() {
               </div>
             ) : (
               <div className="space-y-6">
-                <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
+                <div className="grid gap-4">
                   <section className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-5 md:p-6">
                     <div className="mb-5 flex h-11 w-11 items-center justify-center rounded-xl bg-[#e13f2a]/10 text-[#ff735e]">
                       <Link2 className="h-5 w-5" />
@@ -463,24 +464,6 @@ export default function IntegrationsPage() {
                     </div>
                   </section>
 
-                  <section className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-5 md:p-6">
-                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">Where to find it</p>
-                    <ol className="mt-5 space-y-4">
-                      {[
-                        ['1', 'Open Canvas Calendar', 'Select Calendar from the Canvas navigation.'],
-                        ['2', 'Choose Calendar Feed', 'Find the Calendar Feed link at the bottom right.'],
-                        ['3', 'Copy and paste', 'Copy the full URL and paste it into Orderly.'],
-                      ].map(([step, title, description]) => (
-                        <li key={step} className="flex gap-3">
-                          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#e13f2a]/10 text-xs font-semibold text-[#ff735e]">{step}</span>
-                          <div>
-                            <p className="text-sm font-medium">{title}</p>
-                            <p className="mt-0.5 text-xs leading-5 text-muted-foreground">{description}</p>
-                          </div>
-                        </li>
-                      ))}
-                    </ol>
-                  </section>
                 </div>
 
                 <div className="grid gap-3 border-t border-white/[0.07] pt-6 sm:grid-cols-3">
@@ -502,6 +485,18 @@ export default function IntegrationsPage() {
             )}
           </CardContent>
         </Card>
+
+        <details open={!canvasSettings.icalUrl} className="rounded-2xl border border-border bg-card/70">
+          <summary className="cursor-pointer rounded-2xl px-5 py-4 text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background sm:px-6">
+            Canvas connection guide
+          </summary>
+          <div className="border-t border-border px-5 py-5 sm:px-6">
+            <p className="mb-5 text-sm text-muted-foreground">
+              Follow these steps now, or return to this guide anytime.
+            </p>
+            <CanvasGuide />
+          </div>
+        </details>
       </div>
     </MainLayout>
   );
