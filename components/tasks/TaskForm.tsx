@@ -59,6 +59,8 @@ import {
 } from '@/lib/schedule/selectors';
 import { saveExistingTaskInOrder } from '@/lib/task-form-save-sequence';
 import { externalHtmlToPlainText } from '@/lib/safe-content';
+import { withCommitmentOccurrenceOverride } from '@/lib/planner/commitments';
+import { buildScheduleOccurrences } from '@/lib/schedule/selectors';
 
 export type TaskFormMode = 'task' | 'event';
 
@@ -67,6 +69,7 @@ export interface TaskFormProps {
   onClose: () => void;
   task?: Task | null;
   commitment?: RecurringCommitmentInput | null;
+  occurrenceDate?: string | null;
   initialMode?: TaskFormMode;
   initialDate?: string;
   initialStartTime?: string;
@@ -134,6 +137,7 @@ export function TaskForm({
   onClose,
   task,
   commitment,
+  occurrenceDate,
   initialMode = 'task',
   initialDate = '',
   initialStartTime = '',
@@ -157,6 +161,8 @@ export function TaskForm({
     : '';
   const upsertTaskSchedule = useScheduleStore(state => state.upsertTaskSchedule);
   const removeTaskSchedule = useScheduleStore(state => state.removeTaskSchedule);
+  const setOccurrenceOverride = useScheduleStore(state => state.setOccurrenceOverride);
+  const clearOccurrenceOverride = useScheduleStore(state => state.clearOccurrenceOverride);
   const waitForSchedulePersistence = useScheduleStore(state => state.waitForSchedulePersistence);
   const upsertCommitment = usePlannerStore(state => state.upsertCommitment);
   const removeCommitment = usePlannerStore(state => state.removeCommitment);
@@ -190,6 +196,10 @@ export function TaskForm({
     endClockFromDuration(normalizedClock(initialStartTime), initialDurationSeconds),
   );
   const [eventRecurrenceDays, setEventRecurrenceDays] = useState<number[]>([]);
+  const [repeatUntil, setRepeatUntil] = useState('');
+  const [editWholeSeries, setEditWholeSeries] = useState(false);
+  const editingEventOccurrence = Boolean(commitment && occurrenceDate && commitmentRepeatsWeekly(commitment) && !editWholeSeries);
+  const editingTaskOccurrence = Boolean(task && occurrenceDate && task.recurrence !== 'none' && task.status !== 'completed' && !editWholeSeries);
   const [eventKind, setEventKind] = useState<CommitmentKind>('other');
   const [eventColor, setEventColor] = useState<string>(EVENT_COLORS[0]);
   
@@ -222,6 +232,8 @@ export function TaskForm({
     setSaveError('');
     setRecurrence('none');
     setRecurrenceDays([]);
+    setRepeatUntil('');
+    setEditWholeSeries(false);
     setEventLocation('');
     setEventDate(initialDate);
     setEventStartTime(nextStartTime);
@@ -290,15 +302,31 @@ export function TaskForm({
         setSaveError('');
         setRecurrence(task.recurrence || 'none');
         setRecurrenceDays(task.recurrence_days || []);
+        setRepeatUntil(scheduleEntry?.recurrenceEndDate || '');
+        if (editingTaskOccurrence && occurrenceDate) {
+          const date = scheduleEntry?.occurrenceOverrides[occurrenceDate]?.scheduledDate || occurrenceDate;
+          const occurrences = buildScheduleOccurrences({ tasks: [task], entries: scheduleEntry ? [scheduleEntry] : [],
+            startDate: date, endDate: date, timeZone });
+          const occurrence = [...occurrences.timed, ...occurrences.untimed].find(item => item.recurrenceSourceDate === occurrenceDate);
+          if (occurrence) {
+            setTitle(occurrence.title);
+            setDescription(externalHtmlToPlainText(occurrence.description));
+            setScheduleDate(occurrence.date);
+            setScheduleStartTime(occurrence.startAt ? localTimeFromIso(occurrence.startAt, timeZone) || '' : '');
+            setDurationInput(formatDurationInput(occurrence.durationSeconds));
+          }
+        }
       } else if (commitment) {
         const repeatsWeekly = commitmentRepeatsWeekly(commitment);
+        const override = editingEventOccurrence && occurrenceDate ? commitment.occurrenceOverrides?.[occurrenceDate] : undefined;
         setMode('event');
-        setTitle(commitment.title);
-        setDescription(commitment.description || '');
-        setEventLocation(commitment.location || '');
-        setEventDate(commitment.startDate || initialDate);
-        setEventStartTime(normalizedClock(commitment.startTime));
-        setEventEndTime(normalizedClock(commitment.endTime));
+        setTitle(override?.title ?? commitment.title);
+        setDescription((override?.description !== undefined ? override.description : commitment.description) || '');
+        setEventLocation((override?.location !== undefined ? override.location : commitment.location) || '');
+        setEventDate(editingEventOccurrence ? override?.scheduledDate || occurrenceDate || initialDate : commitment.startDate || initialDate);
+        setEventStartTime(normalizedClock(override?.startTime || commitment.startTime));
+        setEventEndTime(normalizedClock(override?.endTime || commitment.endTime));
+        setRepeatUntil(repeatsWeekly ? commitment.endDate || '' : '');
         setEventRecurrenceDays(repeatsWeekly
           ? [...new Set(commitment.daysOfWeek.filter(day => Number.isInteger(day) && day >= 0 && day <= 6))].sort()
           : []);
@@ -312,7 +340,7 @@ export function TaskForm({
       }
     });
     return () => { cancelled = true; };
-  }, [commitment, initialDate, task, isOpen, scheduleEntry, timeZone, resetForm]);
+  }, [commitment, initialDate, task, isOpen, scheduleEntry, timeZone, resetForm, editingEventOccurrence, editingTaskOccurrence, occurrenceDate]);
 
   const handleCreateSubject = async () => {
     const subjectName = newSubjectName.trim();
@@ -400,6 +428,10 @@ export function TaskForm({
       setScheduleError('The event start and end time must be different.');
       return;
     }
+    if (!editingEventOccurrence && eventRecurrenceDays.length && repeatUntil && repeatUntil < eventDate) {
+      setScheduleError('The repeat end date must be on or after the start date.');
+      return;
+    }
 
     const eventWeekday = weekdayForLocalDate(eventDate);
     if (eventWeekday === null || !localDateTimeToIso(eventDate, `${eventStartTime}:00`, eventTimeZone)) {
@@ -415,8 +447,7 @@ export function TaskForm({
 
     try {
       const repeatsWeekly = eventRecurrenceDays.length > 0;
-      const wasRepeatingWeekly = commitment ? commitmentRepeatsWeekly(commitment) : false;
-      const commitmentInput: RecurringCommitmentInput = {
+      const seriesInput: RecurringCommitmentInput = {
         id: commitment?.id || newCommitmentId(),
         title: title.trim(),
         description: description.trim() || null,
@@ -426,15 +457,18 @@ export function TaskForm({
         startTime: eventStartTime,
         endTime: eventEndTime,
         startDate: eventDate,
-        endDate: repeatsWeekly
-          ? wasRepeatingWeekly ? commitment?.endDate || null : null
-          : eventDate,
+        endDate: repeatsWeekly ? repeatUntil || null : eventDate,
         timeZone: eventTimeZone,
         enabled: commitment?.enabled ?? true,
         color: eventColor,
         updatedAt: new Date().toISOString(),
         occurrenceOverrides: commitment?.occurrenceOverrides || {},
       };
+      const commitmentInput = editingEventOccurrence && commitment && occurrenceDate
+        ? withCommitmentOccurrenceOverride(commitment, occurrenceDate, {
+          title: title.trim(), description: description.trim() || null, location: eventLocation.trim() || null,
+          scheduledDate: eventDate, startTime: eventStartTime, endTime: eventEndTime,
+        }) : seriesInput;
       upsertCommitment(user.id, commitmentInput);
       const persisted = await waitForPlannerPersistence(user.id);
       if (!isCurrentSubmission()) return;
@@ -489,6 +523,11 @@ export function TaskForm({
       setScheduleError('Choose a schedule date before adding a start time.');
       return;
     }
+    const repeatAnchor = scheduleDate || dueDate || localDateFromIso(new Date().toISOString(), timeZone)!;
+    if (!editingTaskOccurrence && recurrence !== 'none' && repeatUntil && repeatUntil < repeatAnchor) {
+      setScheduleError('The repeat end date must be on or after the schedule date.');
+      return;
+    }
 
     const startAt = scheduleStartTime
       ? localDateTimeToIso(scheduleDate, `${scheduleStartTime}:00`, timeZone)
@@ -535,6 +574,26 @@ export function TaskForm({
     const isCurrentSubmission = () => formSessionRef.current === submitSession;
 
     try {
+      if (editingTaskOccurrence && task && occurrenceDate && user?.id) {
+        if (!scheduleDate) { setScheduleError('Choose a date for this occurrence.'); return; }
+        if (!scheduleEntry) {
+          // Give a virtual recurring task a durable anchor before overriding
+          // one occurrence. Never use the target date as the series anchor.
+          upsertTaskSchedule(user.id, task.id, { scheduledDate: localDateFromIso(task.due_date || task.created_at, timeZone),
+            recurrence: task.recurrence, recurrenceDays: task.recurrence_days });
+        }
+        const originalOverride = scheduleEntry?.occurrenceOverrides[occurrenceDate];
+        setOccurrenceOverride(user.id, task.id, occurrenceDate, { title: title.trim(), description: description || null,
+          scheduledDate: scheduleDate, startAt, durationSeconds });
+        if (!(await waitForSchedulePersistence(user.id, [task.id]))) {
+          if (originalOverride) setOccurrenceOverride(user.id, task.id, occurrenceDate, originalOverride);
+          else clearOccurrenceOverride(user.id, task.id, occurrenceDate);
+          setSaveError('This occurrence could not be saved. The original schedule was restored.');
+          return;
+        }
+        if (isCurrentSubmission()) { notifySaved(); closeForm(); }
+        return;
+      }
       const completingFromForm = Boolean(task && task.status !== 'completed' && status === 'completed');
       const taskData = {
         user_id: user?.id || '',
@@ -561,15 +620,15 @@ export function TaskForm({
 
       const persistSchedule = (taskId: string) => {
         if (!user?.id) return;
-        const hasScheduleMetadata = Boolean(scheduleDate || startAt || durationSeconds);
+        const hasScheduleMetadata = Boolean(scheduleDate || startAt || durationSeconds || recurrence !== 'none');
         if (hasScheduleMetadata) {
           upsertTaskSchedule(user.id, taskId, {
-            scheduledDate: scheduleDate || null,
+            scheduledDate: scheduleDate || (recurrence !== 'none' ? repeatAnchor : null),
             startAt,
             durationSeconds,
             recurrence,
             recurrenceDays: recurrence === 'weekly' ? recurrenceDays : null,
-            recurrenceEndDate: scheduleEntry?.recurrenceEndDate || null,
+            recurrenceEndDate: recurrence !== 'none' ? repeatUntil || null : null,
           });
         } else {
           removeTaskSchedule(user.id, taskId);
@@ -656,7 +715,9 @@ export function TaskForm({
   const handleDeleteEvent = async () => {
     if (!user?.id || !commitment) return;
     setIsSubmitting(true);
-    removeCommitment(user.id, commitment.id);
+    if (editingEventOccurrence && occurrenceDate) {
+      upsertCommitment(user.id, withCommitmentOccurrenceOverride(commitment, occurrenceDate, { skipped: true }));
+    } else removeCommitment(user.id, commitment.id);
     const persisted = await waitForPlannerPersistence(user.id);
     if (!persisted) {
       upsertCommitment(user.id, commitment);
@@ -781,6 +842,16 @@ export function TaskForm({
           )}
 
           {/* Title */}
+          {task && occurrenceDate && task.recurrence !== 'none' && task.status !== 'completed' && (
+            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+              <Label htmlFor="task-edit-scope">Change</Label>
+              <select id="task-edit-scope" className="rounded-md border border-border/50 bg-background px-2 py-1.5"
+                value={editWholeSeries ? 'series' : 'occurrence'} onChange={event => setEditWholeSeries(event.target.value === 'series')}>
+                <option value="occurrence">Only this occurrence ({occurrenceDate})</option>
+                <option value="series">Entire series</option>
+              </select>
+            </div>
+          )}
           <div className="space-y-1.5">
             <Label htmlFor="title" className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
               <FileText className="w-3 h-3" />
@@ -824,6 +895,8 @@ export function TaskForm({
 
           {!isEventMode ? (
           <>
+          {editingTaskOccurrence && <p className="text-xs text-muted-foreground">Changing this work session only. Status, deadline and repeat settings belong to the entire series.</p>}
+          <fieldset disabled={editingTaskOccurrence} className="space-y-4 disabled:opacity-60">
           {/* Priority & Status row */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="space-y-1.5">
@@ -1108,6 +1181,13 @@ export function TaskForm({
           )}
 
           {/* Scheduling is intentionally separate from the deadline above. */}
+          {recurrence !== 'none' && (
+            <div className="flex items-center gap-2">
+              <Label htmlFor="task-repeat-until" className="shrink-0 text-xs">Repeat until (optional)</Label>
+              <Input id="task-repeat-until" type="date" className="h-8" value={repeatUntil} min={scheduleDate || undefined} onChange={event => setRepeatUntil(event.target.value)} />
+            </div>
+          )}
+          </fieldset>
           <div className="space-y-3 rounded-xl border border-border/40 bg-muted/15 p-3">
             <div>
               <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
@@ -1214,6 +1294,16 @@ export function TaskForm({
           </>
           ) : (
           <>
+            {commitment && occurrenceDate && commitmentRepeatsWeekly(commitment) && (
+              <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                <Label htmlFor="event-edit-scope">Change</Label>
+                <select id="event-edit-scope" className="rounded-md border border-border/50 bg-background px-2 py-1.5"
+                  value={editWholeSeries ? 'series' : 'occurrence'} onChange={event => setEditWholeSeries(event.target.value === 'series')}>
+                  <option value="occurrence">Only this occurrence ({occurrenceDate})</option>
+                  <option value="series">Entire series</option>
+                </select>
+              </div>
+            )}
             <div className="space-y-1.5">
               <Label htmlFor="event-location" className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 <MapPin className="h-3 w-3" />
@@ -1293,6 +1383,7 @@ export function TaskForm({
                 </Label>
                 <Select
                   value={eventKind}
+                  disabled={editingEventOccurrence}
                   onValueChange={value => setEventKind(value as CommitmentKind)}
                 >
                   <SelectTrigger id="event-kind" className="h-9 border-border/50 bg-muted/30">
@@ -1329,6 +1420,7 @@ export function TaskForm({
                       type="button"
                       aria-label={`Use ${SUBJECT_COLOR_NAMES[color] || color} for this event`}
                       aria-pressed={eventColor === color}
+                      disabled={editingEventOccurrence}
                       onClick={() => setEventColor(color)}
                       className={cn(
                         'h-5 w-5 rounded-full transition-transform hover:scale-110',
@@ -1341,7 +1433,7 @@ export function TaskForm({
               </div>
             </div>
 
-            <div className="space-y-1.5 rounded-xl border border-border/40 bg-muted/15 p-3">
+            {!editingEventOccurrence && <div className="space-y-1.5 rounded-xl border border-border/40 bg-muted/15 p-3">
               <Label id="event-recurrence-days-label" className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 <Repeat className="h-3 w-3" /> Repeat Weekly
                 <span className="font-normal normal-case tracking-normal text-muted-foreground/50">(optional)</span>
@@ -1370,7 +1462,13 @@ export function TaskForm({
               <p className="text-[11px] leading-relaxed text-muted-foreground/70">
                 Leave every day unselected for a one-time event. Select days to repeat weekly starting on {eventDate || 'the event date'}.
               </p>
-            </div>
+              {eventRecurrenceDays.length > 0 && (
+                <div className="flex items-center gap-2 pt-1">
+                  <Label htmlFor="event-repeat-until" className="shrink-0 text-xs">Repeat until (optional)</Label>
+                  <Input id="event-repeat-until" type="date" className="h-8" value={repeatUntil} min={eventDate} onChange={event => setRepeatUntil(event.target.value)} />
+                </div>
+              )}
+            </div>}
 
             {scheduleError && <p role="alert" className="text-xs text-red-400">{scheduleError}</p>}
             {saveError && (
@@ -1451,7 +1549,7 @@ export function TaskForm({
         onOpenChange={setEventDeleteOpen}
         title="Remove Event"
         description={commitment
-          ? `Remove “${commitment.title}”${commitmentRepeatsWeekly(commitment) ? ' and every occurrence in this repeating series' : ''} from your calendar?`
+          ? `Remove “${commitment.title}”${editingEventOccurrence ? ` only on ${occurrenceDate}` : commitmentRepeatsWeekly(commitment) ? ' and every occurrence in this repeating series' : ''} from your calendar?`
           : ''}
         confirmLabel="Remove Event"
         variant="danger"

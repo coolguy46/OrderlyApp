@@ -12,7 +12,7 @@ const [calendarSource, plannerSource, formSource, gridSource] = await Promise.al
 test('an empty calendar slot opens the shared Task/Event form with its exact slot', () => {
   assert.match(calendarSource, /onEmptySlotClick=\{handleEmptySlotClick\}/);
   assert.match(calendarSource, /setCreationSlot\(\{[\s\S]*date,[\s\S]*startTime,[\s\S]*durationSeconds/);
-  assert.match(calendarSource, /<TaskForm[\s\S]*initialMode="task"[\s\S]*initialDate=\{creationSlot\?\.date \|\| ''\}[\s\S]*initialStartTime=\{creationSlot\?\.startTime \|\| ''\}[\s\S]*initialDurationSeconds=\{creationSlot\?\.durationSeconds \|\| null\}/);
+  assert.match(calendarSource, /<TaskForm[\s\S]*initialMode="task"[\s\S]*initialDate=\{creationSlot\?\.date \|\| \(selectedDate \? format\(selectedDate, 'yyyy-MM-dd'\) : ''\)\}[\s\S]*initialStartTime=\{creationSlot\?\.startTime \|\| ''\}[\s\S]*initialDurationSeconds=\{creationSlot\?\.durationSeconds \|\| null\}/);
   assert.match(formSource, /role="tablist"\s+aria-label="Create a task or event"/);
   assert.match(formSource, /setMode\('task'\)/);
   assert.match(formSource, /setMode\('event'\)/);
@@ -21,7 +21,7 @@ test('an empty calendar slot opens the shared Task/Event form with its exact slo
 test('the Assistant scheduler uses the same direct create and edit flow', () => {
   assert.match(plannerSource, /onEmptySlotClick=\{handleEmptySlotClick\}/);
   assert.match(plannerSource, /onBlockClick=\{handleBlockClick\}/);
-  assert.match(plannerSource, /<TaskForm[\s\S]*initialMode="task"[\s\S]*initialDate=\{creationSlot\?\.date \|\| ''\}[\s\S]*initialStartTime=\{creationSlot\?\.startTime \|\| ''\}[\s\S]*initialDurationSeconds=\{creationSlot\?\.durationSeconds \|\| null\}/);
+  assert.match(plannerSource, /<TaskForm[\s\S]*initialMode="task"[\s\S]*initialDate=\{creationSlot\?\.date \|\| format\(selectedDate, 'yyyy-MM-dd'\)\}[\s\S]*initialStartTime=\{creationSlot\?\.startTime \|\| ''\}[\s\S]*initialDurationSeconds=\{creationSlot\?\.durationSeconds \|\| null\}/);
   assert.match(plannerSource, /task=\{editingTask\}/);
   assert.match(plannerSource, /commitment=\{editingCommitment\}/);
 });

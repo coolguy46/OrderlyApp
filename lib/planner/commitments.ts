@@ -9,6 +9,9 @@ const LOCAL_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const LOCAL_TIME_PATTERN = /^\d{2}:\d{2}$/;
 
 export interface CommitmentOccurrence {
+  title: string;
+  description: string | null;
+  location: string | null;
   id: string;
   commitmentId: string;
   sourceDate: LocalDate;
@@ -77,6 +80,9 @@ export function buildCommitmentOccurrences(
     const startTime = isLocalTime(override.startTime) ? override.startTime : commitment.startTime;
     const endTime = isLocalTime(override.endTime) ? override.endTime : commitment.endTime;
     results.push({
+      title: override.title ?? commitment.title,
+      description: override.description !== undefined ? override.description : commitment.description ?? null,
+      location: override.location !== undefined ? override.location : commitment.location ?? null,
       id: `commitment:${commitment.id}@${sourceDate}`,
       commitmentId: commitment.id,
       sourceDate,

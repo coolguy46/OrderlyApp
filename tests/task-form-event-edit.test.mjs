@@ -9,12 +9,12 @@ const taskFormSource = await readFile(
 
 test('TaskForm accepts an existing commitment and initializes every editable event field', () => {
   assert.match(taskFormSource, /commitment\?: RecurringCommitmentInput \| null/);
-  assert.match(taskFormSource, /setTitle\(commitment\.title\)/);
-  assert.match(taskFormSource, /setDescription\(commitment\.description \|\| ''\)/);
-  assert.match(taskFormSource, /setEventLocation\(commitment\.location \|\| ''\)/);
-  assert.match(taskFormSource, /setEventDate\(commitment\.startDate \|\| initialDate\)/);
-  assert.match(taskFormSource, /setEventStartTime\(normalizedClock\(commitment\.startTime\)\)/);
-  assert.match(taskFormSource, /setEventEndTime\(normalizedClock\(commitment\.endTime\)\)/);
+  assert.match(taskFormSource, /setTitle\(override\?\.title \?\? commitment\.title\)/);
+  assert.match(taskFormSource, /setDescription\(\(override\?\.description !== undefined \? override\.description : commitment\.description\)/);
+  assert.match(taskFormSource, /setEventLocation\(\(override\?\.location !== undefined \? override\.location : commitment\.location\)/);
+  assert.match(taskFormSource, /setEventDate\(editingEventOccurrence \? override\?\.scheduledDate \|\| occurrenceDate \|\| initialDate : commitment\.startDate \|\| initialDate\)/);
+  assert.match(taskFormSource, /setEventStartTime\(normalizedClock\(override\?\.startTime \|\| commitment\.startTime\)\)/);
+  assert.match(taskFormSource, /setEventEndTime\(normalizedClock\(override\?\.endTime \|\| commitment\.endTime\)\)/);
   assert.match(taskFormSource, /setEventRecurrenceDays\(repeatsWeekly/);
   assert.match(taskFormSource, /setEventKind\(commitment\.kind\)/);
   assert.match(taskFormSource, /setEventColor\(commitment\.color \|\| EVENT_COLORS\[0\]\)/);

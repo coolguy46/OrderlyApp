@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { CalendarCapacityError } from '@/lib/planner/calendar-range';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { conversationSystemPrompt, parseConversationIntent, readConversationRequest, type ConversationIntent, type ConversationResult } from '@/lib/planner/conversation';
 import { calendarFromSnapshot, compileConversation, conversationFacts, type ConversationSnapshot } from '@/lib/planner/conversation-calendar';
@@ -84,6 +85,7 @@ export async function POST(request: NextRequest) {
     }).reverse();
     const calendar = calendarFromSnapshot(snapshot, user.id, new Date().toISOString(), input.timeZone);
     calendar.localBusy = input.localBusy;
+    calendar.localEvents = input.localEvents;
     const providerMessages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
       { role: 'system', content: conversationSystemPrompt(conversationFacts(calendar, receipts)) },
       ...input.messages,
@@ -91,9 +93,11 @@ export async function POST(request: NextRequest) {
     let intent: ConversationIntent | null = null;
     let compiled: ReturnType<typeof compileConversation> | null = null;
     let lastProblem = '';
-    // At most one repair, with concrete schema/calendar feedback. Never invoke
+    // One optional read-only range lookup and one repair. Never invoke
     // the phrase-matching normalizer on this conversational path.
-    for (let attempt = 0; attempt < 2; attempt += 1) {
+    let inspected = false;
+    let repairs = 0;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
       if (controller.signal.aborted) throw new Error('That response was stopped before saving.');
       dispatched = true;
       const response = await fetch('https://api.deepseek.com/chat/completions', {
@@ -108,12 +112,21 @@ export async function POST(request: NextRequest) {
       const raw = payload.choices?.[0]?.message?.content || '';
       try {
         intent = parseConversationIntent(raw);
+        if (intent.mode === 'inspect') {
+          if (inspected) throw new Error('The one calendar lookup was already used. Answer from the returned range or explain what additional range is needed.');
+          inspected = true;
+          const facts = conversationFacts(calendar, [], intent.calendarRange);
+          providerMessages.push({ role: 'assistant', content: raw }, { role: 'system', content: `Read-only calendar lookup completed. No changes were saved. Use these facts to answer the original request, now returning discuss, clarify, act, or plan:\n${JSON.stringify({ calendarRange: facts.calendarRange, calendar: facts.calendar })}` });
+          intent = null;
+          continue;
+        }
         compiled = compileConversation(intent, calendar);
         break;
       } catch (error) {
         lastProblem = error instanceof Error ? error.message : 'The proposed operation was invalid.';
         intent = null;
         compiled = null;
+        if (repairs++ >= 1) break;
         providerMessages.push({ role: 'assistant', content: raw }, { role: 'system', content: `Validation feedback (no changes have saved): ${lastProblem}\nRepair the structured response using the real snapshot and the user's original intent. If this is a genuine constraint or ambiguity, return clarify with one useful question and no operations. Do not change explicitly requested times just to pass validation.` });
       }
     }
@@ -138,7 +151,7 @@ export async function POST(request: NextRequest) {
       try {
         return json(await persist([], { reply: message.includes('CALENDAR_CHANGED')
           ? 'Your calendar changed while I was planning. I left the new edits alone and saved nothing from this request. Ask me to try again with the updated calendar.'
-          : 'I could not finish that response. No calendar changes were made. Please try again.', intent: null, items: [] }));
+          : error instanceof CalendarCapacityError ? message : 'I could not finish that response. No calendar changes were made. Please try again.', intent: null, items: [] }));
       } catch { /* Keep the request ID for receipt recovery. */ }
     }
     // A database response can be lost AFTER commit. Do not declare rollback or

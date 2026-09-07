@@ -8,15 +8,15 @@ const taskCalendarSource = await readFile(
 );
 
 test('calendar task chips open the shared task editor in month and week views', () => {
-  const editEntryCalls = taskCalendarSource.match(/onClick=\{\(\) => openTaskEditor\(task\.id\)\}/g) || [];
+  const editEntryCalls = taskCalendarSource.match(/onClick=\{\(\) => openTaskEditor\(task\.id, key\)\}/g) || [];
 
   assert.equal(editEntryCalls.length, 2);
-  assert.match(taskCalendarSource, /const openTaskEditor = \(taskId: string\) => \{[\s\S]*setEditingTaskId\(taskId\);[\s\S]*setTaskFormOpen\(true\);/);
-  assert.match(taskCalendarSource, /<TaskForm[\s\S]*isOpen=\{taskFormOpen\}[\s\S]*task=\{editingTask\}/);
+  assert.match(taskCalendarSource, /const openTaskEditor = \(taskId: string, date: string\) => \{[\s\S]*setEditingTaskId\(taskId\);[\s\S]*setTaskFormOpen\(true\);/);
+  assert.match(taskCalendarSource, /<TaskForm[\s\S]*isOpen=\{taskFormOpen && \(!editingEvent \|\| editingEvent\.ownerId === user\?\.id\)\}[\s\S]*task=\{editingTask\}/);
 });
 test('the edit entry point is source-agnostic and closing clears the selected task', () => {
   const openTaskEditor = taskCalendarSource.match(
-    /const openTaskEditor = \(taskId: string\) => \{([\s\S]*?)\n  \};/,
+    /const openTaskEditor = \(taskId: string, date: string\) => \{([\s\S]*?)\n  \};/,
   )?.[1] || '';
 
   assert.doesNotMatch(openTaskEditor, /source|canvas|google_classroom/);

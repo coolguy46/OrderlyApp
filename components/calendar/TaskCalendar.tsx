@@ -9,7 +9,6 @@ import {
   endOfWeek,
   format,
   isSameMonth,
-  startOfDay,
   startOfMonth,
   startOfWeek,
   subMonths,
@@ -31,7 +30,7 @@ import { Card, CardContent } from '@/components/ui/Card';
 import { useAppStore } from '@/lib/store';
 import type { Exam, Subject, Task } from '@/lib/supabase/types';
 import {
-  isMonthlyRecurrenceDate,
+  buildScheduleOccurrences,
   localDateFromIso,
   localTimeFromIso,
   selectScheduleEntriesForUser,
@@ -42,7 +41,9 @@ import {
 import { civilDateFromStored } from '@/lib/civil-date';
 import { useScheduleStore } from '@/lib/schedule/store';
 import type { ScheduleEntry } from '@/lib/schedule/types';
-import { getDefaultPlannerSettings } from '@/lib/planner/types';
+import { getDefaultPlannerSettings, type RecurringCommitmentInput } from '@/lib/planner/types';
+import { storedEventsToCommitments, writeStoredCalendarEvents } from '@/lib/planner/adapters';
+import { useStoredCalendarEvents } from '@/lib/planner/use-stored-calendar-events';
 import { usePlannerStore } from '@/lib/planner/store';
 import { buildCommitmentOccurrences } from '@/lib/planner/commitments';
 import { cn, isExamType } from '@/lib/utils';
@@ -59,6 +60,9 @@ interface TaskCalendarDay {
 }
 
 interface CalendarEventItem {
+  ownerId: string;
+  commitment: RecurringCommitmentInput;
+  sourceDate: string;
   id: string;
   title: string;
   startTime: string;
@@ -67,12 +71,6 @@ interface CalendarEventItem {
 }
 
 const WEEK_STARTS_ON = 1 as const;
-
-function localDateKey(value: string | Date, timeZone: string): string | null {
-  return value instanceof Date
-    ? localDateFromIso(value.toISOString(), timeZone)
-    : civilDateFromStored(value, timeZone);
-}
 
 function localDateFromKey(value: string): Date {
   const [year, month, day] = value.split('-').map(Number);
@@ -87,26 +85,17 @@ function taskOccursOn(
   currentTime: Date,
 ): boolean {
   const dateKey = format(date, 'yyyy-MM-dd');
+  const recurrence = scheduleEntry?.recurrence || task.recurrence || 'none';
+  if (recurrence !== 'none' && task.status !== 'completed') {
+    const occurrences = buildScheduleOccurrences({ tasks: [task], entries: scheduleEntry ? [scheduleEntry] : [],
+      startDate: dateKey, endDate: dateKey, timeZone: displayOptions.timeZone });
+    return occurrences.timed.length + occurrences.untimed.length > 0;
+  }
   const missingDateKey = taskMissingDate(task, currentTime, displayOptions.timeZone);
   if (missingDateKey) return missingDateKey === dateKey;
-  const dueDateKey = taskUntimedDisplayDate(task, displayOptions);
+  const dueDateKey = taskUntimedDisplayDate(task, displayOptions) || scheduleEntry?.scheduledDate;
   if (dueDateKey === dateKey) return true;
-  const recurrence = scheduleEntry?.recurrence || task.recurrence || 'none';
-  if (recurrence === 'none' || task.status === 'completed') return false;
-  if (scheduleEntry?.recurrenceEndDate && dateKey > scheduleEntry.recurrenceEndDate) return false;
-
-  const anchorKey = dueDateKey
-    || scheduleEntry?.scheduledDate
-    || localDateKey(task.created_at, displayOptions.timeZone || 'UTC');
-  if (!anchorKey || startOfDay(date) < startOfDay(localDateFromKey(anchorKey))) return false;
-  if (recurrence === 'daily') return true;
-  if (recurrence === 'weekly') {
-    const configuredDays = scheduleEntry?.recurrenceDays || task.recurrence_days || [];
-    return configuredDays.length > 0
-      ? configuredDays.includes(date.getDay())
-      : date.getDay() === localDateFromKey(anchorKey).getDay();
-  }
-  return recurrence === 'monthly' && isMonthlyRecurrenceDate(dateKey, anchorKey);
+  return false;
 }
 
 function taskTimeLabel(task: Task, timeZone?: string): string | null {
@@ -228,14 +217,19 @@ function ExamDeadlineChip({ exam, subject, compact = false }: { exam: Exam; subj
   );
 }
 
-function EventChip({ event, compact = false }: { event: CalendarEventItem; compact?: boolean }) {
+function EventChip({ event, compact = false, onClick }: { event: CalendarEventItem; compact?: boolean; onClick: () => void }) {
   const formatClock = (value: string) => {
     const [hours, minutes] = value.split(':').map(Number);
     return format(new Date(2000, 0, 1, hours, minutes), 'h:mm a');
   };
   return (
-    <div
-      className={cn('overflow-hidden rounded-md border px-2 py-1.5', compact && 'px-1.5 py-1')}
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={event.commitment.kind === 'school' ? `${event.title} — managed in Settings` : `Edit event ${event.title}`}
+      title={event.commitment.kind === 'school' ? 'School hours are managed in Settings' : undefined}
+      disabled={event.commitment.kind === 'school'}
+      className={cn('w-full overflow-hidden rounded-md border px-2 py-1.5 text-left hover:brightness-110 focus-visible:ring-2 focus-visible:ring-primary', compact && 'px-1.5 py-1')}
       style={{ borderColor: `${event.color}70`, backgroundColor: `${event.color}18` }}
     >
       <div className="flex min-w-0 items-start gap-1.5">
@@ -249,7 +243,7 @@ function EventChip({ event, compact = false }: { event: CalendarEventItem; compa
           )}
         </div>
       </div>
-    </div>
+    </button>
   );
 }
 
@@ -264,6 +258,9 @@ export function TaskCalendar() {
   const [mode, setMode] = useState<TaskCalendarMode>('month');
   const [taskFormOpen, setTaskFormOpen] = useState(false);
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
+  const [editingTaskDate, setEditingTaskDate] = useState<string | null>(null);
+  const [editingEvent, setEditingEvent] = useState<CalendarEventItem | null>(null);
+  const { events: storedEvents, setEvents: setStoredEvents } = useStoredCalendarEvents(user?.id || null);
   const now = useCurrentTime();
 
   useEffect(() => {
@@ -273,8 +270,8 @@ export function TaskCalendar() {
 
   const plannerRecord = user?.id ? plannerUsers[user.id] : null;
   const commitments = useMemo(
-    () => plannerRecord?.commitments || [],
-    [plannerRecord?.commitments],
+    () => [...(plannerRecord?.commitments || []), ...storedEventsToCommitments(storedEvents, plannerRecord?.settings.timeZone || 'UTC')],
+    [plannerRecord?.commitments, plannerRecord?.settings.timeZone, storedEvents],
   );
   const fallbackTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
   const plannerSettings = plannerRecord?.settings || getDefaultPlannerSettings(fallbackTimeZone);
@@ -332,8 +329,11 @@ export function TaskCalendar() {
         for (const occurrence of buildCommitmentOccurrences(commitment, firstVisibleDate, lastVisibleDate)) {
           const values = calendarEvents.get(occurrence.date) || [];
           values.push({
+            ownerId: user?.id || '',
             id: occurrence.id,
-            title: commitment.title,
+            commitment,
+            sourceDate: occurrence.sourceDate,
+            title: occurrence.title,
             startTime: occurrence.startTime,
             endTime: occurrence.endTime,
             color: commitment.color || '#6366f1',
@@ -346,6 +346,13 @@ export function TaskCalendar() {
       const key = format(day, 'yyyy-MM-dd');
       const dayTasks = tasks
         .filter(task => taskOccursOn(task, day, scheduleByTaskId.get(task.id), displayOptions, now))
+        .map(task => {
+          const entry = scheduleByTaskId.get(task.id);
+          if (!entry || task.recurrence === 'none' || task.status === 'completed') return task;
+          const occurrences = buildScheduleOccurrences({ tasks: [task], entries: [entry], startDate: key, endDate: key, timeZone });
+          const occurrence = [...occurrences.timed, ...occurrences.untimed][0];
+          return occurrence ? { ...task, title: occurrence.title, description: occurrence.description } : task;
+        })
         .sort((left, right) => taskTimeSortValue(left, timeZone) - taskTimeSortValue(right, timeZone) || left.title.localeCompare(right.title));
       const dayExams = exams
         .filter(exam => civilDateFromStored(exam.exam_date, timeZone) === key)
@@ -355,7 +362,7 @@ export function TaskCalendar() {
       result.set(key, { tasks: dayTasks, exams: dayExams, events: dayEvents });
     }
     return result;
-  }, [commitments, displayOptions, exams, now, scheduleByTaskId, tasks, timeZone, visibleDays]);
+  }, [commitments, displayOptions, exams, now, scheduleByTaskId, tasks, timeZone, visibleDays, user?.id]);
 
   const navigate = (direction: -1 | 1) => {
     if (!currentDate) return;
@@ -365,18 +372,32 @@ export function TaskCalendar() {
   };
 
   const openNewTaskForm = () => {
+    setEditingEvent(null);
     setEditingTaskId(null);
     setTaskFormOpen(true);
   };
 
-  const openTaskEditor = (taskId: string) => {
+  const openTaskEditor = (taskId: string, date: string) => {
+    setEditingEvent(null);
+    const task = taskById.get(taskId);
+    const entry = scheduleByTaskId.get(taskId);
+    const occurrences = task ? buildScheduleOccurrences({ tasks: [task], entries: entry ? [entry] : [], startDate: date, endDate: date, timeZone }) : null;
+    setEditingTaskDate(occurrences ? [...occurrences.timed, ...occurrences.untimed][0]?.recurrenceSourceDate || date : date);
     setEditingTaskId(taskId);
     setTaskFormOpen(true);
   };
 
   const closeTaskForm = () => {
+    setEditingEvent(null);
     setTaskFormOpen(false);
     setEditingTaskId(null);
+  };
+
+  const openEventEditor = (event: CalendarEventItem) => {
+    if (event.commitment.kind === 'school') return;
+    setEditingTaskId(null);
+    setEditingEvent(event);
+    setTaskFormOpen(true);
   };
 
   if (!mounted || !currentDate) {
@@ -476,9 +497,9 @@ export function TaskCalendar() {
                           {allCount > 0 && <span className="text-[9px] text-muted-foreground">{allCount}</span>}
                         </div>
                         <div className="space-y-1">
-                          {visibleEvents.map(event => <EventChip key={event.id} event={event} compact />)}
+                          {visibleEvents.map(event => <EventChip key={event.id} event={event} compact onClick={() => openEventEditor(event)} />)}
                           {visibleTasks.map(task => (
-                            <TaskDeadlineChip key={task.id} task={task} subject={task.subject_id ? subjectById.get(task.subject_id) : undefined} compact displayDateKey={key} timeZone={timeZone} currentTime={now} onClick={() => openTaskEditor(task.id)} />
+                            <TaskDeadlineChip key={task.id} task={task} subject={task.subject_id ? subjectById.get(task.subject_id) : undefined} compact displayDateKey={key} timeZone={timeZone} currentTime={now} onClick={() => openTaskEditor(task.id, key)} />
                           ))}
                           {visibleExams.map(exam => (
                             <ExamDeadlineChip key={exam.id} exam={exam} subject={exam.subject_id ? subjectById.get(exam.subject_id) : undefined} compact />
@@ -519,9 +540,9 @@ export function TaskCalendar() {
                           </span>
                         </div>
                         <div className="space-y-1.5">
-                          {items.events.map(event => <EventChip key={event.id} event={event} />)}
+                          {items.events.map(event => <EventChip key={event.id} event={event} onClick={() => openEventEditor(event)} />)}
                           {items.tasks.map(task => (
-                            <TaskDeadlineChip key={task.id} task={task} subject={task.subject_id ? subjectById.get(task.subject_id) : undefined} displayDateKey={key} timeZone={timeZone} currentTime={now} onClick={() => openTaskEditor(task.id)} />
+                            <TaskDeadlineChip key={task.id} task={task} subject={task.subject_id ? subjectById.get(task.subject_id) : undefined} displayDateKey={key} timeZone={timeZone} currentTime={now} onClick={() => openTaskEditor(task.id, key)} />
                           ))}
                           {items.exams.map(exam => (
                             <ExamDeadlineChip key={exam.id} exam={exam} subject={exam.subject_id ? subjectById.get(exam.subject_id) : undefined} />
@@ -550,9 +571,18 @@ export function TaskCalendar() {
       </div>
 
       <TaskForm
-        isOpen={taskFormOpen}
+        isOpen={taskFormOpen && (!editingEvent || editingEvent.ownerId === user?.id)}
         onClose={closeTaskForm}
         task={editingTask}
+        commitment={editingEvent?.ownerId === user?.id ? editingEvent?.commitment : null}
+        occurrenceDate={editingEvent?.sourceDate || editingTaskDate}
+        initialDate={format(currentDate, 'yyyy-MM-dd')}
+        onSaved={() => {
+          if (!user?.id || !editingEvent?.commitment.id.startsWith('calendar-')) return;
+          const next = storedEvents.filter(event => event.id !== editingEvent.commitment.id.slice('calendar-'.length));
+          writeStoredCalendarEvents(user.id, next);
+          setStoredEvents(next);
+        }}
       />
     </div>
   );

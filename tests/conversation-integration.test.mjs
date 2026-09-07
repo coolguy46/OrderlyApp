@@ -32,7 +32,11 @@ async function compile(relative) {
 await compile('lib/planner/conversation.ts');
 await compile('lib/planner/conversation-calendar.ts');
 const { parseConversationIntent, conversationSystemPrompt, readConversationRequest } = require(join(temporary, 'lib/planner/conversation.cjs'));
-const { calendarFromSnapshot, compileConversation, conversationFacts } = require(join(temporary, 'lib/planner/conversation-calendar.cjs'));
+const { calendarFromSnapshot, compileConversation, conversationFacts, calendarIntervals } = require(join(temporary, 'lib/planner/conversation-calendar.cjs'));
+const { buildScheduleOccurrences, localTimeFromIso } = require(join(temporary, 'lib/schedule/selectors.cjs'));
+const { scheduleEntriesFromTasks } = require(join(temporary, 'lib/schedule/persistence.cjs'));
+await compile('lib/schedule/calendar-navigation.ts');
+const { shiftCalendarWeek } = require(join(temporary, 'lib/schedule/calendar-navigation.cjs'));
 const db = new PGlite();
 const owner = randomUUID(), other = randomUUID(), conversationId = randomUUID();
 const NOW = '2026-09-06T20:00:00.000Z'; // Sunday, 1 PM Pacific.
@@ -85,6 +89,130 @@ async function turn(text, operations, extras = {}, timeZone = zone, now = NOW) {
 async function undo(receipt) {
   return apply({ writes: receipt.undoOperations, reply: 'Undone', items: [] }, receipt.revision);
 }
+
+test('week navigation preserves selection across many forward/backward weeks and month/year boundaries', () => {
+  let view = { weekStart: new Date(2026, 11, 28), selectedDate: new Date(2027, 0, 1) };
+  const initial = { ...view };
+  for (let i = 0; i < 15; i++) view = shiftCalendarWeek(view.weekStart, view.selectedDate, 1);
+  assert.equal(view.selectedDate.getDay(), 5);
+  assert.equal(view.weekStart.getDay(), 1);
+  for (let i = 0; i < 30; i++) view = shiftCalendarWeek(view.weekStart, view.selectedDate, -1);
+  for (let i = 0; i < 15; i++) view = shiftCalendarWeek(view.weekStart, view.selectedDate, 1);
+  assert.deepEqual(view, initial);
+});
+
+test('three-week planning actually persists work in all three weeks, not just fourteen days', async () => {
+  const result = await turn('plan this work over three weeks on Sundays', [], { mode: 'plan', plan: {
+    taskScope: 'task_ids', taskIds: [], startDate: '2030-09-02', horizonDays: 21, todayLoad: 'normal', includeAlreadyScheduled: false,
+    allowedWeekdays: [0], maxDailyMinutes: 60, availableAfter: '16:00', availableBefore: '20:00',
+    additionalTasks: [1,2,3].map(i => ({ title: `Three week work ${i}`, durationMinutes: 60, estimated: false })),
+  } });
+  const dates = result.state.tasks.filter(task => result.receipt.items.some(item => item.id === task.id)).map(task => task.scheduled_date).sort();
+  assert.deepEqual(dates, ['2030-09-08', '2030-09-15', '2030-09-22']);
+  assert.throws(() => intent([], { mode: 'plan', plan: { taskScope: 'all_pending', taskIds: [], additionalTasks: [], horizonDays: 367, todayLoad: 'normal' } }), /Invalid number|366/);
+  await undo(result.receipt);
+});
+
+test('far-future exact dates save, reload, and validate conflicts at the target date', async () => {
+  const created = await turn('add a future appointment', [{ action: 'create', entity: 'event', title: 'Future appointment', date: '2032-10-15', start: '19:00', end: '20:00' }]);
+  const calendar = calendarFromSnapshot(await snapshot(), owner, NOW, zone);
+  const event = created.state.events.find(e => e.client_commitment_id === created.receipt.items[0].id);
+  assert.equal(event.start_date, '2032-10-15');
+  assert.equal(event.end_date, '2032-10-15');
+  assert.throws(() => compileConversation(intent([{ action: 'create', entity: 'task', title: 'Conflicting work', date: '2032-10-15', start: '19:30', durationMinutes: 30 }]), calendar), /really overlaps Future appointment/);
+  const facts = conversationFacts(calendar, [], { from: '2032-10-01', through: '2032-10-31' });
+  assert.ok(facts.calendar.some(item => item.title === 'Future appointment'));
+  assert.deepEqual(facts.calendarRange, { from: '2032-10-01', through: '2032-10-31' });
+  await undo(created.receipt);
+});
+
+test('calendar inspections are bounded and read-only, and local recurring constraints have no 60-day cutoff', async () => {
+  const inspect = intent([], { mode: 'inspect', calendarRange: { from: '2031-01-01', through: '2031-01-31' } });
+  const calendar = calendarFromSnapshot(await snapshot(), owner, NOW, zone);
+  assert.throws(() => compileConversation(inspect, calendar), /Inspect/);
+  assert.throws(() => intent([{ action: 'create', entity: 'task', title: 'Forbidden' }], { mode: 'inspect', calendarRange: { from: '2031-01-01', through: '2031-01-31' } }), /cannot contain writes/);
+  assert.throws(() => intent([], { mode: 'inspect', calendarRange: { from: '2031-01-01', through: '2033-01-31' } }), /366/);
+  const input = readConversationRequest({ requestId: randomUUID(), conversationId, timeZone: zone, messages: [{ role: 'user', content: 'Plan in 2031' }],
+    localEvents: [{ id: 'practice', title: 'Local practice', kind: 'sports', daysOfWeek: [0,1,2,3,4,5,6], startTime: '18:00', endTime: '19:00', startDate: '2026-09-01', timeZone: zone }] });
+  calendar.localEvents = input.localEvents;
+  assert.throws(() => compileConversation(intent([{ action: 'create', entity: 'event', title: 'Cannot overlap', date: '2031-01-18', start: '18:15', end: '18:45' }]), calendar), /really overlaps/);
+  assert.throws(() => compileConversation(intent([{ action: 'update', entity: 'event', id: 'local-practice', title: 'Cannot edit client-only constraint' }]), calendar), /no longer exists/);
+});
+
+test('weekly tasks and events retain weekday/end rules across months, DST, refresh, and retry', async () => {
+  const state = await snapshot();
+  const parsed = intent([
+    { action: 'create', entity: 'task', title: 'Recurring study', date: '2026-10-27', start: '18:00', durationMinutes: 30, recurrence: 'weekly', days: [2,4], repeatUntil: '2026-11-12' },
+    { action: 'create', entity: 'event', title: 'Soccer', date: '2026-10-31', start: '09:00', end: '10:00', recurrence: 'weekly', days: [6], repeatUntil: '2026-11-14' },
+  ]);
+  const compiled = compileConversation(parsed, calendarFromSnapshot(state, owner, NOW, zone));
+  const requestId = randomUUID();
+  const receipt = await apply(compiled, state.revision, requestId, parsed);
+  assert.deepEqual(await apply(compiled, state.revision, requestId, parsed), receipt);
+  const reloaded = calendarFromSnapshot(await snapshot(), owner, NOW, zone);
+  const entries = calendarIntervals(reloaded, '2026-10-27', '2026-11-30').filter(i => ['Recurring study','Soccer'].includes(i.title));
+  assert.deepEqual(entries.filter(i => i.title === 'Recurring study').map(i => i.sourceDate), ['2026-10-27','2026-10-29','2026-11-03','2026-11-05','2026-11-10','2026-11-12']);
+  assert.deepEqual(entries.filter(i => i.title === 'Soccer').map(i => i.sourceDate), ['2026-10-31','2026-11-07','2026-11-14']);
+  const study = entries.filter(i => i.title === 'Recurring study');
+  assert.ok(study.every(i => localTimeFromIso(i.startAt, zone) === '18:00'));
+  assert.equal(study[0].startAt.slice(11,16), '01:00');
+  assert.equal(study[2].startAt.slice(11,16), '02:00');
+  await undo(receipt);
+});
+
+test('an event occurrence can move beyond its repeat end, be renamed, edited again and removed without changing siblings', async () => {
+  const created = await turn('weekly class', [{ action: 'create', entity: 'event', title: 'Weekend class', date: '2028-10-07', start: '09:00', end: '10:00', recurrence: 'weekly', days: [6], repeatUntil: '2028-10-28' }]);
+  const id = created.receipt.items[0].id;
+  const moved = await turn('move this one later', [{ action: 'update', entity: 'event', id, occurrenceDate: '2028-10-14', date: '2028-12-02', title: 'Special class' }]);
+  assert.equal(moved.state.events.find(e => e.client_commitment_id === id).title, 'Weekend class');
+  assert.equal(moved.receipt.items[0].date, '2028-12-02');
+  const edited = await turn('make that one later', [{ action: 'update', entity: 'event', id, occurrenceDate: '2028-10-14', start: '11:00' }]);
+  const calendar = calendarFromSnapshot(edited.state, owner, NOW, zone);
+  assert.equal(calendarIntervals(calendar, '2028-12-02', '2028-12-02').find(i => i.owner === `event:${id}`).title, 'Special class');
+  assert.equal(localTimeFromIso(calendarIntervals(calendar, '2028-12-02', '2028-12-02').find(i => i.owner === `event:${id}`).startAt, zone), '11:00');
+  assert.equal(calendarIntervals(calendar, '2028-10-21', '2028-10-21').find(i => i.owner === `event:${id}`).title, 'Weekend class');
+  assert.throws(() => compileConversation(intent([{ action: 'update', entity: 'event', id, start: '12:00' }]), calendar), /Which date/);
+  const deleted = await turn('remove this one', [{ action: 'delete', entity: 'event', id, occurrenceDate: '2028-10-14' }]);
+  assert.equal(calendarIntervals(calendarFromSnapshot(deleted.state, owner, NOW, zone), '2028-12-02', '2028-12-02').filter(i => i.owner === `event:${id}`).length, 0);
+  assert.ok(deleted.state.events.some(e => e.client_commitment_id === id));
+  await turn('remove entire series', [{ action: 'delete', entity: 'event', id, wholeSeries: true }]);
+});
+
+test('untimed recurrence and monthly tasks retain boundaries; single-occurrence task edits preserve the task and deadline', async () => {
+  const created = await turn('add repeating work', [
+    { action: 'create', entity: 'task', title: 'Untimed study', date: '2029-01-02', recurrence: 'weekly', days: [2,4], repeatUntil: '2029-02-01' },
+    { action: 'create', entity: 'task', title: 'Month end work', date: '2029-01-31', start: '18:00', durationMinutes: 30, recurrence: 'monthly', repeatUntil: '2029-03-31' },
+  ]);
+  const task = created.state.tasks.find(t => t.title === 'Untimed study');
+  assert.deepEqual(task.recurrence_days, [2,4]);
+  assert.equal(task.schedule_recurrence_end_date, '2029-02-01');
+  const occurrences = buildScheduleOccurrences({ tasks: created.state.tasks.filter(t => created.receipt.items.some(i => i.id === t.id)), entries: scheduleEntriesFromTasks(created.state.tasks, owner), startDate: '2029-01-01', endDate: '2029-04-30', timeZone: zone });
+  assert.deepEqual(occurrences.timed.filter(i => i.title === 'Month end work').map(i => i.date), ['2029-01-31','2029-02-28','2029-03-31']);
+  assert.ok(occurrences.untimed.some(i => i.date === '2029-02-01'));
+  const monthly = created.state.tasks.find(t => t.title === 'Month end work');
+  const changed = await turn('change one work session', [{ action: 'update', entity: 'task', id: monthly.id, occurrenceDate: '2029-02-28', date: '2029-03-01', title: 'Special work' }]);
+  const saved = changed.state.tasks.find(t => t.id === monthly.id);
+  assert.equal(saved.title, monthly.title);
+  assert.equal(saved.due_date, monthly.due_date);
+  assert.equal(saved.status, monthly.status);
+  assert.equal(saved.schedule_occurrence_overrides['2029-02-28'].title, 'Special work');
+  const reloaded = buildScheduleOccurrences({ tasks: [saved], entries: scheduleEntriesFromTasks([saved], owner), startDate: '2029-03-01', endDate: '2029-03-31', timeZone: zone });
+  assert.deepEqual(reloaded.timed.map(i => i.title), ['Special work','Month end work']);
+  await undo(changed.receipt);
+  await apply({ writes: created.receipt.undoOperations, reply: 'Test cleanup', items: [] }, (await snapshot()).revision);
+});
+
+test('whole-series repeat-end changes preserve past anchors and explicitly clear end conditions', async () => {
+  const created = await turn('add Saturdays', [{ action: 'create', entity: 'event', title: 'Anchored series', date: '2026-09-12', start: '11:00', end: '12:00', recurrence: 'weekly', days: [6], repeatUntil: '2026-10-31' }]);
+  const id = created.receipt.items[0].id;
+  const extended = await turn('repeat through November', [{ action: 'update', entity: 'event', id, wholeSeries: true, repeatUntil: '2026-11-30' }], {}, zone, '2026-10-01T20:00:00Z');
+  assert.equal(extended.state.events.find(e => e.client_commitment_id === id).start_date, '2026-09-12');
+  assert.equal(extended.state.events.find(e => e.client_commitment_id === id).end_date, '2026-11-30');
+  const unbounded = await turn('remove end condition', [{ action: 'update', entity: 'event', id, wholeSeries: true, repeatUntil: null }], {}, zone, '2026-10-01T20:00:00Z');
+  assert.equal(unbounded.state.events.find(e => e.client_commitment_id === id).end_date, null);
+  assert.match(unbounded.receipt.reply, /Conflicts were checked through/);
+  await turn('remove whole series', [{ action: 'delete', entity: 'event', id, wholeSeries: true }]);
+});
 
 test('multi-turn typo, type correction, time/date follow-ups persist without duplicate items', async () => {
   const initial = await snapshot();

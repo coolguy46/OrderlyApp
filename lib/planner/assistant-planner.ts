@@ -1,4 +1,5 @@
 import type { Task } from '@/lib/supabase/types';
+import { calendarRange } from './calendar-range';
 import { plannerTaskDeadline, taskToPlannerInput } from './adapters';
 import { estimatePlannerTask, normalizePlannerSettings, plannerHash } from './engine';
 import type {
@@ -371,7 +372,8 @@ export function buildAssistantTaskPlan(input: AssistantTaskPlanInput): ScheduleC
   // put tomorrow's work on today. An explicit valid future date always wins.
   const startDate = requestedStartDate
     || (input.request.taskScope === 'tomorrow' ? addLocalDays(today, 1) : today);
-  const horizonDays = Math.max(1, Math.min(14, Math.trunc(input.request.horizonDays || 7)));
+  const horizonDays = input.request.horizonDays;
+  calendarRange(startDate, horizonDays);
   const horizonDates = Array.from({ length: horizonDays }, (_, index) => addLocalDays(startDate, index));
   const horizonEndDate = horizonDates[horizonDates.length - 1];
   const selectedTasks = selectTasks(

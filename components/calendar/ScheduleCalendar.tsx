@@ -26,6 +26,7 @@ import {
   writeStoredCalendarEvents,
 } from '@/lib/planner/adapters';
 import { useStoredCalendarEvents } from '@/lib/planner/use-stored-calendar-events';
+import { shiftCalendarWeek } from '@/lib/schedule/calendar-navigation';
 import {
   buildCommitmentOccurrences,
   withCommitmentOccurrenceOverride,
@@ -95,8 +96,8 @@ function commitmentBlocks(
         : null;
       return [{
         id: occurrence.id,
-        title: commitment.title,
-        description: [commitment.description, commitment.location ? `Location: ${commitment.location}` : null]
+        title: occurrence.title,
+        description: [occurrence.description, occurrence.location ? `Location: ${occurrence.location}` : null]
           .filter(Boolean)
           .join('\n') || null,
         startAt: interval.startAt,
@@ -217,6 +218,7 @@ export function ScheduleCalendar() {
   const legacyRecoveryOpen = Boolean(userId && legacyRecoveryOpenForUser === userId);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [editingCommitment, setEditingCommitment] = useState<RecurringCommitmentInput | null>(null);
+  const [editingOccurrenceDate, setEditingOccurrenceDate] = useState<string | null>(null);
   const [creationSlot, setCreationSlot] = useState<{
     date: string;
     startTime: string;
@@ -322,6 +324,7 @@ export function ScheduleCalendar() {
     const occurrence = occurrenceById.get(occurrenceId);
     if (!occurrence) return;
     const task = taskById.get(occurrence.taskId) || occurrence.task;
+    setEditingOccurrenceDate(occurrence.recurrenceSourceDate);
     setDetailOccurrenceId(null);
     setEditingCommitment(null);
     setCreationSlot(null);
@@ -340,6 +343,7 @@ export function ScheduleCalendar() {
     setEditingTask(null);
     setCreationSlot(null);
     setEditingCommitment(commitment);
+    setEditingOccurrenceDate(block.occurrenceDate || null);
   }, [commitmentById, openTaskFromOccurrence]);
   const untimedItems = useMemo<UntimedScheduleItem[]>(
     () => occurrences.untimed.map(occurrence => ({
@@ -627,9 +631,9 @@ export function ScheduleCalendar() {
             variant="ghost"
             size="icon-sm"
             onClick={() => {
-              const next = addDays(weekStart, -7);
-              setWeekStart(next);
-              setSelectedDate(next);
+              const next = shiftCalendarWeek(weekStart, selectedDate || weekStart, -1);
+              setWeekStart(next.weekStart);
+              setSelectedDate(next.selectedDate);
             }}
             aria-label="Previous week"
           >
@@ -641,9 +645,9 @@ export function ScheduleCalendar() {
             variant="ghost"
             size="icon-sm"
             onClick={() => {
-              const next = addDays(weekStart, 7);
-              setWeekStart(next);
-              setSelectedDate(next);
+              const next = shiftCalendarWeek(weekStart, selectedDate || weekStart, 1);
+              setWeekStart(next.weekStart);
+              setSelectedDate(next.selectedDate);
             }}
             aria-label="Next week"
           >
@@ -722,8 +726,9 @@ export function ScheduleCalendar() {
         isOpen={Boolean(editingTask || editingCommitment || creationSlot)}
         task={editingTask}
         commitment={editingCommitment}
+        occurrenceDate={editingCommitment || editingTask ? editingOccurrenceDate : null}
         initialMode="task"
-        initialDate={creationSlot?.date || ''}
+        initialDate={creationSlot?.date || (selectedDate ? format(selectedDate, 'yyyy-MM-dd') : '')}
         initialStartTime={creationSlot?.startTime || ''}
         initialDurationSeconds={creationSlot?.durationSeconds || null}
         onClose={() => {

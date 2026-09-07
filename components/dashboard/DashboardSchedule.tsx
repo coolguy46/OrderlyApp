@@ -24,6 +24,7 @@ import { useAppStore } from '@/lib/store';
 import { cn } from '@/lib/utils';
 import {
   storedEventsToCommitments,
+  writeStoredCalendarEvents,
 } from '@/lib/planner/adapters';
 import { useStoredCalendarEvents } from '@/lib/planner/use-stored-calendar-events';
 import { usePlannerStore } from '@/lib/planner/store';
@@ -59,6 +60,8 @@ function timeLabel(item: ScheduleOccurrence, timeZone: string): string {
 }
 
 interface DashboardFixedBlock {
+  commitment: RecurringCommitmentInput;
+  sourceDate: string;
   id: string;
   title: string;
   startAt: string;
@@ -84,7 +87,9 @@ function commitmentBlocksForDate(
 
       return [{
         id: occurrence.id,
-        title: commitment.title,
+        commitment,
+        sourceDate: occurrence.sourceDate,
+        title: occurrence.title,
         startAt,
         endAt,
         color: commitment.color || '#64748b',
@@ -111,7 +116,8 @@ export function DashboardSchedule() {
   const [creationSlot, setCreationSlot] = useState<(
     DashboardScheduleCreationSlot & { userId: string }
   ) | null>(null);
-  const { events: storedEvents } = useStoredCalendarEvents(userId);
+  const { events: storedEvents, setEvents: setStoredEvents } = useStoredCalendarEvents(userId);
+  const [editingEvent, setEditingEvent] = useState<(DashboardFixedBlock & { userId: string }) | null>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
   const selectedDate = localDateToDateCarrier(selectedDateKey) || new Date(1970, 0, 1, 12);
   const dateKey = selectedDateKey;
@@ -333,8 +339,15 @@ export function DashboardSchedule() {
                 const startLabel = formatIsoTime(item.startAt, timeZone) || '';
                 const endLabel = formatIsoTime(item.endAt, timeZone) || '';
                 return (
-                  <div
+                  <button
                     key={item.id}
+                    type="button"
+                    disabled={item.locked}
+                    title={item.locked ? 'School hours are managed in Settings' : 'Edit event'}
+                    onClick={event => {
+                      event.stopPropagation();
+                      if (userId && !item.locked) { setCreationSlot(null); setEditingEvent({ ...item, userId }); }
+                    }}
                     data-dashboard-schedule-block
                     className={cn(
                       'absolute left-2 right-2 overflow-hidden rounded-md border border-l-[3px] px-2 py-1 text-left shadow-sm',
@@ -357,7 +370,7 @@ export function DashboardSchedule() {
                     <p className="truncate text-[9px] text-muted-foreground">
                       {startLabel}–{endLabel}
                     </p>
-                  </div>
+                  </button>
                 );
               })}
 
@@ -380,12 +393,20 @@ export function DashboardSchedule() {
         onOpenChange={open => !open && setDetailOccurrenceId(null)}
       />
       <TaskForm
-        isOpen={Boolean(creationSlot && creationSlot.userId === userId)}
+        isOpen={Boolean((creationSlot && creationSlot.userId === userId) || (editingEvent && editingEvent.userId === userId))}
+        commitment={editingEvent?.userId === userId ? editingEvent?.commitment : null}
+        occurrenceDate={editingEvent?.userId === userId ? editingEvent?.sourceDate : null}
         initialMode="task"
         initialDate={creationSlot?.userId === userId ? creationSlot.date : ''}
         initialStartTime={creationSlot?.userId === userId ? creationSlot.startTime : ''}
         initialDurationSeconds={creationSlot?.userId === userId ? creationSlot.durationSeconds : null}
-        onClose={() => setCreationSlot(null)}
+        onClose={() => { setCreationSlot(null); setEditingEvent(null); }}
+        onSaved={() => {
+          if (!userId || !editingEvent?.commitment.id.startsWith('calendar-')) return;
+          const next = storedEvents.filter(event => event.id !== editingEvent.commitment.id.slice('calendar-'.length));
+          writeStoredCalendarEvents(userId, next);
+          setStoredEvents(next);
+        }}
       />
     </Card>
   );

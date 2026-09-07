@@ -278,6 +278,7 @@ function PositionedBlock({
         type="button"
         {...attributes}
         {...listeners}
+        title={block.kind === 'school' ? 'School hours are managed in Settings' : undefined}
         aria-label={`${block.title}, ${formatBlockTime(start, end)}, ${minutesLabel(duration)}`}
         onClick={(event) => {
           event.stopPropagation();

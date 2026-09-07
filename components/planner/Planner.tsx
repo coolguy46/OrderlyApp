@@ -30,6 +30,7 @@ import {
   writeStoredCalendarEvents,
 } from '@/lib/planner/adapters';
 import { useStoredCalendarEvents } from '@/lib/planner/use-stored-calendar-events';
+import { shiftCalendarWeek } from '@/lib/schedule/calendar-navigation';
 import {
   buildCommitmentOccurrences,
   withCommitmentOccurrenceOverride,
@@ -374,11 +375,11 @@ function calendarRenderData(
       if (!endAt) continue;
       if (!startAt) continue;
       const id = occurrence.id;
-      busy.push({ id, title: event.title, startAt, endAt });
+      busy.push({ id, title: occurrence.title, startAt, endAt });
       blocks.push({
         id,
-        title: event.title,
-        description: event.description || null,
+        title: occurrence.title,
+        description: occurrence.description,
         startAt,
         endAt,
         color: event.color || '#0ea5e9',
@@ -416,7 +417,7 @@ function commitmentRenderData(
       const school = commitment.kind === 'school';
       busy.push({
         id,
-        title: commitment.title,
+        title: occurrence.title,
         startAt,
         endAt,
         commitmentId: school ? null : commitment.id,
@@ -424,8 +425,8 @@ function commitmentRenderData(
       });
       blocks.push({
         id,
-        title: commitment.title,
-        description: [commitment.description, commitment.location ? `Location: ${commitment.location}` : null]
+        title: occurrence.title,
+        description: [occurrence.description, occurrence.location ? `Location: ${occurrence.location}` : null]
           .filter(Boolean)
           .join('\n') || null,
         startAt,
@@ -651,6 +652,7 @@ export function Planner() {
   const [taskDetailsOpen, setTaskDetailsOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [editingCommitment, setEditingCommitment] = useState<RecurringCommitmentInput | null>(null);
+  const [editingOccurrenceDate, setEditingOccurrenceDate] = useState<string | null>(null);
   const [creationSlot, setCreationSlot] = useState<{
     date: string;
     startTime: string;
@@ -1015,6 +1017,12 @@ export function Planner() {
     if (!isSameDay(start, weekStart)) setWeekStart(start);
   }, [weekStart]);
 
+  const navigateWeek = (direction: -1 | 1) => {
+    const next = shiftCalendarWeek(weekStart, selectedDate, direction);
+    setWeekStart(next.weekStart);
+    setSelectedDate(next.selectedDate);
+  };
+
   const handleEmptySlotClick = useCallback((nextStart: Date, nextEnd: Date) => {
     const date = localDateFromIso(nextStart.toISOString(), timeZone);
     const startTime = localTimeFromIso(nextStart.toISOString(), timeZone);
@@ -1036,6 +1044,7 @@ export function Planner() {
         ? taskById.get(occurrence.taskId) || occurrence.task
         : taskById.get(block.taskId);
       if (!task) return;
+      setEditingOccurrenceDate(occurrence?.recurrenceSourceDate || null);
       setEditingCommitment(null);
       setCreationSlot(null);
       setEditingTask(task);
@@ -1048,6 +1057,7 @@ export function Planner() {
     setEditingTask(null);
     setCreationSlot(null);
     setEditingCommitment(commitment);
+    setEditingOccurrenceDate(block.occurrenceDate || null);
   }, [commitmentById, occurrenceById, taskById]);
 
   const closeTaskForm = useCallback(() => {
@@ -1099,7 +1109,7 @@ export function Planner() {
         try { window.sessionStorage.setItem(`orderly:conversation-id:${owner}`, conversationId); } catch {}
       }
       body = { requestId: crypto.randomUUID(), conversationId, timeZone,
-        localBusy: commandEvents.busy.map(({ id, title, startAt, endAt }) => ({ id, title, startAt, endAt })),
+        localEvents: storedEventsToCommitments(storedEvents, timeZone),
         messages: [...messages, userMessage].slice(-CHAT_CONTEXT_LIMIT).map(({role, content}) => ({role, content})) };
       setMessages(previous => [...previous, userMessage].slice(-CHAT_DISPLAY_LIMIT));
       setCommand('');
@@ -1150,7 +1160,7 @@ export function Planner() {
             const first = result.items?.[0];
             const savedTask = first?.entity === 'task' ? useAppStore.getState().tasks.find(task => task.id === first.id) : null;
             const savedEvent = first?.entity === 'event' ? usePlannerStore.getState().users[owner]?.commitments.find(event => event.id === first.id) : null;
-            const date = savedTask?.scheduled_date || savedEvent?.startDate;
+            const date = first?.date || savedTask?.scheduled_date || savedEvent?.startDate;
             if (date) selectDay(localDateCarrier(date));
           }
         } catch {
@@ -1164,7 +1174,7 @@ export function Planner() {
       clearTimeout(timeout);
       if (isCurrent()) { chatSendLockRef.current = false; setIsThinking(false); setApplying(false); chatAbortRef.current = null; }
     }
-  }, [chatOwnerUserId, command, commandEvents.busy, finalizeTaskCreations, messages, selectedTaskId, selectDay, timeZone, userId, waitForPlannerPersistence, waitForSchedulePersistence]);
+  }, [chatOwnerUserId, command, storedEvents, finalizeTaskCreations, messages, selectedTaskId, selectDay, timeZone, userId, waitForPlannerPersistence, waitForSchedulePersistence]);
 
   const undoChatChange = useCallback(async () => {
     if (!lastChatReceipt || lastChatReceipt.userId !== userId || chatSendLockRef.current) return;
@@ -1937,10 +1947,10 @@ export function Planner() {
                 </div>
               </div>
               <div className="flex gap-1">
-                <Button type="button" variant="ghost" size="icon-sm" onClick={() => setWeekStart(previous => addDays(previous, -7))} aria-label="Previous week">
+                <Button type="button" variant="ghost" size="icon-sm" onClick={() => navigateWeek(-1)} aria-label="Previous week">
                   <ChevronLeft className="h-4 w-4" />
                 </Button>
-                <Button type="button" variant="ghost" size="icon-sm" onClick={() => setWeekStart(previous => addDays(previous, 7))} aria-label="Next week">
+                <Button type="button" variant="ghost" size="icon-sm" onClick={() => navigateWeek(1)} aria-label="Next week">
                   <ChevronRight className="h-4 w-4" />
                 </Button>
               </div>
@@ -2078,8 +2088,9 @@ export function Planner() {
         isOpen={Boolean(editingTask || editingCommitment || creationSlot)}
         task={editingTask}
         commitment={editingCommitment}
+        occurrenceDate={editingCommitment || editingTask ? editingOccurrenceDate : null}
         initialMode="task"
-        initialDate={creationSlot?.date || ''}
+        initialDate={creationSlot?.date || format(selectedDate, 'yyyy-MM-dd')}
         initialStartTime={creationSlot?.startTime || ''}
         initialDurationSeconds={creationSlot?.durationSeconds || null}
         onClose={closeTaskForm}

@@ -38,6 +38,8 @@ function occurrenceOverridesFromJson(value: Json | undefined): Record<string, Sc
       ? null
       : normalizedDuration(candidate.durationSeconds) ?? undefined;
     result[date] = {
+      ...(typeof candidate.title === 'string' ? { title: candidate.title } : {}),
+      ...(typeof candidate.description === 'string' || candidate.description === null ? { description: candidate.description } : {}),
       ...(scheduledDate !== undefined ? { scheduledDate } : {}),
       ...(startAt !== undefined ? { startAt } : {}),
       ...(durationSeconds !== undefined ? { durationSeconds } : {}),
@@ -52,6 +54,8 @@ function occurrenceOverridesToJson(
   overrides: Record<string, ScheduleOccurrenceOverride>,
 ): Json {
   return Object.fromEntries(Object.entries(overrides).map(([date, override]) => [date, {
+    ...(override.title !== undefined ? { title: override.title } : {}),
+    ...(override.description !== undefined ? { description: override.description } : {}),
     ...(override.scheduledDate !== undefined ? { scheduledDate: override.scheduledDate } : {}),
     ...(override.startAt !== undefined ? { startAt: override.startAt } : {}),
     ...(override.durationSeconds !== undefined ? { durationSeconds: override.durationSeconds } : {}),

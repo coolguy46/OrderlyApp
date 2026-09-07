@@ -4,6 +4,8 @@ export type LocalDate = string;
 export type ScheduleRecurrence = 'none' | 'daily' | 'weekly' | 'monthly';
 
 export interface ScheduleOccurrenceOverride {
+  title?: string;
+  description?: string | null;
   scheduledDate?: LocalDate | null;
   startAt?: string | null;
   durationSeconds?: number | null;

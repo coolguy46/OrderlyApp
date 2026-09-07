@@ -252,7 +252,9 @@ test('follow-ups use confirmed server receipts rather than matching old assistan
   assert.match(source, /eq\('conversation_id', input.conversationId\)/);
   assert.match(source, /confirmed|receipts/);
   assert.match(source, /\.\.\.input.messages/);
-  assert.match(source, /attempt < 2/);
+  assert.match(source, /attempt < 3/);
+  assert.match(source, /if \(repairs\+\+ >= 1\) break/);
+  assert.match(source, /if \(inspected\) throw/);
   assert.match(source, /Validation feedback/);
   assert.doesNotMatch(source, /lastAssistantMessage.content ===|inferPlannerChat|normalizedCommands/);
 });
@@ -280,7 +282,7 @@ test('semantic protocol rejects invalid plans and separates discussion from writ
   const source = await readFile(new URL('../lib/planner/conversation.ts', import.meta.url), 'utf8');
   assert.match(source, /Discussion cannot contain writes/);
   assert.match(source, /Existing item ID required/);
-  assert.match(source, /number\(p.horizonDays, 1, 14\)/);
+  assert.match(source, /number\(p.horizonDays, 1, MAX_CALENDAR_DAYS\)/);
   assert.match(source, /new Intl.DateTimeFormat\('en', \{ timeZone \}\)/);
 });
 

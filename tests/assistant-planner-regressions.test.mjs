@@ -19,6 +19,7 @@ const runtimeSources = [
   'lib/schedule/types.ts',
   'lib/schedule/selectors.ts',
   'lib/planner/assistant-planner.ts',
+  'lib/planner/calendar-range.ts',
 ];
 
 for (const relativePath of runtimeSources) {

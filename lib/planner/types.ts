@@ -113,6 +113,9 @@ export interface PlannerExamInput {
 export type CommitmentKind = 'class' | 'school' | 'sports' | 'work' | 'appointment' | 'personal' | 'other';
 
 export interface CommitmentOccurrenceOverride {
+  title?: string;
+  description?: string | null;
+  location?: string | null;
   scheduledDate?: LocalDate | null;
   startTime?: LocalTime | null;
   endTime?: LocalTime | null;

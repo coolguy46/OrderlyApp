@@ -29,7 +29,7 @@ test('dashboard schedule clicks create an exact snapped 30-minute slot', () => {
 
 test('dashboard schedule opens the shared Task/Event form with the clicked slot', () => {
   assert.match(source, /setCreationSlot\(\{[\s\S]*\.\.\.dashboardScheduleCreationSlot\(dateKey, event\.clientY, bounds\.top\),[\s\S]*userId/);
-  assert.match(source, /<TaskForm[\s\S]*isOpen=\{Boolean\(creationSlot && creationSlot\.userId === userId\)\}[\s\S]*initialMode="task"[\s\S]*initialDate=\{creationSlot\?\.userId === userId \? creationSlot\.date : ''\}[\s\S]*initialStartTime=\{creationSlot\?\.userId === userId \? creationSlot\.startTime : ''\}[\s\S]*initialDurationSeconds=\{creationSlot\?\.userId === userId \? creationSlot\.durationSeconds : null\}/);
+  assert.match(source, /<TaskForm[\s\S]*creationSlot && creationSlot\.userId === userId[\s\S]*initialMode="task"[\s\S]*initialDate=\{creationSlot\?\.userId === userId \? creationSlot\.date : ''\}[\s\S]*initialStartTime=\{creationSlot\?\.userId === userId \? creationSlot\.startTime : ''\}[\s\S]*initialDurationSeconds=\{creationSlot\?\.userId === userId \? creationSlot\.durationSeconds : null\}/);
   assert.match(source, /Click an empty time to add a task or event\./);
 });
 
