@@ -77,6 +77,8 @@ import { WeekTimeGrid, type PlannerBlockView } from '@/components/planner';
 import type { ConversationRequest, ConversationResult } from '@/lib/planner/conversation';
 import { AssistantChat } from '@/components/planner/assistant/AssistantChat';
 import { TaskForm } from '@/components/tasks/TaskForm';
+import { TaskCalendar, type TaskCalendarMode } from '@/components/calendar/TaskCalendar';
+import { CalendarViewTabs, type CalendarSection } from '@/components/calendar/CalendarViewTabs';
 import type { UntimedScheduleItem } from '@/components/schedule/UntimedTaskShelf';
 
 interface ConversationMessage {
@@ -648,6 +650,8 @@ export function Planner() {
   const [isThinking, setIsThinking] = useState(false);
   const [usage, setUsage] = useState<AssistantChatResponse['usage']>(null);
   const [calendarOpen, setCalendarOpen] = useState(true);
+  const [calendarSection, setCalendarSection] = useState<CalendarSection>('tasks');
+  const [taskCalendarMode, setTaskCalendarMode] = useState<TaskCalendarMode>('month');
   const [calendarExpanded, setCalendarExpanded] = useState(false);
   const [taskDetailsOpen, setTaskDetailsOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
@@ -1109,6 +1113,7 @@ export function Planner() {
         try { window.sessionStorage.setItem(`orderly:conversation-id:${owner}`, conversationId); } catch {}
       }
       body = { requestId: crypto.randomUUID(), conversationId, timeZone,
+        selectedDate: localDate(selectedDate),
         localEvents: storedEventsToCommitments(storedEvents, timeZone),
         messages: [...messages, userMessage].slice(-CHAT_CONTEXT_LIMIT).map(({role, content}) => ({role, content})) };
       setMessages(previous => [...previous, userMessage].slice(-CHAT_DISPLAY_LIMIT));
@@ -1157,6 +1162,7 @@ export function Planner() {
         try {
           await useAppStore.getState().refreshData();
           if (isCurrent()) {
+            setCalendarSection('schedule');
             const first = result.items?.[0];
             const savedTask = first?.entity === 'task' ? useAppStore.getState().tasks.find(task => task.id === first.id) : null;
             const savedEvent = first?.entity === 'event' ? usePlannerStore.getState().users[owner]?.commitments.find(event => event.id === first.id) : null;
@@ -1174,7 +1180,7 @@ export function Planner() {
       clearTimeout(timeout);
       if (isCurrent()) { chatSendLockRef.current = false; setIsThinking(false); setApplying(false); chatAbortRef.current = null; }
     }
-  }, [chatOwnerUserId, command, storedEvents, finalizeTaskCreations, messages, selectedTaskId, selectDay, timeZone, userId, waitForPlannerPersistence, waitForSchedulePersistence]);
+  }, [chatOwnerUserId, command, storedEvents, finalizeTaskCreations, messages, selectedTaskId, selectedDate, selectDay, timeZone, userId, waitForPlannerPersistence, waitForSchedulePersistence]);
 
   const undoChatChange = useCallback(async () => {
     if (!lastChatReceipt || lastChatReceipt.userId !== userId || chatSendLockRef.current) return;
@@ -1889,7 +1895,7 @@ export function Planner() {
       />
 
       <Card className="overflow-hidden">
-        <CardHeader className="flex-row items-center justify-between gap-3 px-4 py-3">
+        <CardHeader className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
           <button
             type="button"
             onClick={() => setCalendarOpen(open => !open)}
@@ -1900,15 +1906,18 @@ export function Planner() {
               <CalendarDays className="h-4 w-4" />
             </span>
             <span className="min-w-0">
-              <span className="block text-sm font-semibold">Week calendar</span>
+              <span className="block text-sm font-semibold">Your calendar</span>
               <span className="block truncate text-xs text-muted-foreground">
-                {format(weekStart, 'MMM d')}–{format(addDays(weekStart, 6), 'MMM d, yyyy')}
+                {calendarSection === 'tasks' && taskCalendarMode === 'month'
+                  ? format(selectedDate, 'MMMM yyyy')
+                  : `${format(weekStart, 'MMM d')}–${format(addDays(weekStart, 6), 'MMM d, yyyy')}`}
               </span>
             </span>
             {calendarOpen ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
           </button>
-          {calendarOpen && (
-            <div className="flex items-center gap-1">
+          {calendarOpen && <CalendarViewTabs value={calendarSection} onChange={setCalendarSection} />}
+          {calendarOpen && calendarSection === 'schedule' && (
+            <div className="flex shrink-0 items-center gap-1">
               <Button
                 type="button"
                 variant={taskDetailsOpen ? 'secondary' : 'ghost'}
@@ -1931,14 +1940,21 @@ export function Planner() {
         </CardHeader>
       </Card>
 
-      {calendarOpen && (
+      {calendarOpen && calendarSection === 'tasks' && (
+        <div role="tabpanel" aria-label="Task Calendar" className="min-w-0">
+          <TaskCalendar key={userId} date={selectedDate} onDateChange={selectDay}
+            mode={taskCalendarMode} onModeChange={setTaskCalendarMode} />
+        </div>
+      )}
+
+      {calendarOpen && calendarSection === 'schedule' && (
         <div className={cn(
           'grid min-w-0 gap-5',
           taskDetailsOpen && 'xl:grid-cols-[minmax(0,1fr)_320px]',
-        )}>
+        )} role="tabpanel" aria-label="Schedule">
         <main className="min-w-0">
           <Card>
-            <CardHeader className="flex-row items-center justify-between px-4 pb-3 pt-4">
+            <CardHeader className="flex flex-row items-center justify-between gap-2 px-4 pb-3 pt-4">
               <div className="flex min-w-0 items-center gap-2">
                 <CalendarDays className="h-4 w-4 shrink-0 text-primary" />
                 <div className="min-w-0">

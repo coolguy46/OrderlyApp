@@ -51,7 +51,7 @@ import { hasMissingTaskOnDate, isTaskMissing, taskMissingDate } from '@/lib/task
 import { useCurrentTime } from '@/lib/use-current-time';
 import { useHydrated } from '@/lib/use-hydrated';
 
-type TaskCalendarMode = 'week' | 'month';
+export type TaskCalendarMode = 'week' | 'month';
 
 interface TaskCalendarDay {
   tasks: Task[];
@@ -247,15 +247,30 @@ function EventChip({ event, compact = false, onClick }: { event: CalendarEventIt
   );
 }
 
-export function TaskCalendar() {
+export function TaskCalendar({ date: controlledDate, onDateChange, mode: controlledMode, onModeChange }: {
+  date?: Date;
+  onDateChange?: (date: Date) => void;
+  mode?: TaskCalendarMode;
+  onModeChange?: (mode: TaskCalendarMode) => void;
+} = {}) {
   const { tasks, exams, subjects, user } = useAppStore();
   const entriesByUser = useScheduleStore(state => state.entriesByUser);
   const plannerUsers = usePlannerStore(state => state.users);
   const setActiveUser = usePlannerStore(state => state.setActiveUser);
   const mounted = useHydrated();
-  const [currentDate, setCurrentDate] = useState<Date | null>(null);
+  const [internalDate, setInternalDate] = useState<Date | null>(null);
+  const currentDate = controlledDate ?? internalDate;
+  const setCurrentDate = (date: Date) => {
+    setInternalDate(date);
+    onDateChange?.(date);
+  };
   const [currentDateTimeZone, setCurrentDateTimeZone] = useState<string | null>(null);
-  const [mode, setMode] = useState<TaskCalendarMode>('month');
+  const [internalMode, setInternalMode] = useState<TaskCalendarMode>('month');
+  const mode = controlledMode ?? internalMode;
+  const setMode = (next: TaskCalendarMode) => {
+    setInternalMode(next);
+    onModeChange?.(next);
+  };
   const [taskFormOpen, setTaskFormOpen] = useState(false);
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [editingTaskDate, setEditingTaskDate] = useState<string | null>(null);
@@ -279,7 +294,7 @@ export function TaskCalendar() {
   const todayKey = localDateFromIso(now.toISOString(), timeZone);
 
   if (mounted && todayKey && currentDateTimeZone !== timeZone) {
-    setCurrentDate(localDateFromKey(todayKey));
+    setInternalDate(localDateFromKey(todayKey));
     setCurrentDateTimeZone(timeZone);
   }
 
@@ -437,6 +452,7 @@ export function TaskCalendar() {
                 key={value}
                 type="button"
                 onClick={() => setMode(value)}
+                aria-pressed={mode === value}
                 className={cn(
                   'rounded-md px-3 py-1.5 text-xs font-medium capitalize transition-colors',
                   mode === value ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
@@ -446,7 +462,7 @@ export function TaskCalendar() {
               </button>
             ))}
           </div>
-          <Button type="button" size="sm" onClick={openNewTaskForm} className="h-8 px-2.5 text-xs">
+          <Button type="button" size="sm" onClick={openNewTaskForm} className="h-8 px-2.5 text-xs" aria-label="New">
             <Plus className="h-3.5 w-3.5" />
             <span className="hidden sm:inline">New</span>
           </Button>
@@ -488,12 +504,13 @@ export function TaskCalendar() {
                         )}
                       >
                         <div className="mb-1 flex items-center justify-between">
-                          <span className={cn(
+                          <button type="button" onClick={() => setCurrentDate(day)} aria-label={`Select ${format(day, 'EEEE, MMMM d, yyyy')}`} aria-pressed={key === format(currentDate, 'yyyy-MM-dd')} className={cn(
                             'flex h-6 min-w-6 items-center justify-center rounded-full px-1.5 text-xs font-semibold',
                             isPlannerToday && 'bg-primary text-primary-foreground shadow-sm',
+                            key === format(currentDate, 'yyyy-MM-dd') && 'ring-2 ring-primary/60',
                           )}>
                             {format(day, 'd')}
-                          </span>
+                          </button>
                           {allCount > 0 && <span className="text-[9px] text-muted-foreground">{allCount}</span>}
                         </div>
                         <div className="space-y-1">
@@ -535,9 +552,9 @@ export function TaskCalendar() {
                         hasMissingTasks && 'bg-red-500/[0.07] ring-1 ring-inset ring-red-500/35',
                       )}>
                         <div className="mb-2 flex items-center justify-center">
-                          <span className={cn('flex h-7 min-w-7 items-center justify-center rounded-full px-2 text-sm font-semibold', isPlannerToday && 'bg-primary text-primary-foreground shadow-sm')}>
+                          <button type="button" onClick={() => setCurrentDate(day)} aria-label={`Select ${format(day, 'EEEE, MMMM d, yyyy')}`} aria-pressed={key === format(currentDate, 'yyyy-MM-dd')} className={cn('flex h-7 min-w-7 items-center justify-center rounded-full px-2 text-sm font-semibold', isPlannerToday && 'bg-primary text-primary-foreground shadow-sm', key === format(currentDate, 'yyyy-MM-dd') && 'ring-2 ring-primary/60')}>
                             {format(day, 'd')}
-                          </span>
+                          </button>
                         </div>
                         <div className="space-y-1.5">
                           {items.events.map(event => <EventChip key={event.id} event={event} onClick={() => openEventEditor(event)} />)}

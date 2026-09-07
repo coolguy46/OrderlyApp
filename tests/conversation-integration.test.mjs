@@ -32,7 +32,7 @@ async function compile(relative) {
 await compile('lib/planner/conversation.ts');
 await compile('lib/planner/conversation-calendar.ts');
 const { parseConversationIntent, conversationSystemPrompt, readConversationRequest } = require(join(temporary, 'lib/planner/conversation.cjs'));
-const { calendarFromSnapshot, compileConversation, conversationFacts, calendarIntervals } = require(join(temporary, 'lib/planner/conversation-calendar.cjs'));
+const { calendarFromSnapshot, compileConversation, conversationFacts, calendarIntervals, conversationValidationFeedback, RecurringScopeError } = require(join(temporary, 'lib/planner/conversation-calendar.cjs'));
 const { buildScheduleOccurrences, localTimeFromIso } = require(join(temporary, 'lib/schedule/selectors.cjs'));
 const { scheduleEntriesFromTasks } = require(join(temporary, 'lib/schedule/persistence.cjs'));
 await compile('lib/schedule/calendar-navigation.ts');
@@ -171,11 +171,38 @@ test('an event occurrence can move beyond its repeat end, be renamed, edited aga
   assert.equal(calendarIntervals(calendar, '2028-12-02', '2028-12-02').find(i => i.owner === `event:${id}`).title, 'Special class');
   assert.equal(localTimeFromIso(calendarIntervals(calendar, '2028-12-02', '2028-12-02').find(i => i.owner === `event:${id}`).startAt, zone), '11:00');
   assert.equal(calendarIntervals(calendar, '2028-10-21', '2028-10-21').find(i => i.owner === `event:${id}`).title, 'Weekend class');
-  assert.throws(() => compileConversation(intent([{ action: 'update', entity: 'event', id, start: '12:00' }]), calendar), /Which date/);
+  assert.throws(() => compileConversation(intent([{ action: 'update', entity: 'event', id, start: '12:00' }]), calendar), RecurringScopeError);
   const deleted = await turn('remove this one', [{ action: 'delete', entity: 'event', id, occurrenceDate: '2028-10-14' }]);
   assert.equal(calendarIntervals(calendarFromSnapshot(deleted.state, owner, NOW, zone), '2028-12-02', '2028-12-02').filter(i => i.owner === `event:${id}`).length, 0);
   assert.ok(deleted.state.events.some(e => e.client_commitment_id === id));
   await turn('remove entire series', [{ action: 'delete', entity: 'event', id, wholeSeries: true }]);
+});
+
+test('changing repeat weekdays edits the series even if the model omits redundant wholeSeries; ambiguous edits stay protected', async () => {
+  const created = await turn('create weekday practice', [{ action: 'create', entity: 'event', title: 'Practice', date: '2027-02-01', start: '18:00', end: '19:00', recurrence: 'weekly', days: [1,2,3,4,5], repeatUntil: '2027-03-01' }]);
+  const id = created.receipt.items[0].id;
+  const calendar = calendarFromSnapshot(created.state, owner, NOW, zone);
+  // Unchanged copied rules do not authorize a series-wide rename.
+  for (const op of [
+    { title: 'Ambiguous rename' },
+    { title: 'Ambiguous rename', days: [5,4,3,2,1], repeatUntil: '2027-03-01' },
+    { title: 'Explicit occurrence', days: [1,2,4,5], wholeSeries: false },
+  ]) assert.throws(() => compileConversation(intent([{ action: 'update', entity: 'event', id, ...op }]), calendar), RecurringScopeError);
+  assert.throws(() => compileConversation(intent([{ action: 'update', entity: 'event', id, occurrenceDate: '2027-02-03', days: [1,2,4,5] }]), calendar), /Repeat settings affect the whole series/);
+  const changed = await turn('rename all practice to gym and stop repeating on Wednesdays', [{ action: 'update', entity: 'event', id, title: 'Gym', days: [1,2,4,5] }]);
+  const saved = changed.state.events.find(e => e.client_commitment_id === id);
+  assert.equal(saved.title, 'Gym');
+  assert.equal(saved.start_date, '2027-02-01');
+  assert.equal(saved.end_date, '2027-03-01');
+  assert.equal(saved.start_time.slice(0,5), '18:00');
+  assert.equal(saved.end_time.slice(0,5), '19:00');
+  assert.deepEqual(saved.days_of_week, [1,2,4,5]);
+  const occurrences = calendarIntervals(calendarFromSnapshot(changed.state, owner, NOW, zone), '2027-02-01', '2027-02-07').filter(i => i.owner === `event:${id}`);
+  assert.equal(occurrences.length, 4);
+  assert.ok(occurrences.every(i => i.title === 'Gym' && i.sourceDate !== '2027-02-03'));
+  assert.match(conversationValidationFeedback(new RecurringScopeError()), /including the question the user just answered/);
+  assert.doesNotMatch(new RecurringScopeError().message, /wholeSeries|occurrenceDate/);
+  await turn('delete series', [{ action: 'delete', entity: 'event', id, wholeSeries: true }]);
 });
 
 test('untimed recurrence and monthly tasks retain boundaries; single-occurrence task edits preserve the task and deadline', async () => {
@@ -417,4 +444,8 @@ test('provider context includes all overdue tasks, verified outcomes and local c
   assert.match(prompt, /1:00 PM/);
   assert.match(prompt, /earlier assistant prose alone is NOT proof/);
   assert.throws(() => readConversationRequest({ requestId: randomUUID(), conversationId, timeZone: 'Invalid/Zone', messages: [{ role: 'user', content: 'hello' }] }));
+  const request = { requestId: randomUUID(), conversationId, timeZone: zone, messages: [{ role: 'user', content: 'plan the selected day' }] };
+  assert.equal(readConversationRequest({ ...request, selectedDate: '2028-03-12' }).selectedDate, '2028-03-12');
+  assert.throws(() => readConversationRequest({ ...request, selectedDate: '2028-02-31' }), /Invalid local date/);
+  assert.match(prompt, /not as a replacement for today/);
 });

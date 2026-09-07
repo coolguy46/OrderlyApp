@@ -16,6 +16,7 @@ const userRecord = { settings, commitments: stored?.events || [initialEvent], es
 const persist = () => localStorage.setItem('calendar-ui-fixture', JSON.stringify({ events: usePlannerStore.getState().users[id].commitments,
   tasks: useAppStore.getState().tasks, entries: useScheduleStore.getState().entriesByUser[id] }));
 export const useAppStore = create<any>((set) => ({
+  dataLoaded: true, finalizeTaskCreations: () => {},
   user: { id, email: 'calendar-test@example.invalid' }, tasks: stored?.tasks || [], subjects: [], exams: [], goals: [], studySessions: [],
   addTask: async (input: any) => {
     const task = { id: crypto.randomUUID(), created_at: now, updated_at: now, due_date: null, due_time: null, source: 'manual', status: 'pending', ...input };
@@ -48,6 +49,7 @@ export const useScheduleStore = create<any>((set, get) => ({
 
 Object.assign(window, { calendarFixture: {
   state: () => ({ events: usePlannerStore.getState().users[id].commitments, tasks: useAppStore.getState().tasks, entries: useScheduleStore.getState().entriesByUser[id] }),
+  saveChatEvent: () => usePlannerStore.getState().upsertCommitment(id, { ...initialEvent, id: 'chat-event', title: 'Future chat event', daysOfWeek: [5], startDate: '2027-03-12', endDate: '2027-03-12' }),
   addTask: async () => {
     const task = await useAppStore.getState().addTask({ title: 'Repeating study', recurrence: 'weekly', recurrence_days: [2,4], priority: 'medium' });
     useScheduleStore.getState().upsertTaskSchedule(id, task.id, { scheduledDate: '2026-09-08', startAt: localDateTimeToIso('2026-09-08','18:00','America/Los_Angeles'), durationSeconds: 1800,

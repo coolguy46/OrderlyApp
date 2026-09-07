@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { CalendarCapacityError } from '@/lib/planner/calendar-range';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { conversationSystemPrompt, parseConversationIntent, readConversationRequest, type ConversationIntent, type ConversationResult } from '@/lib/planner/conversation';
-import { calendarFromSnapshot, compileConversation, conversationFacts, type ConversationSnapshot } from '@/lib/planner/conversation-calendar';
+import { calendarFromSnapshot, compileConversation, conversationFacts, conversationValidationFeedback, type ConversationSnapshot } from '@/lib/planner/conversation-calendar';
 import { completeAssistantUsage, failAssistantUsage, parseAssistantProviderUsage, reserveAssistantUsage, type AssistantUsageRpcClient } from '@/lib/planner/assistant-usage';
 
 export const dynamic = 'force-dynamic';
@@ -87,7 +87,7 @@ export async function POST(request: NextRequest) {
     calendar.localBusy = input.localBusy;
     calendar.localEvents = input.localEvents;
     const providerMessages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
-      { role: 'system', content: conversationSystemPrompt(conversationFacts(calendar, receipts)) },
+      { role: 'system', content: conversationSystemPrompt({ ...conversationFacts(calendar, receipts), selectedDate: input.selectedDate || null }) },
       ...input.messages,
     ];
     let intent: ConversationIntent | null = null;
@@ -127,7 +127,7 @@ export async function POST(request: NextRequest) {
         intent = null;
         compiled = null;
         if (repairs++ >= 1) break;
-        providerMessages.push({ role: 'assistant', content: raw }, { role: 'system', content: `Validation feedback (no changes have saved): ${lastProblem}\nRepair the structured response using the real snapshot and the user's original intent. If this is a genuine constraint or ambiguity, return clarify with one useful question and no operations. Do not change explicitly requested times just to pass validation.` });
+        providerMessages.push({ role: 'assistant', content: raw }, { role: 'system', content: `Validation feedback (no changes have saved): ${conversationValidationFeedback(error)}\nRepair the structured response using the real snapshot and the user's original intent. If this is a genuine constraint or ambiguity, return clarify with one useful question and no operations. Do not change explicitly requested times just to pass validation.` });
       }
     }
     await completeAssistantUsage(rpc, input.requestId, usage, model);

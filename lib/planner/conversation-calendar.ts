@@ -161,6 +161,19 @@ function applyWrites(calendar: ConversationCalendar, writes: CalendarWrite[]): C
 }
 
 export interface CompiledConversation { writes: CalendarWrite[]; reply: string; items: ConversationResult['items'] }
+export class RecurringScopeError extends Error {
+  constructor() {
+    super('Should I change just one occurrence or the entire repeating series?');
+    this.name = 'RecurringScopeError';
+  }
+}
+
+export function conversationValidationFeedback(error: unknown): string {
+  const message = error instanceof Error ? error.message : 'The proposed operation was invalid.';
+  return error instanceof RecurringScopeError
+    ? `${message} This is a missing structured scope, not necessarily missing user permission. Review the full conversation, including the question the user just answered. If the user already requested or confirmed the whole series, repair with wholeSeries:true; do not ask again. If a particular occurrence was requested, supply its original occurrenceDate. Only clarify if scope is genuinely unresolved. Never expose field names to the user.`
+    : message;
+}
 export function compileConversation(intent: ConversationIntent, calendar: ConversationCalendar, newId: () => string = () => crypto.randomUUID()): CompiledConversation {
   if (intent.mode === 'inspect') throw new Error('Inspect the requested calendar range before compiling an answer.');
   if (intent.mode === 'discuss' || intent.mode === 'clarify') return { writes: [], reply: intent.reply, items: [] };
@@ -178,11 +191,23 @@ export function compileConversation(intent: ConversationIntent, calendar: Conver
       ? ` · repeats ${schedule.recurrence}${schedule.recurrence === 'weekly' ? ` on ${(schedule.recurrenceDays || []).map(day => ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][day]).join(', ')}` : ''}${schedule.recurrenceEndDate ? ` through ${schedule.recurrenceEndDate}` : ''}` : '';
     lines.push(`**${title}** (${entity}) — ${time}${schedule?.durationSeconds ? ` · ${Math.round(schedule.durationSeconds / 60)} min` : ''}${repeat}`);
   };
-  for (const op of intent.operations) {
+  for (const operation of intent.operations) {
+    const op = { ...operation };
     const working = applyWrites(calendar, writes);
     const task = op.id ? working.snapshot.tasks.find(task => task.id === op.id) : undefined;
     const event = op.id && working.snapshot.events.some(row => row.client_commitment_id === op.id)
       ? commitments(working).find(event => event.id === op.id && event.kind !== 'school') : undefined;
+    // Changing a repeat rule necessarily edits the series. Recognize an actual
+    // rule change, not unchanged fields copied by the model. Never broaden an
+    // explicitly single-occurrence operation or an ambiguous title/time edit.
+    const existingSchedule = task ? scheduleEntriesFromTasks([task], calendar.userId)[0] : event ? eventSchedule(event) : undefined;
+    if (op.action === 'update' && existingSchedule && existingSchedule.recurrence !== 'none'
+      && op.wholeSeries === undefined && !op.occurrenceDate) {
+      const ruleChanged = (op.recurrence !== undefined && op.recurrence !== existingSchedule.recurrence)
+        || (op.days !== undefined && [...new Set(op.days)].sort().join(',') !== [...new Set(existingSchedule.recurrenceDays || [])].sort().join(','))
+        || (op.repeatUntil !== undefined && op.repeatUntil !== (existingSchedule.recurrenceEndDate || null));
+      if (ruleChanged) op.wholeSeries = true;
+    }
     if (op.action !== 'create' && !task && !event) throw new Error('That item no longer exists in this account. Use a current item ID or ask which item.');
     if (op.action !== 'convert' && op.id && (op.entity === 'task' ? !task : !event)) throw new Error('The item type does not match its saved ID. Use convert to change type.');
     if (op.action === 'convert' && (op.entity === 'event' ? !task : !event)) throw new Error('This item is already the requested type. Update it instead of making a duplicate.');
@@ -191,7 +216,7 @@ export function compileConversation(intent: ConversationIntent, calendar: Conver
     if (op.action === 'delete') {
       if (!event) throw new Error('Task deletion is not supported in chat. Use unschedule to keep the assignment.');
       if (eventSchedule(event).recurrence !== 'none' && !op.wholeSeries) {
-        if (!op.occurrenceDate) throw new Error('Which occurrence should be removed?');
+        if (!op.occurrenceDate) throw new RecurringScopeError();
         const targetDate = event.occurrenceOverrides?.[op.occurrenceDate]?.scheduledDate || op.occurrenceDate;
         if (!buildCommitmentOccurrences(event, targetDate, targetDate).some(item => item.sourceDate === op.occurrenceDate)) throw new Error('That occurrence does not exist or was already removed.');
         writes.push({ entity: 'event', op: 'put', id: event.id, data: recurringCommitmentInsert(calendar.userId, withCommitmentOccurrenceOverride(event, op.occurrenceDate, { skipped: true })) as Record<string, unknown> });
@@ -210,7 +235,7 @@ export function compileConversation(intent: ConversationIntent, calendar: Conver
     if (!title) throw new Error('A title is required.');
     let previous: ScheduleEntryInput | undefined = task ? scheduleEntriesFromTasks([task], calendar.userId)[0] : event ? eventSchedule(event) : undefined;
     const editingOccurrence = previous?.recurrence !== 'none' && previous && !op.wholeSeries && op.action === 'update';
-    if (editingOccurrence && !op.occurrenceDate) throw new Error('Which date of this repeating item should change? Use occurrenceDate, or wholeSeries only when requested.');
+    if (editingOccurrence && !op.occurrenceDate) throw new RecurringScopeError();
     if (editingOccurrence && (op.recurrence !== undefined || op.days !== undefined || op.repeatUntil !== undefined)) throw new Error('Repeat settings affect the whole series. Ask whether to change the entire series.');
     if (editingOccurrence && op.occurrenceDate) {
       const taskOverride = task ? scheduleEntriesFromTasks([task], calendar.userId)[0]?.occurrenceOverrides[op.occurrenceDate] : undefined;
