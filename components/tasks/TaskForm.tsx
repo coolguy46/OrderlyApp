@@ -28,6 +28,7 @@ import {
   BookOpen,
   Calendar,
   CalendarDays,
+  ChevronDown,
   Clock,
   FileText,
   Flag,
@@ -174,6 +175,7 @@ export function TaskForm({
   const [mode, setMode] = useState<TaskFormMode>(task ? 'task' : commitment ? 'event' : initialMode);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
+  const [descriptionExpanded, setDescriptionExpanded] = useState(false);
   const [priority, setPriority] = useState<TaskPriority>('medium');
   const [manualPriority, setManualPriority] = useState(false);
   const [status, setStatus] = useState<TaskStatus>('pending');
@@ -218,6 +220,7 @@ export function TaskForm({
     setMode(task ? 'task' : commitment ? 'event' : initialMode);
     setTitle('');
     setDescription('');
+    setDescriptionExpanded(false);
     setPriority('medium');
     setManualPriority(false);
     setStatus('pending');
@@ -285,6 +288,7 @@ export function TaskForm({
             ? externalHtmlToPlainText(task.description)
             : task.description || '',
         );
+        setDescriptionExpanded(Boolean(task.description));
         setPriority(task.priority);
         setStatus(task.status);
         setSubjectId(task.subject_id || 'none');
@@ -311,6 +315,7 @@ export function TaskForm({
           if (occurrence) {
             setTitle(occurrence.title);
             setDescription(externalHtmlToPlainText(occurrence.description));
+            setDescriptionExpanded(Boolean(occurrence.description));
             setScheduleDate(occurrence.date);
             setScheduleStartTime(occurrence.startAt ? localTimeFromIso(occurrence.startAt, timeZone) || '' : '');
             setDurationInput(formatDurationInput(occurrence.durationSeconds));
@@ -322,6 +327,7 @@ export function TaskForm({
         setMode('event');
         setTitle(override?.title ?? commitment.title);
         setDescription((override?.description !== undefined ? override.description : commitment.description) || '');
+        setDescriptionExpanded(Boolean(override?.description !== undefined ? override.description : commitment.description));
         setEventLocation((override?.location !== undefined ? override.location : commitment.location) || '');
         setEventDate(editingEventOccurrence ? override?.scheduledDate || occurrenceDate || initialDate : commitment.startDate || initialDate);
         setEventStartTime(normalizedClock(override?.startTime || commitment.startTime));
@@ -764,13 +770,13 @@ export function TaskForm({
     <>
       <Dialog open={isOpen} onOpenChange={(open) => !open && closeForm()}>
         <DialogContent
-          className="flex max-h-none flex-col gap-0 overflow-hidden p-0 sm:max-w-[540px] sm:overflow-hidden"
+          className="flex max-h-none flex-col gap-0 overflow-hidden p-0 sm:max-w-[620px] sm:overflow-hidden"
           style={{ maxHeight: 'min(calc(100dvh - 1rem), 900px)' }}
         >
         {/* Header */}
-        <div className="shrink-0 bg-gradient-to-b from-indigo-500/5 to-transparent px-6 pb-4 pt-6">
-          <DialogHeader>
-            <div className="flex items-center gap-3">
+        <div className="shrink-0 px-5 pb-4 pt-5 sm:px-6">
+          <DialogHeader className="text-left">
+            <div className="flex items-center gap-3 pr-7">
               <div className={cn(
                 'p-2 rounded-xl',
                 task ? 'bg-amber-500/15' : isEventMode ? 'bg-cyan-500/15' : 'bg-indigo-500/15'
@@ -794,7 +800,7 @@ export function TaskForm({
                       ? 'Update this calendar event and its repeat schedule'
                     : isEventMode
                       ? 'Add a class, game, meeting, or other calendar event'
-                      : 'Fill in the details to create a task'}
+                      : 'Add a task and choose when to work on it'}
                 </DialogDescription>
               </div>
             </div>
@@ -806,14 +812,14 @@ export function TaskForm({
             role="region"
             aria-label={isEventMode ? 'Event details' : 'Task details'}
             tabIndex={0}
-            className="px-6 pb-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-400"
+            className="px-5 pb-5 sm:px-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-400"
           >
-          <div className="space-y-4">
+          <div className="space-y-4 [&_label]:font-medium [&_label]:normal-case [&_label]:tracking-normal">
           {!task && !commitment && (
             <div
               role="tablist"
               aria-label="Create a task or event"
-              className="grid grid-cols-2 rounded-xl border border-border/50 bg-muted/25 p-1"
+              className="grid grid-cols-2 rounded-lg bg-muted/40 p-1"
             >
               {(['task', 'event'] as const).map(nextMode => (
                 <button
@@ -828,7 +834,7 @@ export function TaskForm({
                     setSaveError('');
                   }}
                   className={cn(
-                    'flex h-9 items-center justify-center gap-2 rounded-lg text-sm font-medium transition-colors',
+                    'flex h-9 items-center justify-center gap-2 rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                     mode === nextMode
                       ? 'bg-background text-foreground shadow-sm'
                       : 'text-muted-foreground hover:text-foreground',
@@ -845,7 +851,7 @@ export function TaskForm({
           {task && occurrenceDate && task.recurrence !== 'none' && task.status !== 'completed' && (
             <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
               <Label htmlFor="task-edit-scope">Change</Label>
-              <select id="task-edit-scope" className="rounded-md border border-border/50 bg-background px-2 py-1.5"
+              <select id="task-edit-scope" className="min-w-0 max-w-full rounded-md border border-border/50 bg-background px-2 py-2"
                 value={editWholeSeries ? 'series' : 'occurrence'} onChange={event => setEditWholeSeries(event.target.value === 'series')}>
                 <option value="occurrence">Only this occurrence ({occurrenceDate})</option>
                 <option value="series">Entire series</option>
@@ -878,11 +884,20 @@ export function TaskForm({
 
           {/* Description */}
           <div className="space-y-1.5">
-            <Label htmlFor="description" className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
-              <BookOpen className="w-3 h-3" />
-              Description
-              <span className="text-muted-foreground/50 normal-case tracking-normal font-normal">(optional)</span>
-            </Label>
+            <button
+              type="button"
+              aria-expanded={descriptionExpanded}
+              aria-controls="task-description-fields"
+              onClick={() => setDescriptionExpanded(expanded => !expanded)}
+              className="flex min-h-9 w-full items-center gap-2 rounded-md text-left text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <BookOpen className="h-3.5 w-3.5" />
+              {description ? 'Description' : 'Add description'}
+              <span className="text-xs text-muted-foreground">Optional</span>
+              <ChevronDown className={cn('ml-auto h-4 w-4 transition-transform', descriptionExpanded && 'rotate-180')} />
+            </button>
+            <div id="task-description-fields" hidden={!descriptionExpanded}>
+            <Label htmlFor="description" className="sr-only">Description</Label>
             <Textarea
               id="description"
               placeholder="Add more details..."
@@ -891,6 +906,7 @@ export function TaskForm({
               rows={2}
               className="h-24 min-h-20 max-h-40 resize-y overflow-y-auto border-border/50 bg-muted/30 field-sizing-fixed focus:bg-background"
             />
+            </div>
           </div>
 
           {!isEventMode ? (
@@ -1188,20 +1204,20 @@ export function TaskForm({
             </div>
           )}
           </fieldset>
-          <div className="space-y-3 rounded-xl border border-border/40 bg-muted/15 p-3">
+          <div className="space-y-3 border-t border-border/60 pt-4">
             <div>
-              <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                <Calendar className="h-3 w-3" />
+              <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                <Calendar className="h-4 w-4 text-muted-foreground" />
                 Schedule
                 <span className="font-normal normal-case tracking-normal text-muted-foreground/50">(optional)</span>
               </div>
-              <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground/70">
-                Leave the start time blank to keep this task in the untimed shelf. Its deadline does not change.
+              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                Plan work separately from its deadline. No start time keeps it untimed.
               </p>
             </div>
 
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-              <div className="space-y-1.5">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+              <div className="col-span-2 space-y-1.5 sm:col-span-1">
                 <Label htmlFor="scheduleDate" className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                   <Calendar className="h-3 w-3" /> Schedule Date
                 </Label>
@@ -1274,13 +1290,13 @@ export function TaskForm({
                 return `${hours % 12 || 12}:${String(minutes).padStart(2, '0')} ${hours >= 12 ? 'PM' : 'AM'}`;
               };
               return (
-                <p className="rounded-md bg-indigo-500/10 px-2.5 py-2 text-[11px] text-indigo-300">
+                <p className="rounded-md bg-primary/10 px-2.5 py-2 text-xs text-primary">
                   Scheduled {formatClock(scheduleStartTime)}–{formatClock(endTime)} on {scheduleDate}
                 </p>
               );
             })()}
             {taskEndsAfterDeadline && (
-              <p role="status" className="rounded-md border border-amber-500/25 bg-amber-500/10 px-2.5 py-2 text-[11px] leading-relaxed text-amber-300">
+              <p role="status" className="rounded-md bg-amber-500/10 px-2.5 py-2 text-xs leading-relaxed text-amber-700 dark:text-amber-300">
                 This work session ends after the {formattedPreviewDeadline} deadline. You can still schedule it; the original due date will not change.
               </p>
             )}
@@ -1297,7 +1313,7 @@ export function TaskForm({
             {commitment && occurrenceDate && commitmentRepeatsWeekly(commitment) && (
               <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                 <Label htmlFor="event-edit-scope">Change</Label>
-                <select id="event-edit-scope" className="rounded-md border border-border/50 bg-background px-2 py-1.5"
+                <select id="event-edit-scope" className="min-w-0 max-w-full rounded-md border border-border/50 bg-background px-2 py-2"
                   value={editWholeSeries ? 'series' : 'occurrence'} onChange={event => setEditWholeSeries(event.target.value === 'series')}>
                   <option value="occurrence">Only this occurrence ({occurrenceDate})</option>
                   <option value="series">Entire series</option>
@@ -1319,8 +1335,8 @@ export function TaskForm({
               />
             </div>
 
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-              <div className="space-y-1.5">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+              <div className="col-span-2 space-y-1.5 sm:col-span-1">
                 <Label htmlFor="event-date" className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                   <Calendar className="h-3 w-3" /> Date
                 </Label>
@@ -1433,7 +1449,7 @@ export function TaskForm({
               </div>
             </div>
 
-            {!editingEventOccurrence && <div className="space-y-1.5 rounded-xl border border-border/40 bg-muted/15 p-3">
+            {!editingEventOccurrence && <div className="space-y-2 border-t border-border/60 pt-4">
               <Label id="event-recurrence-days-label" className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 <Repeat className="h-3 w-3" /> Repeat Weekly
                 <span className="font-normal normal-case tracking-normal text-muted-foreground/50">(optional)</span>
@@ -1481,14 +1497,14 @@ export function TaskForm({
           </DialogBody>
 
           {/* Actions */}
-          <div className="flex shrink-0 gap-2 border-t border-border/30 bg-background/95 px-6 py-4 backdrop-blur-sm">
+          <div className="grid shrink-0 grid-cols-2 gap-2 border-t border-border/50 bg-background/95 px-5 py-4 sm:flex sm:justify-end sm:px-6">
             {commitment && (
               <Button
                 type="button"
                 variant="outline"
                 onClick={() => setEventDeleteOpen(true)}
                 disabled={isSubmitting}
-                className="h-10 gap-1.5 border-red-500/30 px-3 text-red-400 hover:bg-red-500/10 hover:text-red-300"
+                className="col-span-2 h-10 gap-1.5 justify-self-start border-red-500/30 px-3 text-red-600 hover:bg-red-500/10 dark:text-red-400 sm:mr-auto"
               >
                 <Trash2 className="h-4 w-4" />
                 Remove
@@ -1498,11 +1514,11 @@ export function TaskForm({
               type="button"
               variant="outline"
               onClick={closeForm}
-              className="flex-1 h-10"
+              className="h-10 sm:min-w-24"
             >
               Cancel
             </Button>
-            <Button type="submit" disabled={isSubmitting} aria-busy={isSubmitting} className="flex-1 h-10 gap-1.5 shadow-md shadow-primary/20">
+            <Button type="submit" disabled={isSubmitting} aria-busy={isSubmitting} className="h-10 gap-1.5 sm:min-w-32">
               {task ? (
                 <>
                   <Save className="w-4 h-4" />

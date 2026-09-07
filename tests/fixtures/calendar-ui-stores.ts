@@ -19,12 +19,13 @@ export const useAppStore = create<any>((set) => ({
   dataLoaded: true, finalizeTaskCreations: () => {},
   user: { id, email: 'calendar-test@example.invalid' }, tasks: stored?.tasks || [], subjects: [], exams: [], goals: [], studySessions: [],
   addTask: async (input: any) => {
-    const task = { id: crypto.randomUUID(), created_at: now, updated_at: now, due_date: null, due_time: null, source: 'manual', status: 'pending', ...input };
+    const task = { id: crypto.randomUUID(), user_id: id, created_at: now, updated_at: now, due_date: null, due_time: null, source: 'manual', status: 'pending', ...input };
     set((state: any) => ({ tasks: [...state.tasks, task] })); persist(); return task;
   },
   updateTask: async (taskId: string, patch: any) => { set((s: any) => ({ tasks: s.tasks.map((t: any) => t.id === taskId ? { ...t, ...patch } : t) })); persist(); return true; },
   deleteTask: async (taskId: string) => { set((s: any) => ({ tasks: s.tasks.filter((t: any) => t.id !== taskId) })); persist(); return true; },
-  completeTask: async () => true, refreshData: async () => {}, addSubject: async () => null, deleteSubject: async () => {},
+  completeTask: async (taskId: string) => { set((s: any) => ({ tasks: s.tasks.map((t: any) => t.id === taskId ? { ...t, status: 'completed', completed_at: now } : t) })); persist(); return true; },
+  refreshData: async () => {}, addSubject: async () => null, deleteSubject: async () => {},
 }));
 export const usePlannerStore = create<any>((set) => ({
   users: { [id]: userRecord }, setActiveUser: () => {},
@@ -50,6 +51,16 @@ export const useScheduleStore = create<any>((set, get) => ({
 Object.assign(window, { calendarFixture: {
   state: () => ({ events: usePlannerStore.getState().users[id].commitments, tasks: useAppStore.getState().tasks, entries: useScheduleStore.getState().entriesByUser[id] }),
   saveChatEvent: () => usePlannerStore.getState().upsertCommitment(id, { ...initialEvent, id: 'chat-event', title: 'Future chat event', daysOfWeek: [5], startDate: '2027-03-12', endDate: '2027-03-12' }),
+  addLayoutTask: async () => {
+    const task = await useAppStore.getState().addTask({
+    id: 'layout-canvas-task', title: '[Canvas] Reading and reflection: compare the arguments and prepare your response for class',
+    source: 'canvas', priority: 'high', recurrence: 'none', due_date: '2026-09-06T15:00:00Z', due_time: '08:00',
+    course_name: 'English Language and Composition', assignment_type: 'Assignment',
+    description: '<p>Read both passages and prepare a thoughtful response.</p>'.repeat(18)
+      + '<p>Reference: https://example.invalid/' + 'long-resource-name-'.repeat(20) + '</p>',
+    });
+    useScheduleStore.getState().upsertTaskSchedule(id, task.id, { scheduledDate: '2026-09-06', startAt: null, durationSeconds: 3600 });
+  },
   addTask: async () => {
     const task = await useAppStore.getState().addTask({ title: 'Repeating study', recurrence: 'weekly', recurrence_days: [2,4], priority: 'medium' });
     useScheduleStore.getState().upsertTaskSchedule(id, task.id, { scheduledDate: '2026-09-08', startAt: localDateTimeToIso('2026-09-08','18:00','America/Los_Angeles'), durationSeconds: 1800,

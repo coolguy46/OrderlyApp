@@ -10,7 +10,7 @@ export function CalendarViewTabs({ value, onChange }: {
   onChange: (value: CalendarSection) => void;
 }) {
   return (
-    <div className="grid w-full grid-cols-2 rounded-xl border border-border/50 bg-muted/35 p-1 sm:w-auto sm:min-w-[280px]"
+    <div className="grid w-full shrink-0 grid-cols-2 rounded-xl bg-muted/40 p-1 sm:w-auto sm:min-w-[280px]"
       role="tablist" aria-label="Calendar view">
       {([
         { id: 'tasks' as const, label: 'Task Calendar', icon: CalendarDays },
@@ -29,9 +29,9 @@ export function CalendarViewTabs({ value, onChange }: {
             const buttons = event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]');
             buttons?.[next === 'tasks' ? 0 : 1]?.focus();
           }}
-          className={cn('flex min-h-9 items-center justify-center gap-2 rounded-lg border px-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
-            selected ? 'border-border/50 bg-background text-foreground shadow-sm' : 'border-transparent text-muted-foreground hover:text-foreground')}>
-          <Icon className={cn('h-4 w-4 shrink-0', selected && item.id === 'schedule' && 'text-indigo-500')} />
+          className={cn('flex min-h-10 items-center justify-center gap-2 rounded-lg px-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+            selected ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:bg-background/40 hover:text-foreground')}>
+          <Icon className={cn('h-4 w-4 shrink-0', selected && 'text-primary')} />
           {item.label}
         </button>;
       })}

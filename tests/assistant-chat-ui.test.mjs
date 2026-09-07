@@ -308,10 +308,11 @@ test('chat UI keeps the composer visible and calendar controls secondary', async
     readFile(chatUrl, 'utf8'),
   ]);
 
-  assert.match(chatSource, /sticky bottom-0/);
+  assert.match(chatSource, /min-h-0 flex-1 overflow-y-auto/);
+  assert.match(chatSource, /shrink-0 border-t/);
   assert.match(chatSource, /New chat/);
   assert.match(chatSource, /Stop response/);
-  assert.match(chatSource, /Requested changes save directly to your calendar/);
+  assert.match(chatSource, /Changes save to your calendar/);
   assert.doesNotMatch(chatSource, /Proposed schedule change/);
   assert.match(plannerSource, /aria-expanded=\{calendarOpen\}/);
   assert.match(plannerSource, /setCalendarExpanded/);

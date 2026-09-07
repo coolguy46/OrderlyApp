@@ -9,7 +9,7 @@ import {
   startOfDay,
   startOfWeek,
 } from 'date-fns';
-import { ArchiveRestore, ChevronLeft, ChevronRight, Clock3 } from 'lucide-react';
+import { ArchiveRestore, ChevronLeft, ChevronRight, CircleHelp } from 'lucide-react';
 import { TaskDetailViewer } from '@/components/tasks/TaskDetailViewer';
 import { TaskForm } from '@/components/tasks/TaskForm';
 import { Button } from '@/components/ui/Button';
@@ -623,9 +623,9 @@ export function ScheduleCalendar() {
   };
 
   return (
-    <div className="flex min-h-0 flex-col gap-3">
-      <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border/50 bg-card/55 px-3 py-2 shadow-sm backdrop-blur-sm">
-        <div className="flex min-w-0 items-center gap-1">
+    <div className="flex min-h-0 min-w-0 flex-col gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 py-1">
+        <div className="flex min-w-0 max-w-full items-center gap-0.5">
           <Button
             type="button"
             variant="ghost"
@@ -639,7 +639,7 @@ export function ScheduleCalendar() {
           >
             <ChevronLeft className="h-4 w-4" />
           </Button>
-          <Button type="button" variant="ghost" size="sm" onClick={goToToday} className="h-8 px-2.5 text-xs">Today</Button>
+          <Button type="button" variant="ghost" size="sm" onClick={goToToday} className="h-9 px-2.5 text-sm">Today</Button>
           <Button
             type="button"
             variant="ghost"
@@ -653,16 +653,23 @@ export function ScheduleCalendar() {
           >
             <ChevronRight className="h-4 w-4" />
           </Button>
-          <div className="ml-1 min-w-0">
-            <p className="truncate text-sm font-semibold sm:text-base">
-              {format(weekStart, 'MMM d')}–{format(addDays(weekStart, 6), 'MMM d, yyyy')}
-            </p>
-            <p className="hidden text-[10px] text-muted-foreground sm:block">Drag tasks onto a time or back to Untimed · move or resize anything except school</p>
-          </div>
+          <p className="ml-2 min-w-0 text-sm font-semibold leading-snug sm:text-base">
+            {format(weekStart, 'MMM d')}–{format(addDays(weekStart, 6), 'MMM d, yyyy')}
+          </p>
         </div>
-        <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
-          <Clock3 className="h-3.5 w-3.5" />
-          {occurrences.timed.length} timed · {occurrences.untimed.length} untimed
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+          <span>{occurrences.timed.length} timed · {occurrences.untimed.length} untimed</span>
+          <details className="group relative">
+            <summary className="flex min-h-9 cursor-pointer list-none items-center gap-1.5 rounded-lg px-2 text-xs transition-colors hover:bg-muted/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary [&::-webkit-details-marker]:hidden">
+              <CircleHelp className="h-3.5 w-3.5" />
+              Schedule tips
+            </summary>
+            <div className="absolute right-0 top-full z-[60] mt-1 w-64 max-w-[calc(100vw-2rem)] space-y-2 rounded-xl border border-border bg-popover p-4 text-xs leading-relaxed text-popover-foreground shadow-lg">
+              <p>Click an empty time to add a task or event.</p>
+              <p>Drag items to move them. Use the bottom edge to resize, or move a task back to Untimed.</p>
+              <p className="text-muted-foreground">Scheduling work does not change its deadline. School hours are managed in Settings.</p>
+            </div>
+          </details>
         </div>
       </div>
 
@@ -693,7 +700,7 @@ export function ScheduleCalendar() {
         blocks={timedBlocks}
         editable
         variant="fullscreen"
-        viewportClassName="h-[calc(100dvh-13.5rem)] min-h-[560px]"
+        viewportClassName="h-[calc(100dvh-13.5rem)] min-h-[420px]"
         showSummaryHeader={false}
         showUntimedShelf
         untimedItems={untimedItems}

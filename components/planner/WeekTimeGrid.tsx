@@ -251,7 +251,7 @@ function PositionedBlock({
     top: startMinute * PIXELS_PER_MINUTE,
     height,
     transform: CSS.Translate.toString(transform),
-    borderColor: colorWithAlpha(color, '99', 'rgba(99, 102, 241, 0.55)'),
+    borderColor: colorWithAlpha(color, '55', 'rgba(99, 102, 241, 0.33)'),
     borderLeftColor: color,
     backgroundColor: fixed
       ? colorWithAlpha(color, '14', 'rgba(113, 113, 122, 0.18)')
@@ -264,7 +264,7 @@ function PositionedBlock({
       ref={setNodeRef}
       style={style}
       className={cn(
-        'group absolute left-1 right-1 overflow-hidden rounded-md border border-l-[3px] text-left shadow-sm transition-[box-shadow,opacity]',
+        'group absolute left-1 right-1 overflow-hidden rounded-md border border-l-[3px] text-left transition-[box-shadow,opacity]',
         draggable && 'cursor-grab active:cursor-grabbing',
         fixed && 'border-dashed bg-muted/70',
         block.draft && 'border-primary/80 bg-primary/15 shadow-lg ring-1 ring-primary/35',
@@ -293,12 +293,12 @@ function PositionedBlock({
           }
         }}
         className={cn(
-          'absolute inset-0 z-0 w-full px-1.5 py-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary',
+          'absolute inset-0 z-0 flex w-full items-start px-2 py-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary',
           draggable && 'cursor-grab touch-none active:cursor-grabbing',
           compact && 'py-0.5',
         )}
       >
-        <div className="flex min-w-0 items-start gap-1">
+        <div className="flex w-full min-w-0 items-start gap-1">
           {block.draft ? (
             <Sparkles className="mt-0.5 h-3 w-3 shrink-0 text-primary" />
           ) : fixed ? (
@@ -306,22 +306,23 @@ function PositionedBlock({
           ) : editable ? (
             <GripVertical className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground/70" />
           ) : null}
-          <div className={cn('min-w-0 flex-1', draggable && block.kind === 'task' && onMoveToUntimed && 'pr-4')}>
+          <div className={cn('min-w-0 flex-1', draggable && block.kind === 'task' && onMoveToUntimed && 'pr-5')}>
             <p
               className={cn(
-                'truncate text-[11px] font-semibold leading-tight text-foreground',
+                'truncate text-xs font-medium leading-tight text-foreground',
+                compact && 'text-[11px]',
                 block.completed && 'line-through',
               )}
             >
               {block.title}
             </p>
             {!compact && (
-              <p className="truncate text-[9px] leading-tight text-muted-foreground">
+              <p className="mt-0.5 truncate text-[11px] leading-tight text-muted-foreground">
                 {formatBlockTime(start, end)}
               </p>
             )}
             {roomy && (
-              <p className="mt-0.5 truncate text-[9px] leading-tight text-muted-foreground/80">
+              <p className="mt-1 truncate text-[10px] leading-tight text-muted-foreground/80">
                 {block.draft ? `Draft · ${minutesLabel(duration)}` : block.subjectName || block.reason || minutesLabel(duration)}
               </p>
             )}
@@ -343,7 +344,8 @@ function PositionedBlock({
             event.stopPropagation();
             void Promise.resolve(onMoveToUntimed(block));
           }}
-          className="absolute right-0.5 top-0.5 z-20 flex h-5 w-5 items-center justify-center rounded text-muted-foreground/80 opacity-75 transition hover:bg-background/70 hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary sm:opacity-0 sm:group-hover:opacity-100"
+          data-size="icon-sm"
+          className="absolute right-0.5 top-0.5 z-20 flex h-6 w-6 items-center justify-center rounded text-muted-foreground/70 transition-colors hover:bg-background/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary"
         >
           <ListTodo className="h-3 w-3" />
         </button>
@@ -357,7 +359,7 @@ function PositionedBlock({
           data-size="icon-sm"
           onPointerDown={(event) => onResizeStart?.(event, block)}
           onKeyDown={(event) => onResizeKeyDown(event, block)}
-          className="absolute inset-x-1 bottom-0 z-20 h-2 cursor-ns-resize touch-none rounded-full opacity-0 transition-opacity after:absolute after:bottom-0.5 after:left-1/2 after:h-0.5 after:w-7 after:-translate-x-1/2 after:rounded-full after:bg-foreground/35 hover:opacity-100 focus-visible:opacity-100 group-hover:opacity-100"
+          className="absolute inset-x-1 bottom-0 z-20 h-2 cursor-ns-resize touch-none rounded-full opacity-50 transition-opacity after:absolute after:bottom-0.5 after:left-1/2 after:h-0.5 after:w-7 after:-translate-x-1/2 after:rounded-full after:bg-foreground/35 hover:opacity-100 focus-visible:opacity-100 group-hover:opacity-100"
         />
       )}
     </div>
@@ -408,7 +410,7 @@ function DayColumn({ day, keyboardStartMinute, onActivate }: DayColumnProps) {
         activate(event, true);
       } : undefined}
       className={cn(
-        'relative border-r border-border/50 bg-background/25 transition-colors last:border-r-0',
+        'relative border-r border-border/35 bg-background/25 transition-colors last:border-r-0',
         interactive && 'cursor-cell outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary',
         isOver && 'bg-primary/5',
       )}
@@ -418,7 +420,7 @@ function DayColumn({ day, keyboardStartMinute, onActivate }: DayColumnProps) {
         <div
           key={hour}
           aria-hidden="true"
-          className="pointer-events-none absolute inset-x-0 border-t border-border/45"
+          className="pointer-events-none absolute inset-x-0 border-t border-border/35"
           style={{ top: hour * HOUR_HEIGHT }}
         />
       ))}
@@ -426,7 +428,7 @@ function DayColumn({ day, keyboardStartMinute, onActivate }: DayColumnProps) {
         <div
           key={`quarter-${quarter}`}
           aria-hidden="true"
-          className="pointer-events-none absolute inset-x-0 border-t border-border/15"
+          className="pointer-events-none absolute inset-x-0 border-t border-border/10"
           style={{ top: (quarter + 1) * SNAP_MINUTES * PIXELS_PER_MINUTE }}
         />
       ))}
@@ -852,18 +854,18 @@ export function WeekTimeGrid({
         <div
           ref={scrollRef}
           className={cn(
-            'scroll-touch relative overflow-auto overscroll-contain rounded-xl border border-border/60 bg-card/35',
+            'scroll-touch relative overflow-auto overscroll-contain rounded-xl border border-border/50 bg-card/35',
             !viewportClassName && (variant === 'fullscreen' ? 'h-[calc(100dvh-8.5rem)]' : 'h-[600px]'),
             viewportClassName,
           )}
         >
           <div className={cn('relative', contentMinWidth)}>
-            <div className="sticky top-0 z-40 bg-card/95 shadow-sm backdrop-blur-xl" data-time-grid-header>
+            <div className="sticky top-0 z-40 bg-card/95 backdrop-blur-xl" data-time-grid-header>
               <div
-                className="grid h-14 border-b border-border/70 bg-card/95"
+                className="grid h-14 border-b border-border/50 bg-card/95"
                 style={{ gridTemplateColumns: columns }}
               >
-                <div className="sticky left-0 z-50 flex items-center justify-center border-r border-border/60 bg-card/95 px-1 text-[9px] font-medium text-muted-foreground">
+                <div className="sticky left-0 z-50 flex items-center justify-center border-r border-border/40 bg-card/95 px-1 text-[10px] font-medium text-muted-foreground">
                   <span className="truncate" title={timeZoneLabel || resolvedTimeZone}>
                     {displayedTimeZoneLabel}
                   </span>
@@ -872,7 +874,7 @@ export function WeekTimeGrid({
                   <div
                     key={day.toISOString()}
                     className={cn(
-                      'flex items-stretch justify-stretch border-r border-border/50 last:border-r-0',
+                      'flex items-stretch justify-stretch border-r border-border/35 last:border-r-0',
                       isSameDay(day, displayNow) && 'bg-primary/5',
                       selectedDay && isSameDay(day, selectedDay) && 'bg-indigo-500/10',
                     )}
@@ -882,9 +884,9 @@ export function WeekTimeGrid({
                       onClick={() => onSelectedDateChange?.(startOfDay(day))}
                       disabled={!onSelectedDateChange}
                       aria-pressed={Boolean(selectedDay && isSameDay(day, selectedDay))}
-                      className="flex w-full flex-col items-center justify-center px-2 disabled:cursor-default"
+                      className="flex w-full flex-col items-center justify-center px-2 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary disabled:cursor-default"
                     >
-                      <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                      <span className="text-[11px] font-medium text-muted-foreground">
                         {format(day, 'EEE')}
                       </span>
                       <span
@@ -916,13 +918,13 @@ export function WeekTimeGrid({
 
             <div className="grid" style={{ gridTemplateColumns: columns }}>
               <div
-                className="sticky left-0 z-30 border-r border-border/60 bg-card/95"
+                className="sticky left-0 z-30 border-r border-border/40 bg-card/95"
                 style={{ height: GRID_HEIGHT }}
               >
                 {Array.from({ length: 24 }, (_, hour) => (
                   <div
                     key={hour}
-                    className="absolute inset-x-0 whitespace-nowrap pr-2 text-right text-[9px] leading-none text-muted-foreground"
+                    className="absolute inset-x-0 whitespace-nowrap pr-2 text-right text-[11px] leading-none text-muted-foreground"
                     style={{ top: hour * HOUR_HEIGHT + 6 }}
                   >
                     {format(addMinutes(startOfDay(new Date()), hour * 60), 'h a')}

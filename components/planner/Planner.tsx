@@ -1835,7 +1835,7 @@ export function Planner() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-[1800px] space-y-5 px-4 py-5 sm:px-6 lg:px-8">
+    <div className="mx-auto w-full min-w-0 max-w-[1800px] space-y-5">
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div className="flex items-center gap-3">
           <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/15 text-primary">
@@ -1846,38 +1846,21 @@ export function Planner() {
             <p className="text-sm text-muted-foreground">Talk through your plans, or ask me to update your calendar.</p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          {undoState?.userId === userId && (
-            <Button type="button" variant="outline" size="sm" disabled={applying} onClick={() => void undo()}>
-              <Undo2 className="h-4 w-4" /> {undoState.recoveryOnly ? 'Retry cleanup' : 'Undo'}
-            </Button>
-          )}
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              const today = dateCarrierInTimeZone(timeZone);
-              setWeekStart(startOfWeek(today, { weekStartsOn: 1 }));
-              setSelectedDate(today);
-            }}
-          >
-            Today
-          </Button>
-        </div>
       </header>
 
-      {retryPending && chatReady && (
-        <Button type="button" variant="outline" disabled={activeIsThinking} onClick={() => void submitCommand('', null, true)}>
-          Check last request
-        </Button>
-      )}
-      {lastChatReceipt?.userId === userId && (
-        <Button type="button" variant="outline" disabled={activeIsThinking} onClick={() => void undoChatChange()}>
-          <Undo2 className="h-4 w-4" /> Undo last chat change
-        </Button>
-      )}
       <AssistantChat
+        actions={<>
+          {retryPending && chatReady && (
+            <Button type="button" variant="outline" size="sm" disabled={activeIsThinking} onClick={() => void submitCommand('', null, true)}>
+              Check last request
+            </Button>
+          )}
+          {lastChatReceipt?.userId === userId && (
+            <Button type="button" variant="ghost" size="sm" disabled={activeIsThinking} onClick={() => void undoChatChange()}>
+              <Undo2 className="h-4 w-4" /> Undo last chat change
+            </Button>
+          )}
+        </>}
         messages={activeMessages}
         command={activeCommand}
         onCommandChange={setCommand}
@@ -1894,27 +1877,25 @@ export function Planner() {
         endRef={chatEndRef}
       />
 
-      <Card className="overflow-hidden">
-        <CardHeader className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+      <section className="min-w-0 space-y-3" aria-label="Assistant calendar">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/50 pb-3">
           <button
             type="button"
             onClick={() => setCalendarOpen(open => !open)}
-            className="flex min-w-0 items-center gap-3 text-left"
+            className="flex min-h-10 min-w-0 items-center gap-2 rounded-lg text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             aria-expanded={calendarOpen}
+            aria-controls="assistant-calendar-content"
           >
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-              <CalendarDays className="h-4 w-4" />
-            </span>
-            <span className="min-w-0">
-              <span className="block text-sm font-semibold">Your calendar</span>
-              <span className="block truncate text-xs text-muted-foreground">
-                {calendarSection === 'tasks' && taskCalendarMode === 'month'
-                  ? format(selectedDate, 'MMMM yyyy')
-                  : `${format(weekStart, 'MMM d')}–${format(addDays(weekStart, 6), 'MMM d, yyyy')}`}
-              </span>
-            </span>
+            <CalendarDays className="h-4 w-4 shrink-0 text-primary" />
+            <span className="text-sm font-semibold">Your calendar</span>
             {calendarOpen ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
           </button>
+          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+          {undoState?.userId === userId && (
+            <Button type="button" variant="outline" size="sm" disabled={applying} onClick={() => void undo()}>
+              <Undo2 className="h-4 w-4" /> {undoState.recoveryOnly ? 'Retry cleanup' : 'Undo'}
+            </Button>
+          )}
           {calendarOpen && <CalendarViewTabs value={calendarSection} onChange={setCalendarSection} />}
           {calendarOpen && calendarSection === 'schedule' && (
             <div className="flex shrink-0 items-center gap-1">
@@ -1923,8 +1904,10 @@ export function Planner() {
                 variant={taskDetailsOpen ? 'secondary' : 'ghost'}
                 size="sm"
                 onClick={() => setTaskDetailsOpen(open => !open)}
+                aria-expanded={taskDetailsOpen}
+                aria-controls="assistant-day-details"
               >
-                Tasks
+                Day details
               </Button>
               <Button
                 type="button"
@@ -1937,8 +1920,10 @@ export function Planner() {
               </Button>
             </div>
           )}
-        </CardHeader>
-      </Card>
+          </div>
+        </div>
+
+      <div id="assistant-calendar-content" hidden={!calendarOpen}>
 
       {calendarOpen && calendarSection === 'tasks' && (
         <div role="tabpanel" aria-label="Task Calendar" className="min-w-0">
@@ -1949,20 +1934,23 @@ export function Planner() {
 
       {calendarOpen && calendarSection === 'schedule' && (
         <div className={cn(
-          'grid min-w-0 gap-5',
+          'grid min-w-0 gap-4',
           taskDetailsOpen && 'xl:grid-cols-[minmax(0,1fr)_320px]',
         )} role="tabpanel" aria-label="Schedule">
-        <main className="min-w-0">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between gap-2 px-4 pb-3 pt-4">
+        <div className="min-w-0">
+          <div>
+            <div className="flex flex-wrap items-center justify-between gap-3 pb-3">
               <div className="flex min-w-0 items-center gap-2">
-                <CalendarDays className="h-4 w-4 shrink-0 text-primary" />
                 <div className="min-w-0">
                   <CardTitle>{format(weekStart, 'MMM d')}–{format(addDays(weekStart, 6), 'MMM d, yyyy')}</CardTitle>
-                  <p className="mt-1 truncate text-xs text-muted-foreground">Drag tasks onto the calendar or back to Untimed, then move or resize anything except school.</p>
                 </div>
               </div>
-              <div className="flex gap-1">
+              <div className="flex items-center gap-1">
+                <Button type="button" variant="ghost" size="sm" onClick={() => {
+                  const today = dateCarrierInTimeZone(timeZone);
+                  setWeekStart(startOfWeek(today, { weekStartsOn: 1 }));
+                  setSelectedDate(today);
+                }}>Today</Button>
                 <Button type="button" variant="ghost" size="icon-sm" onClick={() => navigateWeek(-1)} aria-label="Previous week">
                   <ChevronLeft className="h-4 w-4" />
                 </Button>
@@ -1970,8 +1958,8 @@ export function Planner() {
                   <ChevronRight className="h-4 w-4" />
                 </Button>
               </div>
-            </CardHeader>
-            <CardContent className="px-4 pb-4">
+            </div>
+            <div>
               {preview?.status === 'ready' && preview.actions.length > 0 && (
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-primary/40 bg-primary/[0.07] p-3" aria-live="polite">
                   <div className="flex min-w-0 items-start gap-2">
@@ -2007,7 +1995,7 @@ export function Planner() {
                 weekStart={weekStart}
                 blocks={blocks}
                 editable
-                viewportClassName={calendarExpanded ? 'h-[760px]' : 'h-[420px]'}
+                viewportClassName={calendarExpanded ? 'h-[min(760px,80dvh)] min-h-[360px]' : 'h-[min(460px,60dvh)] min-h-[300px]'}
                 showSummaryHeader={false}
                 timeZone={timeZone}
                 timeZoneLabel={timeZone.split('/').pop()?.replace('_', ' ') || 'Local'}
@@ -2023,14 +2011,14 @@ export function Planner() {
                 onUntimedItemClick={item => prepareCommand(`Schedule ${item.title} `, item.taskId || null)}
                 onUntimedItemSchedule={handleScheduleUntimed}
               />
-            </CardContent>
-          </Card>
-        </main>
+            </div>
+          </div>
+        </div>
 
         {taskDetailsOpen && (
-        <aside className="min-w-0 self-start xl:sticky xl:top-5">
+        <aside id="assistant-day-details" aria-label="Day details" className="min-w-0 self-start xl:sticky xl:top-5">
           <Card>
-            <CardHeader className="flex-row items-center justify-between px-4 pb-3 pt-4">
+            <CardHeader className="flex flex-row items-center justify-between px-4 pb-3 pt-4">
               <div>
                 <CardTitle>{format(selectedDate, 'EEEE, MMM d')}</CardTitle>
                 <p className="mt-1 text-xs text-muted-foreground">{selectedDayOccurrences.length} item{selectedDayOccurrences.length === 1 ? '' : 's'} on this day</p>
@@ -2053,7 +2041,7 @@ export function Planner() {
                     key={occurrence.id}
                     type="button"
                     onClick={() => prepareCommand(`Move ${occurrence.title} to `, occurrence.taskId)}
-                    className="w-full rounded-lg border border-border/60 bg-background/40 p-3 text-left transition-colors hover:border-primary/40 hover:bg-accent/40"
+                    className="w-full rounded-lg p-3 text-left transition-colors hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                   >
                     <div className="flex items-start gap-2">
                       <span className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: occurrence.color || '#6366f1' }} />
@@ -2084,8 +2072,8 @@ export function Planner() {
                     type="button"
                     onClick={() => prepareCommand(`Schedule ${task.title} `, task.id)}
                     className={cn(
-                      'w-full rounded-lg border p-3 text-left transition-colors hover:border-primary/40 hover:bg-accent/40',
-                      selectedTaskId === task.id ? 'border-primary/60 bg-primary/5' : 'border-border/60 bg-background/30',
+                      'w-full rounded-lg p-3 text-left transition-colors hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+                      selectedTaskId === task.id && 'bg-primary/10 ring-1 ring-primary/40',
                     )}
                   >
                     <p className="truncate text-sm font-medium">{task.title}</p>
@@ -2099,6 +2087,8 @@ export function Planner() {
         )}
         </div>
       )}
+      </div>
+      </section>
 
       <TaskForm
         isOpen={Boolean(editingTask || editingCommitment || creationSlot)}

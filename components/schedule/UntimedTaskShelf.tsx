@@ -70,7 +70,7 @@ function UntimedTask({
       }}
       disabled={!onClick && !draggable}
       className={cn(
-        'flex w-full min-w-0 items-center gap-1 rounded-md border px-1.5 py-1 text-left text-[10px] shadow-sm transition-[filter,opacity] hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-default',
+        'flex min-h-7 w-full min-w-0 items-center gap-1.5 rounded-md border px-1.5 py-1 text-left text-[11px] transition-[filter,opacity] hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-default',
         draggable && 'cursor-grab touch-none active:cursor-grabbing',
         item.completed && 'opacity-50',
         isDragging && 'opacity-20',
@@ -81,13 +81,13 @@ function UntimedTask({
         transform: CSS.Translate.toString(transform),
       }}
       aria-label={`${item.title}${duration ? `, ${duration}` : ''}, untimed${draggable ? ', drag to schedule' : ''}`}
+      title={`${item.title}${duration ? ` · ${duration}` : ''}`}
     >
       {draggable && <GripVertical className="h-3 w-3 shrink-0 text-muted-foreground/70" />}
-      <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: item.color || '#6366f1' }} />
       <span className={cn('min-w-0 flex-1 truncate font-medium', item.completed && 'line-through')}>
         {item.title}
       </span>
-      {duration && <span className="shrink-0 text-[8px] text-muted-foreground">{duration}</span>}
+      {duration && <span className="shrink-0 text-[10px] text-muted-foreground">{duration}</span>}
     </button>
   );
 }
@@ -119,7 +119,7 @@ function UntimedDay({
     <div
       ref={setNodeRef}
       className={cn(
-        'max-h-24 min-h-12 space-y-1 overflow-y-auto border-r border-border/50 p-1 transition-colors last:border-r-0',
+        'max-h-28 min-h-12 space-y-1 overflow-y-auto overscroll-contain border-r border-border/35 p-1.5 transition-colors last:border-r-0',
         selected && 'bg-indigo-500/[0.05]',
         isOver && 'bg-primary/15 ring-1 ring-inset ring-primary/50',
       )}
@@ -156,18 +156,18 @@ export function UntimedTaskShelf({
     <div
       ref={setShelfNodeRef}
       className={cn(
-        'grid min-h-12 border-b border-border/70 bg-card/95 transition-colors',
+        'grid min-h-12 border-b border-border/50 bg-card/95 transition-colors',
         isShelfOver && 'bg-primary/10 ring-1 ring-inset ring-primary/40',
       )}
       style={{ gridTemplateColumns: columns }}
       aria-label="Untimed tasks"
     >
       <div className={cn(
-        'sticky left-0 z-50 flex items-center justify-center gap-1 border-r border-border/60 bg-card/95 px-1 text-[9px] font-medium text-muted-foreground transition-colors',
+        'sticky left-0 z-50 flex flex-col items-center justify-center gap-1 border-r border-border/40 bg-card/95 px-1 text-[10px] font-medium text-muted-foreground transition-colors',
         isShelfOver && 'bg-primary/15 text-primary',
       )}>
         <ListTodo className="h-3 w-3" />
-        <span className="hidden sm:inline">Untimed</span>
+        <span>Untimed</span>
       </div>
 
       {days.map(day => (

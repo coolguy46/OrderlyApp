@@ -169,7 +169,7 @@ export function TaskDetailViewer({ task, open, onOpenChange, onEdit, scheduleOcc
     if (!decodedText) return null;
 
     return (
-      <div className="whitespace-pre-wrap text-sm text-muted-foreground leading-relaxed">
+      <div className="whitespace-pre-wrap break-words text-sm leading-relaxed text-muted-foreground [overflow-wrap:anywhere]">
         {decodedText}
       </div>
     );
@@ -184,14 +184,9 @@ export function TaskDetailViewer({ task, open, onOpenChange, onEdit, scheduleOcc
         // that long Canvas descriptions stay inside the viewport and scroll.
         style={{ maxHeight: 'min(90dvh, 900px)' }}
       >
-        {/* Header with gradient accent */}
-        <div className={cn(
-          'relative shrink-0 px-6 pt-6 pb-4',
-          isOverdue && 'bg-gradient-to-b from-red-500/5 to-transparent',
-          isInProgress && !isOverdue && 'bg-gradient-to-b from-indigo-500/5 to-transparent',
-          isCompleted && 'bg-gradient-to-b from-emerald-500/5 to-transparent'
-        )}>
-          <DialogHeader className="space-y-3">
+        {/* Header */}
+        <div className="relative shrink-0 px-5 pb-4 pt-5 sm:px-6">
+          <DialogHeader className="space-y-3 text-left">
             <div className="flex items-start gap-3 pr-8">
               {/* Status icon */}
               <div className={cn(
@@ -216,13 +211,13 @@ export function TaskDetailViewer({ task, open, onOpenChange, onEdit, scheduleOcc
                   {task.title}
                 </DialogTitle>
                 {task.course_name && (
-                  <p className="text-sm text-muted-foreground mt-0.5">{task.course_name}</p>
+                  <p className="mt-1 break-words text-sm text-muted-foreground">{task.course_name}</p>
                 )}
               </div>
             </div>
 
             {/* Tags row */}
-            <div className="flex items-center gap-1.5 flex-wrap pl-[44px]">
+            <div className="flex flex-wrap items-center gap-1.5 sm:pl-[44px]">
               <span className={cn(
                 'inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium border',
                 pConfig.bg, pConfig.color, pConfig.border
@@ -271,24 +266,25 @@ export function TaskDetailViewer({ task, open, onOpenChange, onEdit, scheduleOcc
         </div>
 
         {/* Content */}
-        <div className="flex-1 -mt-1 min-h-0 overflow-y-auto overscroll-contain px-6 touch-pan-y [-webkit-overflow-scrolling:touch]">
-          <div className="space-y-5 pb-4">
+        <div
+          role="region"
+          aria-label="Task information"
+          tabIndex={0}
+          className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 touch-pan-y [-webkit-overflow-scrolling:touch] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:px-6"
+        >
+          <div className="space-y-5 pb-5">
             {/* Info cards */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               {dueDisplay && (
                 <div className={cn(
-                  'flex items-center gap-3 p-3 rounded-xl border',
+                  'flex items-start gap-3 rounded-lg p-3',
                   dueDisplay.urgent
-                    ? 'bg-red-500/5 border-red-500/20'
+                    ? 'bg-red-500/5'
                     : dueDisplay.warning
-                    ? 'bg-amber-500/5 border-amber-500/20'
-                    : 'bg-muted/30 border-border/50'
+                    ? 'bg-amber-500/5'
+                    : 'bg-muted/25'
                 )}>
-                  <div className={cn(
-                    'p-2 rounded-lg shrink-0',
-                    dueDisplay.urgent ? 'bg-red-500/15' :
-                    dueDisplay.warning ? 'bg-amber-500/15' : 'bg-muted/50'
-                  )}>
+                  <div className="mt-0.5 shrink-0">
                     <Calendar className={cn(
                       'w-4 h-4',
                       dueDisplay.urgent ? 'text-red-400' :
@@ -304,15 +300,15 @@ export function TaskDetailViewer({ task, open, onOpenChange, onEdit, scheduleOcc
                       {dueDisplay.text}
                       {!isCompleted && task.due_time && ` at ${formatTime(task.due_time)}`}
                     </p>
-                    <p className="text-[11px] text-muted-foreground">{dueDisplay.sub}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">{dueDisplay.sub}</p>
                   </div>
                 </div>
               )}
 
               {(scheduleOccurrence || scheduleEntry) && (
-                <div className="flex items-center gap-3 rounded-xl border border-indigo-500/20 bg-indigo-500/5 p-3">
-                  <div className="shrink-0 rounded-lg bg-indigo-500/15 p-2">
-                    <Clock className="h-4 w-4 text-indigo-400" />
+                <div className="flex items-start gap-3 rounded-lg bg-primary/5 p-3">
+                  <div className="mt-0.5 shrink-0">
+                    <Clock className="h-4 w-4 text-primary" />
                   </div>
                   <div className="min-w-0">
                     <p className="text-sm font-semibold">
@@ -320,7 +316,7 @@ export function TaskDetailViewer({ task, open, onOpenChange, onEdit, scheduleOcc
                         ? `${scheduledStartLabel}${scheduledEndLabel ? `–${scheduledEndLabel}` : ''}`
                         : 'Untimed'}
                     </p>
-                    <p className="text-[11px] text-muted-foreground">
+                    <p className="mt-1 text-xs text-muted-foreground">
                       {[scheduledDateLabel, formatDurationInput(scheduledDuration) || null]
                         .filter(Boolean)
                         .join(' · ')}
@@ -330,25 +326,25 @@ export function TaskDetailViewer({ task, open, onOpenChange, onEdit, scheduleOcc
               )}
 
               {task.assignment_type && (
-                <div className="flex items-center gap-3 p-3 rounded-xl bg-muted/30 border border-border/50">
-                  <div className="p-2 rounded-lg bg-muted/50 shrink-0">
+                <div className="flex items-start gap-3 rounded-lg bg-muted/25 p-3">
+                  <div className="mt-0.5 shrink-0">
                     <Tag className="w-4 h-4 text-muted-foreground" />
                   </div>
                   <div className="min-w-0">
                     <p className="text-sm font-semibold capitalize">{task.assignment_type}</p>
-                    <p className="text-[11px] text-muted-foreground">Assignment Type</p>
+                    <p className="mt-1 text-xs text-muted-foreground">Assignment type</p>
                   </div>
                 </div>
               )}
 
               {task.completed_at && (
-                <div className="flex items-center gap-3 p-3 rounded-xl bg-emerald-500/5 border border-emerald-500/20">
-                  <div className="p-2 rounded-lg bg-emerald-500/15 shrink-0">
+                <div className="flex items-start gap-3 rounded-lg bg-emerald-500/5 p-3">
+                  <div className="mt-0.5 shrink-0">
                     <CheckCircle2 className="w-4 h-4 text-emerald-400" />
                   </div>
                   <div className="min-w-0">
                     <p className="text-sm font-semibold">{formatZonedDate(task.completed_at)}</p>
-                    <p className="text-[11px] text-muted-foreground">Completed</p>
+                    <p className="mt-1 text-xs text-muted-foreground">Completed</p>
                   </div>
                 </div>
               )}
@@ -357,10 +353,10 @@ export function TaskDetailViewer({ task, open, onOpenChange, onEdit, scheduleOcc
             {/* Description */}
             {task.description && (
               <div className="space-y-2">
-                <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                <h4 className="text-sm font-medium">
                   Description
                 </h4>
-                <div className="p-4 rounded-xl bg-muted/20 border border-border/40 break-words [&_*]:max-w-full">
+                <div className="break-words [&_*]:max-w-full">
                   {formatDescription(task.description)}
                 </div>
               </div>
@@ -372,7 +368,7 @@ export function TaskDetailViewer({ task, open, onOpenChange, onEdit, scheduleOcc
                 href={externalUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex items-center justify-between gap-2 p-3 rounded-xl bg-primary/5 hover:bg-primary/10 border border-primary/10 text-primary transition-all group"
+                className="group flex items-center justify-between gap-2 rounded-lg bg-primary/5 p-3 text-primary transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <div className="flex items-center gap-2.5">
                   <ExternalLink className="w-4 h-4" />
@@ -387,31 +383,30 @@ export function TaskDetailViewer({ task, open, onOpenChange, onEdit, scheduleOcc
         </div>
 
         {/* Footer */}
-        <DialogFooter className="flex-shrink-0 px-6 py-4 border-t border-border/40 bg-muted/20">
-          <div className="flex items-center gap-2 w-full flex-wrap sm:flex-nowrap">
+        <DialogFooter className="shrink-0 border-t border-border/50 bg-background px-5 py-4 sm:px-6">
+          <div className="flex w-full flex-wrap items-center gap-2">
             {task.status === 'pending' && !isOverdue && (
-              <Button variant="outline" size="sm" onClick={handleStartProgress} className="gap-1.5">
+              <Button variant="ghost" size="sm" onClick={handleStartProgress} className="h-9 gap-1.5">
                 <Play className="w-3.5 h-3.5" />
                 Start Progress
               </Button>
             )}
             {isExamTask && (
               <Link href="/exams">
-                <Button variant="outline" size="sm" className="gap-1.5" onClick={() => onOpenChange(false)}>
+                <Button variant="ghost" size="sm" className="h-9 gap-1.5" onClick={() => onOpenChange(false)}>
                   <GraduationCap className="w-3.5 h-3.5" />
                   View in Exams
                 </Button>
               </Link>
             )}
             {onEdit && (
-              <Button variant="outline" size="sm" className="gap-1.5" onClick={() => { onEdit(task); onOpenChange(false); }}>
+              <Button variant="outline" size="sm" className="h-9 gap-1.5" onClick={() => { onEdit(task); onOpenChange(false); }}>
                 <Edit3 className="w-3.5 h-3.5" />
                 Edit
               </Button>
             )}
-            <div className="flex-1" />
             <Button size="sm" onClick={handleComplete} disabled={isUpdatingStatus} className={cn(
-              'gap-1.5',
+              'h-10 w-full gap-1.5 sm:ml-auto sm:w-auto',
               isCompleted
                 ? 'bg-amber-600 hover:bg-amber-700 text-white'
                 : 'bg-emerald-600 hover:bg-emerald-700 text-white'

@@ -24,7 +24,6 @@ import {
   Plus,
 } from 'lucide-react';
 import { TaskForm } from '@/components/tasks/TaskForm';
-import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card, CardContent } from '@/components/ui/Card';
 import { useAppStore } from '@/lib/store';
@@ -170,8 +169,9 @@ function TaskDeadlineChip({
         event.stopPropagation();
         onClick();
       }}
+      title={[task.title, subject?.name, dueLabel].filter(Boolean).join(' · ')}
       className={cn(
-        'group w-full overflow-hidden rounded-md border px-2 py-1.5 text-left transition-colors hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+        'group w-full overflow-hidden rounded-md border px-2 py-2 text-left transition-colors hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
         task.status === 'completed' && 'opacity-55',
         missing && 'border-red-500/70 bg-red-500/15',
         compact && 'px-1.5 py-1',
@@ -185,11 +185,11 @@ function TaskDeadlineChip({
           <CircleDot className="mt-0.5 h-3 w-3 shrink-0" style={{ color }} />
         )}
         <div className="min-w-0 flex-1">
-          <p className={cn('truncate text-[11px] font-medium leading-tight', task.status === 'completed' && 'line-through')}>
+          <p className={cn('text-xs font-medium leading-snug', compact ? 'truncate text-[11px]' : 'line-clamp-2 break-words', task.status === 'completed' && 'line-through')}>
             {task.title}
           </p>
           {(!compact || shifted || missing) && (subject || dueLabel) && (
-            <p className={cn('mt-0.5 truncate text-[9px] text-muted-foreground', missing && 'font-medium text-red-400')}>
+            <p className={cn('mt-1 truncate text-[11px] text-muted-foreground', compact && 'mt-0.5 text-[10px]', missing && 'font-medium text-red-400')}>
               {[subject?.name, dueLabel].filter(Boolean).join(' · ')}
             </p>
           )}
@@ -203,14 +203,15 @@ function ExamDeadlineChip({ exam, subject, compact = false }: { exam: Exam; subj
   const color = subject?.color || '#a855f7';
   return (
     <div
-      className={cn('overflow-hidden rounded-md border px-2 py-1.5', compact && 'px-1.5 py-1')}
+      className={cn('overflow-hidden rounded-md border px-2 py-2', compact && 'px-1.5 py-1')}
+      title={[exam.title, subject?.name].filter(Boolean).join(' · ')}
       style={{ borderColor: `${color}55`, backgroundColor: `${color}12` }}
     >
       <div className="flex min-w-0 items-start gap-1.5">
         <GraduationCap className="mt-0.5 h-3 w-3 shrink-0" style={{ color }} />
         <div className="min-w-0 flex-1">
-          <p className="truncate text-[11px] font-medium leading-tight">{exam.title}</p>
-          {!compact && subject && <p className="mt-0.5 truncate text-[9px] text-muted-foreground">{subject.name}</p>}
+          <p className={cn('text-xs font-medium leading-snug', compact ? 'truncate text-[11px]' : 'line-clamp-2 break-words')}>{exam.title}</p>
+          {!compact && subject && <p className="mt-1 truncate text-[11px] text-muted-foreground">{subject.name}</p>}
         </div>
       </div>
     </div>
@@ -227,17 +228,17 @@ function EventChip({ event, compact = false, onClick }: { event: CalendarEventIt
       type="button"
       onClick={onClick}
       aria-label={event.commitment.kind === 'school' ? `${event.title} — managed in Settings` : `Edit event ${event.title}`}
-      title={event.commitment.kind === 'school' ? 'School hours are managed in Settings' : undefined}
+      title={event.commitment.kind === 'school' ? 'School hours are managed in Settings' : `${event.title} · ${formatClock(event.startTime)}–${formatClock(event.endTime)}`}
       disabled={event.commitment.kind === 'school'}
-      className={cn('w-full overflow-hidden rounded-md border px-2 py-1.5 text-left hover:brightness-110 focus-visible:ring-2 focus-visible:ring-primary', compact && 'px-1.5 py-1')}
+      className={cn('w-full overflow-hidden rounded-md border px-2 py-2 text-left hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary', compact && 'px-1.5 py-1')}
       style={{ borderColor: `${event.color}70`, backgroundColor: `${event.color}18` }}
     >
       <div className="flex min-w-0 items-start gap-1.5">
         <CalendarClock className="mt-0.5 h-3 w-3 shrink-0" style={{ color: event.color }} />
         <div className="min-w-0 flex-1">
-          <p className="truncate text-[11px] font-medium leading-tight">{event.title}</p>
+          <p className={cn('text-xs font-medium leading-snug', compact ? 'truncate text-[11px]' : 'line-clamp-2 break-words')}>{event.title}</p>
           {!compact && (
-            <p className="mt-0.5 truncate text-[9px] text-muted-foreground">
+            <p className="mt-1 truncate text-[11px] text-muted-foreground">
               {formatClock(event.startTime)}–{formatClock(event.endTime)}
             </p>
           )}
@@ -424,9 +425,9 @@ export function TaskCalendar({ date: controlledDate, onDateChange, mode: control
     : `${format(visibleDays[0], 'MMM d')}–${format(visibleDays[6], 'MMM d, yyyy')}`;
 
   return (
-    <div className="flex min-h-0 flex-col gap-3">
-      <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border/50 bg-card/55 px-3 py-2 shadow-sm backdrop-blur-sm">
-        <div className="flex min-w-0 items-center gap-1">
+    <div className="flex min-h-0 min-w-0 flex-col gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 py-1">
+        <div className="flex min-w-0 max-w-full items-center gap-0.5">
           <Button type="button" variant="ghost" size="icon-sm" onClick={() => navigate(-1)} aria-label={`Previous ${mode}`}>
             <ChevronLeft className="h-4 w-4" />
           </Button>
@@ -435,18 +436,18 @@ export function TaskCalendar({ date: controlledDate, onDateChange, mode: control
             variant="ghost"
             size="sm"
             onClick={() => todayKey && setCurrentDate(localDateFromKey(todayKey))}
-            className="h-8 px-2.5 text-xs"
+            className="h-9 px-2.5 text-sm"
           >
             Today
           </Button>
           <Button type="button" variant="ghost" size="icon-sm" onClick={() => navigate(1)} aria-label={`Next ${mode}`}>
             <ChevronRight className="h-4 w-4" />
           </Button>
-          <p className="ml-1 truncate text-sm font-semibold sm:text-base">{title}</p>
+          <p className="ml-2 min-w-0 text-sm font-semibold leading-snug sm:text-base">{title}</p>
         </div>
 
         <div className="flex items-center gap-2">
-          <div className="flex items-center rounded-lg bg-muted/50 p-0.5" role="group" aria-label="Task calendar range">
+          <div className="flex items-center rounded-lg bg-muted/35 p-0.5" role="group" aria-label="Task calendar range">
             {(['week', 'month'] as const).map(value => (
               <button
                 key={value}
@@ -454,7 +455,7 @@ export function TaskCalendar({ date: controlledDate, onDateChange, mode: control
                 onClick={() => setMode(value)}
                 aria-pressed={mode === value}
                 className={cn(
-                  'rounded-md px-3 py-1.5 text-xs font-medium capitalize transition-colors',
+                  'min-h-8 rounded-md px-3 text-xs font-medium capitalize transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
                   mode === value ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
                 )}
               >
@@ -462,21 +463,21 @@ export function TaskCalendar({ date: controlledDate, onDateChange, mode: control
               </button>
             ))}
           </div>
-          <Button type="button" size="sm" onClick={openNewTaskForm} className="h-8 px-2.5 text-xs" aria-label="New">
+          <Button type="button" size="sm" onClick={openNewTaskForm} className="h-9 px-3 text-sm" aria-label="New">
             <Plus className="h-3.5 w-3.5" />
-            <span className="hidden sm:inline">New</span>
+            <span>New</span>
           </Button>
         </div>
       </div>
 
-      <Card className="min-h-0 overflow-hidden border-border/55 bg-card/40">
+      <Card className="min-h-0 overflow-hidden border-border/50 bg-card/40 shadow-none">
         <CardContent className="p-0">
           <div className="overflow-x-auto">
             <div className="min-w-[840px]">
-              <div className="grid grid-cols-7 border-b border-border/60 bg-card/80">
+              <div className="grid grid-cols-7 border-b border-border/50 bg-card/80">
                 {visibleDays.slice(0, 7).map(day => (
                   <div key={format(day, 'EEE')} className="border-r border-border/45 px-2 py-2 text-center last:border-r-0">
-                    <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{format(day, 'EEE')}</p>
+                    <p className="text-[11px] font-medium text-muted-foreground">{format(day, 'EEE')}</p>
                   </div>
                 ))}
               </div>
@@ -497,21 +498,21 @@ export function TaskCalendar({ date: controlledDate, onDateChange, mode: control
                       <div
                         key={key}
                         className={cn(
-                          'min-h-[128px] border-b border-r border-border/40 p-1.5 last:border-r-0',
+                          'min-h-[128px] border-b border-r border-border/35 p-2 last:border-r-0',
                           !isSameMonth(day, currentDate) && 'bg-muted/[0.08] text-muted-foreground opacity-55',
                           isPlannerToday && 'bg-primary/[0.035]',
                           hasMissingTasks && 'bg-red-500/[0.07] ring-1 ring-inset ring-red-500/35',
                         )}
                       >
-                        <div className="mb-1 flex items-center justify-between">
+                        <div className="mb-1.5 flex items-center justify-between">
                           <button type="button" onClick={() => setCurrentDate(day)} aria-label={`Select ${format(day, 'EEEE, MMMM d, yyyy')}`} aria-pressed={key === format(currentDate, 'yyyy-MM-dd')} className={cn(
-                            'flex h-6 min-w-6 items-center justify-center rounded-full px-1.5 text-xs font-semibold',
+                            'flex h-7 min-w-7 items-center justify-center rounded-full px-1.5 text-xs font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
                             isPlannerToday && 'bg-primary text-primary-foreground shadow-sm',
                             key === format(currentDate, 'yyyy-MM-dd') && 'ring-2 ring-primary/60',
                           )}>
                             {format(day, 'd')}
                           </button>
-                          {allCount > 0 && <span className="text-[9px] text-muted-foreground">{allCount}</span>}
+                          {allCount > 0 && <span className="text-[10px] text-muted-foreground">{allCount}</span>}
                         </div>
                         <div className="space-y-1">
                           {visibleEvents.map(event => <EventChip key={event.id} event={event} compact onClick={() => openEventEditor(event)} />)}
@@ -528,7 +529,7 @@ export function TaskCalendar({ date: controlledDate, onDateChange, mode: control
                                 setCurrentDate(day);
                                 setMode('week');
                               }}
-                              className="rounded px-1 text-[9px] font-medium text-muted-foreground hover:bg-muted/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                              className="min-h-6 rounded px-1 text-[11px] font-medium text-muted-foreground hover:bg-muted/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                             >
                               +{allCount - shown} more
                             </button>
@@ -565,7 +566,7 @@ export function TaskCalendar({ date: controlledDate, onDateChange, mode: control
                             <ExamDeadlineChip key={exam.id} exam={exam} subject={exam.subject_id ? subjectById.get(exam.subject_id) : undefined} />
                           ))}
                           {items.tasks.length === 0 && items.exams.length === 0 && items.events.length === 0 && (
-                            <div className="flex min-h-24 flex-col items-center justify-center text-center text-[10px] text-muted-foreground/60">
+                            <div className="flex min-h-24 flex-col items-center justify-center text-center text-[11px] text-muted-foreground/70">
                               <CalendarDays className="mb-1 h-4 w-4" />
                               Nothing to handle
                             </div>
@@ -581,10 +582,10 @@ export function TaskCalendar({ date: controlledDate, onDateChange, mode: control
         </CardContent>
       </Card>
 
-      <div className="flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground">
-        <Badge variant="outline" className="gap-1 text-[10px]"><CircleDot className="h-2.5 w-2.5" /> Task deadline</Badge>
-        <Badge variant="outline" className="gap-1 text-[10px]"><GraduationCap className="h-2.5 w-2.5" /> Exam</Badge>
-        <Badge variant="outline" className="gap-1 text-[10px]"><CalendarClock className="h-2.5 w-2.5" /> Event</Badge>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-[11px] text-muted-foreground" aria-label="Calendar legend">
+        <span className="inline-flex items-center gap-1.5"><CircleDot className="h-3 w-3" /> Task deadline</span>
+        <span className="inline-flex items-center gap-1.5"><GraduationCap className="h-3 w-3" /> Exam</span>
+        <span className="inline-flex items-center gap-1.5"><CalendarClock className="h-3 w-3" /> Event</span>
       </div>
 
       <TaskForm

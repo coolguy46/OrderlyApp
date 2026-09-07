@@ -24,6 +24,7 @@ interface AssistantUsage {
 }
 
 interface AssistantChatProps {
+  actions?: ReactNode;
   messages: readonly AssistantChatMessage[];
   command: string;
   onCommandChange: (value: string) => void;
@@ -161,6 +162,7 @@ function AssistantMessageContent({ content }: { content: string }) {
 }
 
 export function AssistantChat({
+  actions,
   messages,
   command,
   onCommandChange,
@@ -174,41 +176,40 @@ export function AssistantChat({
   endRef,
 }: AssistantChatProps) {
   return (
-    <Card className="flex h-[68vh] min-h-[560px] max-h-[760px] flex-col overflow-hidden border-primary/20 bg-card/75 shadow-sm backdrop-blur-sm">
-      <CardHeader className="flex-row items-center justify-between gap-4 border-b border-border/50 px-5 py-4">
+    <Card className="flex h-[clamp(360px,52dvh,560px)] flex-col overflow-hidden bg-card/75 shadow-none" aria-label="Chat with Orderly">
+      <CardHeader className="flex flex-wrap items-center justify-between gap-2 border-b border-border/40 px-4 py-3 [.border-b]:pb-3 sm:px-5">
         <div className="flex min-w-0 items-center gap-3">
           <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/15 text-primary">
             <Bot className="h-5 w-5" />
           </span>
           <div className="min-w-0">
             <CardTitle>Chat with Orderly</CardTitle>
-            <p className="mt-0.5 truncate text-xs text-muted-foreground">Ask about your week or change your schedule.</p>
           </div>
         </div>
-        {(messages.length > 0 || isThinking) && (
-          <Button type="button" variant="ghost" size="sm" onClick={onNewChat}>
-            New chat
-          </Button>
-        )}
+        <div className="flex flex-wrap items-center gap-1">
+          {actions}
+          {(messages.length > 0 || isThinking) && (
+            <Button type="button" variant="ghost" size="sm" onClick={onNewChat}>
+              New chat
+            </Button>
+          )}
+        </div>
       </CardHeader>
 
-      <CardContent className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6">
+      <CardContent className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 sm:px-5">
         {messages.length === 0 ? (
-          <div className="flex min-h-full flex-col items-center justify-center px-4 py-8 text-center">
-            <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/15 text-primary">
-              <Sparkles className="h-7 w-7" />
-            </span>
-            <h2 className="mt-4 text-xl font-semibold tracking-tight">What can I help you plan?</h2>
+          <div className="flex min-h-full flex-col items-center justify-center py-4 text-center">
+            <h2 className="text-lg font-semibold tracking-tight">What can I help you plan?</h2>
             <p className="mt-2 max-w-md text-sm leading-relaxed text-muted-foreground">
-              Ask a question about your workload, find an open time, or tell me what you want to change.
+              Ask about your workload or tell me what to change.
             </p>
-            <div className="mt-6 flex max-w-2xl flex-wrap justify-center gap-2">
+            <div className="mt-4 flex max-w-2xl flex-wrap justify-center gap-2">
               {examples.map(example => (
                 <button
                   key={example}
                   type="button"
                   onClick={() => onExampleClick(example)}
-                  className="rounded-full border border-border/70 bg-background/60 px-3 py-2 text-xs text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
+                  className="min-h-9 rounded-lg border border-border/50 px-3 py-2 text-xs text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                 >
                   {example}
                 </button>
@@ -216,20 +217,20 @@ export function AssistantChat({
             </div>
           </div>
         ) : (
-          <div className="mx-auto max-w-4xl space-y-5">
+          <div className="mx-auto max-w-3xl space-y-5">
             {messages.map(message => (
               <div key={message.id} className={cn('flex', message.role === 'user' ? 'justify-end' : 'justify-start')}>
-                <div className={cn('min-w-0', message.role === 'user' ? 'max-w-[82%]' : 'max-w-[92%]')}>
+                <div className={cn('min-w-0', message.role === 'user' ? 'max-w-[88%] sm:max-w-[82%]' : 'max-w-full sm:max-w-[94%]')}>
                   {message.role === 'assistant' && (
                     <p className="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
                       <Sparkles className="h-3 w-3 text-primary" /> Orderly
                     </p>
                   )}
                   <div className={cn(
-                    'break-words rounded-2xl px-4 py-3 text-sm leading-6',
+                    'break-words [overflow-wrap:anywhere] rounded-2xl px-4 py-3 text-sm leading-6',
                     message.role === 'user'
                       ? 'rounded-br-md bg-primary text-primary-foreground'
-                      : 'rounded-bl-md border border-border/60 bg-muted/45 text-foreground',
+                      : 'rounded-bl-md bg-muted/35 text-foreground',
                   )}>
                     {message.role === 'assistant'
                       ? <AssistantMessageContent content={message.content} />
@@ -258,9 +259,9 @@ export function AssistantChat({
         <div ref={endRef} />
       </CardContent>
 
-      <div className="sticky bottom-0 border-t border-border/50 bg-background/90 px-4 py-3 backdrop-blur-xl sm:px-6 sm:py-4">
-        <div className="mx-auto max-w-4xl">
-          <div className="flex items-end gap-2 rounded-2xl border border-border/70 bg-card px-3 py-2 shadow-sm focus-within:border-primary/50 focus-within:ring-2 focus-within:ring-primary/10">
+      <div className="shrink-0 border-t border-border/40 bg-card px-3 py-3 sm:px-5">
+        <div className="mx-auto max-w-3xl">
+          <div className="flex items-end gap-2 rounded-xl border border-border/60 bg-background/50 px-3 py-2 focus-within:border-primary/50 focus-within:ring-2 focus-within:ring-primary/10">
             <Textarea
               ref={inputRef}
               value={command}
@@ -293,7 +294,7 @@ export function AssistantChat({
             )}
           </div>
           <p className="mt-2 text-center text-[11px] text-muted-foreground">
-            Orderly can make mistakes. Requested changes save directly to your calendar; check the confirmation and use Undo if needed.
+            Changes save to your calendar. Check the result; use Undo if needed.
           </p>
         </div>
       </div>

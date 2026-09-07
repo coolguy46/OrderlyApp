@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createServer } from 'node:http';
@@ -34,7 +34,7 @@ test('real calendar/grid/editor UI: navigation, recurrence, click/drag/resize, s
     server = createServer((req, res) => {
       if (req.url === '/bundle.js') { res.setHeader('Content-Type','text/javascript'); res.end(bundle); }
       else if (req.url === '/style.css') { res.setHeader('Content-Type','text/css'); res.end(css); }
-      else res.end('<!doctype html><html class="dark"><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/style.css"></head><body><div id="root"></div><script src="/bundle.js"></script></body></html>');
+      else res.end('<!doctype html><html class="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/style.css"></head><body><div id="root"></div><script src="/bundle.js"></script></body></html>');
     });
     await new Promise(res => server.listen(0, '127.0.0.1', res));
     const origin = `http://127.0.0.1:${server.address().port}`;
@@ -46,11 +46,17 @@ test('real calendar/grid/editor UI: navigation, recurrence, click/drag/resize, s
     await page.route('**/*', route => route.request().url().startsWith(origin) ? route.continue() : route.abort());
     await page.clock.install({ time: new Date('2026-09-06T20:00:00Z') });
     await page.goto(origin);
+    const capture = async name => {
+      if (!process.env.ORDERLY_UI_SCREENSHOT_DIR) return;
+      await mkdir(process.env.ORDERLY_UI_SCREENSHOT_DIR, { recursive: true });
+      await page.screenshot({ path: join(process.env.ORDERLY_UI_SCREENSHOT_DIR, `${name}.png`), animations: 'disabled' });
+    };
     assert.deepEqual(errors, []);
     await page.getByRole('button', { name: 'Next month', exact: true }).click();
     await page.getByRole('button', { name: 'Edit event Weekend practice', exact: true }).first().click();
     await page.locator('#event-date').waitFor();
     assert.equal(await page.locator('#event-date').inputValue(), '2026-10-03');
+    await capture('event-editor-desktop');
     if (process.env.ORDERLY_CALENDAR_SCREENSHOT) {
       await page.waitForTimeout(400);
       await page.screenshot({ path: process.env.ORDERLY_CALENDAR_SCREENSHOT, animations: 'disabled' });
@@ -75,6 +81,7 @@ test('real calendar/grid/editor UI: navigation, recurrence, click/drag/resize, s
     await page.getByRole('dialog').waitFor({ state: 'hidden' });
     assert.equal((await page.evaluate(() => window.calendarFixture.state().events[0])).endDate, '2026-11-30');
     await page.getByRole('button', { name: 'Fixture schedule', exact: true }).click();
+    await capture('schedule-desktop');
     for (let i = 0; i < 5; i++) await page.getByRole('button', { name: 'Next week', exact: true }).click();
     const eventButton = page.getByRole('button', { name: /^Weekend practice,/ }).first();
     await eventButton.scrollIntoViewIfNeeded();
@@ -143,6 +150,8 @@ test('real calendar/grid/editor UI: navigation, recurrence, click/drag/resize, s
     assert.equal(removed.id, 'practice', 'deleting one occurrence retains the series');
     // Mount the actual Assistant, not an imitation of its calendar shell.
     await page.getByRole('button', { name: 'Fixture assistant', exact: true }).click();
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await capture('assistant-empty-desktop');
     const calendarTab = page.getByRole('tab', { name: 'Task Calendar', exact: true });
     const scheduleTab = page.getByRole('tab', { name: 'Schedule', exact: true });
     assert.equal(await calendarTab.getAttribute('aria-selected'), 'true');
@@ -187,12 +196,27 @@ test('real calendar/grid/editor UI: navigation, recurrence, click/drag/resize, s
     assert.equal(sentRequest.selectedDate, '2027-01-24', 'chat receives the selected date separately from today');
     assert.equal(await scheduleTab.getAttribute('aria-selected'), 'true');
     assert.equal(await page.getByRole('button', { name: /Fri 12/i }).getAttribute('aria-pressed'), 'true');
+    // Presentation controls must not lose the in-progress conversation or input.
+    await page.getByRole('textbox', { name: 'Message Orderly' }).fill('Keep this draft through layout changes');
+    await page.getByRole('button', { name: 'Day details', exact: true }).click();
+    assert.equal(await page.getByRole('complementary', { name: 'Day details' }).count(), 1);
+    await page.getByRole('button', { name: 'Day details', exact: true }).click();
+    await page.getByRole('button', { name: 'Expand calendar', exact: true }).click();
+    await page.getByRole('button', { name: 'Use compact calendar', exact: true }).click();
+    await page.getByRole('button', { name: 'Your calendar', exact: true }).click();
+    assert.equal(await page.getByRole('tabpanel', { name: 'Schedule', exact: true }).count(), 0);
+    await page.getByRole('button', { name: 'Your calendar', exact: true }).click();
+    assert.equal(await page.getByRole('textbox', { name: 'Message Orderly' }).inputValue(), 'Keep this draft through layout changes');
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await capture('assistant-conversation-desktop');
     await scheduleTab.press('ArrowLeft');
     assert.equal(await calendarTab.getAttribute('aria-selected'), 'true');
     assert.equal(await page.getByRole('button', { name: 'Edit event Future chat event', exact: true }).count(), 1);
     await calendarTab.click();
     await page.getByRole('tabpanel', { name: 'Task Calendar', exact: true }).getByRole('button', { name: 'Today', exact: true }).click();
     await page.setViewportSize({ width: 390, height: 844 });
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await capture('assistant-mobile');
     const tabsBounds = await page.getByRole('tablist', { name: 'Calendar view', exact: true }).boundingBox();
     assert.ok(tabsBounds.x >= 0 && tabsBounds.x + tabsBounds.width <= 391, 'Assistant tabs fit on mobile');
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), 'calendar grid scrolls within its card rather than overflowing the mobile page');
@@ -214,6 +238,73 @@ test('real calendar/grid/editor UI: navigation, recurrence, click/drag/resize, s
     assert.ok(bounds.x >= -1 && bounds.x + bounds.width <= 391, 'mobile editor must fit horizontally');
     await page.getByRole('button', { name: 'Create Event', exact: true }).scrollIntoViewIfNeeded();
     assert.equal(await page.getByRole('button', { name: 'Create Event', exact: true }).isVisible(), true);
+    await capture('event-editor-mobile');
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+
+    // New description disclosure retains user input; schedule controls remain available.
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await page.getByRole('button', { name: 'New', exact: true }).click();
+    assert.equal(await page.locator('#description').isVisible(), false);
+    await page.getByRole('button', { name: 'Add description Optional', exact: true }).press('Enter');
+    await page.locator('#description').fill('A description that must survive collapsing the field');
+    await page.getByRole('button', { name: 'Description Optional', exact: true }).click();
+    await page.getByRole('button', { name: 'Description Optional', exact: true }).press('Enter');
+    assert.equal(await page.locator('#description').inputValue(), 'A description that must survive collapsing the field');
+    await page.locator('#scheduleDate').scrollIntoViewIfNeeded();
+    assert.equal(await page.locator('#scheduleDate').isVisible(), true);
+    await capture('task-editor-laptop');
+    const saveBounds = await page.getByRole('button', { name: 'Create Task', exact: true }).boundingBox();
+    assert.ok(saveBounds.y >= 0 && saveBounds.y + saveBounds.height <= 720, 'save stays visible on a short laptop viewport');
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+
+    await page.getByRole('button', { name: 'Today', exact: true }).click();
+    await page.evaluate(() => window.calendarFixture.addLayoutTask());
+    await page.getByRole('button', { name: /\[Canvas\] Reading and reflection:/ }).first().click();
+    assert.equal(await page.locator('#description').isVisible(), true, 'existing imported description stays expanded');
+    await page.locator('#scheduleDate').scrollIntoViewIfNeeded();
+    await capture('imported-task-editor-laptop');
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await page.getByRole('button', { name: 'Fixture schedule', exact: true }).click();
+    await page.getByRole('button', { name: /\[Canvas\] Reading and reflection:/ }).first().click();
+    assert.equal(await page.locator('#title').inputValue(), '[Canvas] Reading and reflection: compare the arguments and prepare your response for class');
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await page.getByRole('button', { name: 'Fixture detail', exact: true }).click();
+    await capture('imported-task-details-laptop');
+    await page.setViewportSize({ width: 390, height: 844 });
+    const detailBounds = await page.getByRole('dialog').boundingBox();
+    assert.ok(detailBounds.x >= -1 && detailBounds.x + detailBounds.width <= 391);
+    await page.getByRole('region', { name: 'Task information' }).focus();
+    await page.keyboard.press('End');
+    await capture('imported-task-details-mobile');
+    await page.getByRole('button', { name: 'Mark Complete', exact: true }).click();
+    await page.getByRole('dialog').waitFor({ state: 'hidden' });
+    assert.equal((await page.evaluate(() => window.calendarFixture.state().tasks)).find(t => t.id === 'layout-canvas-task').status, 'completed');
+
+    await page.getByRole('button', { name: 'Fixture schedule', exact: true }).click();
+    for (const [width, height, label] of [[1280,720,'laptop'], [390,844,'mobile']]) {
+      await page.setViewportSize({ width, height });
+      await page.evaluate(() => window.scrollTo(0, 0));
+      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), `schedule fits the ${label} page`);
+      await capture(`schedule-${label}`);
+      await page.getByText('Schedule tips', { exact: true }).click();
+      const tipBounds = await page.getByText('Click an empty time to add a task or event.', { exact: true }).boundingBox();
+      assert.ok(tipBounds.x >= 0 && tipBounds.x + tipBounds.width <= width, 'schedule tips fit the viewport');
+      await page.getByText('Schedule tips', { exact: true }).click();
+    }
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await page.evaluate(() => document.documentElement.classList.remove('dark'));
+    await capture('schedule-light-laptop');
+    await page.getByRole('button', { name: 'Fixture assistant', exact: true }).click();
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await capture('assistant-light-laptop');
+    await page.setViewportSize({ width: 390, height: 667 });
+    await page.getByRole('textbox', { name: 'Message Orderly' }).fill('A long unsent message\n'.repeat(15));
+    await page.getByRole('textbox', { name: 'Message Orderly' }).scrollIntoViewIfNeeded();
+    const inputBounds = await page.getByRole('textbox', { name: 'Message Orderly' }).boundingBox();
+    const sendBounds = await page.getByRole('button', { name: 'Send message', exact: true }).boundingBox();
+    assert.ok(inputBounds.height > 40 && sendBounds.y >= 0 && sendBounds.y + sendBounds.height <= 667, 'long input and send button remain reachable on a short phone');
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
+    await capture('assistant-long-input-mobile');
     assert.deepEqual(errors, []);
   } finally {
     await browser?.close();
