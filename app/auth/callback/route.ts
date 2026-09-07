@@ -1,3 +1,4 @@
+import { safeErrorCode } from '@/lib/security/log';
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
@@ -106,9 +107,9 @@ export async function GET(request: Request) {
         return NextResponse.redirect(new URL(next, origin));
       }
 
-      if (error) console.error('OAuth code exchange failed:', error.message);
+      if (error) console.error('OAuth code exchange failed:', safeErrorCode(error));
     } catch (error) {
-      console.error('OAuth callback failed:', error);
+      console.error('OAuth callback failed:', safeErrorCode(error));
     }
   }
 

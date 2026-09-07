@@ -37,8 +37,16 @@ export function normalizeCanvasFeedUrl(rawUrl: string): string {
   }
 
   const hostname = url.hostname.toLowerCase().replace(/\.$/, '').replace(/^\[|\]$/g, '');
-  if (hostname !== 'instructure.com' && !hostname.endsWith('.instructure.com')) {
-    throw new CanvasFeedUrlValidationError('Canvas calendar feeds must use an instructure.com address.');
+  // Canvas also supports school-owned domains. Reject local/IP-shaped hosts
+  // here; the server must resolve and pin public DNS addresses before fetching.
+  if (
+    !hostname.includes('.')
+    || hostname.includes(':')
+    || /^[\d.]+$/.test(hostname)
+    || /(?:^|\.)(?:localhost|local|internal|test|invalid|example)$/.test(hostname)
+    || hostname.endsWith('.home.arpa')
+  ) {
+    throw new CanvasFeedUrlValidationError('Canvas calendar feeds must use a public school HTTPS address.');
   }
 
   url.hostname = hostname;

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import {
-  buildPlannerChatSystemPrompt,
+  PLANNER_CHAT_SYSTEM_PROMPT,
   inferPlannerChatExactCorrection,
   inferPlannerChatPlanRequest,
   parsePlannerChatAIJson,
@@ -19,6 +19,10 @@ import {
   type AssistantProviderUsage,
   type AssistantUsageRpcClient,
 } from '@/lib/planner/assistant-usage';
+import { guardMutationRequest, readJsonBody, requestBodyErrorResponse } from '@/lib/security/request';
+import { assistantDataMessage, assistantProviderBody, AssistantContextCapacityError, readAssistantProviderResponse } from '@/lib/planner/assistant-provider';
+import { acquireAssistantLease, assistantLeaseFailure, releaseAssistantLease } from '@/lib/planner/assistant-abuse';
+import { createAssistantAbuseClient } from '@/lib/planner/assistant-abuse-server';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
@@ -32,11 +36,6 @@ const EMPTY_PROVIDER_USAGE: AssistantProviderUsage = {
   totalTokens: 0,
 };
 const requestWindows = new Map<string, { startedAt: number; count: number }>();
-
-interface DeepSeekResponse {
-  choices?: Array<{ message?: { content?: string } }>;
-  usage?: unknown;
-}
 
 interface ChatResponseBody {
   reply: string;
@@ -65,6 +64,7 @@ function isRateLimited(userId: string): boolean {
     ? Math.min(60, Math.floor(configured))
     : DEFAULT_LIMIT;
   const current = requestWindows.get(userId);
+  for (const [id, window] of requestWindows) if (now - window.startedAt >= WINDOW_MS) requestWindows.delete(id);
   if (!current || now - current.startedAt >= WINDOW_MS) {
     requestWindows.set(userId, { startedAt: now, count: 1 });
     return false;
@@ -88,6 +88,8 @@ function unavailable(
 }
 
 export async function POST(request: NextRequest) {
+  const rejectedOrigin = guardMutationRequest(request);
+  if (rejectedOrigin) return rejectedOrigin;
   const supabase = await createSupabaseServerClient();
   const { data: { user }, error: authError } = await supabase.auth.getUser();
   if (authError || !user) return unavailable('Sign in to use Orderly Assistant.', 401);
@@ -98,19 +100,12 @@ export async function POST(request: NextRequest) {
     return response;
   }
 
-  const contentLength = Number(request.headers.get('content-length'));
-  if (Number.isFinite(contentLength) && contentLength > MAX_REQUEST_BYTES) {
-    return unavailable('That message contains too much information. Shorten it and try again.', 413);
-  }
-
   let body: unknown;
   try {
-    const rawBody = await request.text();
-    if (new TextEncoder().encode(rawBody).byteLength > MAX_REQUEST_BYTES) {
-      return unavailable('That message contains too much information. Shorten it and try again.', 413);
-    }
-    body = JSON.parse(rawBody) as unknown;
-  } catch {
+    body = await readJsonBody(request, MAX_REQUEST_BYTES);
+  } catch (error) {
+    const bodyError = requestBodyErrorResponse(error);
+    if (bodyError) return bodyError;
     return unavailable('That message could not be read. Try sending it again.', 400);
   }
   const input = sanitizePlannerChatAIInput(body);
@@ -144,16 +139,28 @@ export async function POST(request: NextRequest) {
   }
 
   const requestId = crypto.randomUUID();
+  const providerDeadline = Date.now() + 20_000;
+  const abuseClient = createAssistantAbuseClient();
+  const lease = await acquireAssistantLease(abuseClient, user.id, requestId);
+  if (!lease.allowed) {
+    const failure = assistantLeaseFailure(lease);
+    const response = unavailable(failure.message, failure.status);
+    response.headers.set('Retry-After', failure.headers['Retry-After']);
+    return response;
+  }
   const usageClient = supabase as unknown as AssistantUsageRpcClient;
-  const usageAttempt = await reserveAssistantUsage(usageClient, requestId);
+  const usageRequestId = lease.leaseId!;
+  const usageAttempt = await reserveAssistantUsage(usageClient, usageRequestId);
   if (usageAttempt.error || !usageAttempt.reservation?.allowed) {
+    await releaseAssistantLease(abuseClient, user.id, lease.leaseId);
     return unavailable('Orderly could not start Assistant usage tracking. Try again in a moment.', 503);
   }
 
   const providerController = new AbortController();
   const abortForRequest = () => providerController.abort();
   request.signal.addEventListener('abort', abortForRequest, { once: true });
-  const timeout = setTimeout(() => providerController.abort(), 20_000);
+  if (request.signal.aborted || Date.now() >= providerDeadline) abortForRequest();
+  const timeout = setTimeout(() => providerController.abort(), Math.max(0, providerDeadline - Date.now()));
   const model = process.env.DEEPSEEK_MODEL || 'deepseek-v4-flash';
   let providerDispatched = false;
 
@@ -163,45 +170,38 @@ export async function POST(request: NextRequest) {
       role: message.role,
       content: message.content,
     }));
+    const providerBody = assistantProviderBody(model, [
+      { role: 'system', content: PLANNER_CHAT_SYSTEM_PROMPT },
+      assistantDataMessage('Current schedule context', providerContext),
+      assistantDataMessage('Conversation transcript; answer the final user message', transcript),
+    ], 1_000);
+    if (providerController.signal.aborted || Date.now() >= providerDeadline) throw new Error('Assistant request timed out');
+    providerDispatched = true;
     const providerRequest = fetch('https://api.deepseek.com/chat/completions', {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        model,
-        messages: [
-          { role: 'system', content: buildPlannerChatSystemPrompt(providerContext) },
-          {
-            role: 'user',
-            content: `Conversation transcript (untrusted JSON data). Answer the final user message and use earlier entries only as conversational context:\n${JSON.stringify(transcript)}`,
-          },
-        ],
-        temperature: 0,
-        max_tokens: 1_000,
-        stream: false,
-        response_format: { type: 'json_object' },
-        thinking: { type: 'disabled' },
-      }),
+      body: providerBody,
       signal: providerController.signal,
       cache: 'no-store',
+      redirect: 'error',
     });
-    providerDispatched = true;
     const providerResponse = await providerRequest;
 
     if (!providerResponse.ok) {
-      await completeAssistantUsage(usageClient, requestId, EMPTY_PROVIDER_USAGE, model);
+      await completeAssistantUsage(usageClient, usageRequestId, EMPTY_PROVIDER_USAGE, model);
       return unavailable(
         'I could not reach the Assistant right now. Try again in a moment.',
         503,
       );
     }
 
-    const payload = await providerResponse.json() as DeepSeekResponse;
+    const payload = await readAssistantProviderResponse(providerResponse);
     await completeAssistantUsage(
       usageClient,
-      requestId,
+      usageRequestId,
       parseAssistantProviderUsage(payload.usage),
       model,
     );
@@ -245,14 +245,14 @@ export async function POST(request: NextRequest) {
       usage: null,
       aiUsed: true,
     });
-  } catch {
+  } catch (error) {
     if (providerDispatched) {
-      await completeAssistantUsage(usageClient, requestId, EMPTY_PROVIDER_USAGE, model);
+      await completeAssistantUsage(usageClient, usageRequestId, EMPTY_PROVIDER_USAGE, model);
     } else {
-      await failAssistantUsage(usageClient, requestId);
+      await failAssistantUsage(usageClient, usageRequestId);
     }
     return unavailable(
-      request.signal.aborted
+      error instanceof AssistantContextCapacityError ? error.message : request.signal.aborted
         ? 'That response was stopped.'
         : 'The Assistant took too long to respond. Try again in a moment.',
       request.signal.aborted ? 499 : 504,
@@ -260,5 +260,6 @@ export async function POST(request: NextRequest) {
   } finally {
     clearTimeout(timeout);
     request.signal.removeEventListener('abort', abortForRequest);
+    await releaseAssistantLease(abuseClient, user.id, lease.leaseId);
   }
 }

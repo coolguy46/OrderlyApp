@@ -105,3 +105,10 @@ test('deletion queue is service-role-only and worker is authenticated', async ()
   assert.match(deletionRoute, /status: 'queued'/);
   assert.match(deletionRoute, /\{ status: 202 \}/);
 });
+
+test('queued deletion is not presented as completed by Settings or login', async () => {
+  const settings = await readFile(new URL('../app/settings/page.tsx', import.meta.url), 'utf8');
+  const login = await readFile(new URL('../app/auth/login/page.tsx', import.meta.url), 'utf8');
+  assert.match(settings, /result\?\.status === 'completed'[\s\S]*accountDeleted=1[\s\S]*accountDeletionQueued=1/);
+  assert.match(login, /accountDeletionQueued[\s\S]*not yet confirmed complete/);
+});

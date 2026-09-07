@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { guardMutationRequest, readJsonBody, requestBodyErrorResponse } from '@/lib/security/request';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import {
   CanvasFeedUrlValidationError,
@@ -17,22 +18,19 @@ const MAX_REQUEST_BYTES = 4_096;
 
 /** Validate a private Canvas feed without persisting it to the user's account. */
 export async function POST(request: Request) {
+  const rejected = guardMutationRequest(request);
+  if (rejected) return rejected;
   const sessionClient = await createSupabaseServerClient();
   const { data: { user }, error: authError } = await sessionClient.auth.getUser();
   if (authError || !user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const contentLength = Number(request.headers.get('content-length'));
-  if (Number.isFinite(contentLength) && contentLength > MAX_REQUEST_BYTES) {
-    return NextResponse.json({ error: 'Canvas feed URL is too long' }, { status: 413 });
-  }
-
   let body: unknown;
   try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: 'Invalid request' }, { status: 400 });
+    body = await readJsonBody(request, MAX_REQUEST_BYTES);
+  } catch (error) {
+    return requestBodyErrorResponse(error) || NextResponse.json({ error: 'Invalid request' }, { status: 400 });
   }
 
   const rawUrl = body && typeof body === 'object' && !Array.isArray(body)

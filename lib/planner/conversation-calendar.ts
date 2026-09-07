@@ -29,7 +29,9 @@ export interface ConversationCalendar {
   localEvents?: RecurringCommitmentInput[];
 }
 export function calendarFromSnapshot(snapshot: ConversationSnapshot, userId: string, now: string, timeZone: string): ConversationCalendar {
-  if (snapshot.tasks.some(t => t.user_id !== userId) || snapshot.events.some(e => e.user_id !== userId)) throw new Error('Account mismatch');
+  if (snapshot.tasks.some(t => t.user_id !== userId) || snapshot.events.some(e => e.user_id !== userId)
+    || snapshot.exams.some(e => e.user_id !== userId)
+    || (snapshot.preferences && snapshot.preferences.user_id !== userId)) throw new Error('Account mismatch');
   const record = plannerPersistenceSnapshotFromRows(userId, snapshot.preferences, snapshot.events, []);
   return { userId, now, snapshot, settings: { ...getDefaultPlannerSettings(timeZone), ...record.settings } };
 }

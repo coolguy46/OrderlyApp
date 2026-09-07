@@ -255,7 +255,7 @@ test('follow-ups use confirmed server receipts rather than matching old assistan
   assert.match(source, /attempt < 3/);
   assert.match(source, /if \(repairs\+\+ >= 1\) break/);
   assert.match(source, /if \(inspected\) throw/);
-  assert.match(source, /Validation feedback/);
+  assert.match(source, /assistantDataMessage\('Validation result'/);
   assert.doesNotMatch(source, /lastAssistantMessage.content ===|inferPlannerChat|normalizedCommands/);
 });
 

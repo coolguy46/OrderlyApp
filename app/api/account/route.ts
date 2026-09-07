@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
+import { guardMutationRequest } from '@/lib/security/request';
 import { createClient } from '@supabase/supabase-js';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
-import { hasRecentSignIn } from '@/lib/auth/recent-auth';
+import { hasRecentSessionAuthentication } from '@/lib/auth/recent-auth';
 import {
   claimAccountDeletionRequests,
   processAccountDeletionRequest,
@@ -10,7 +11,9 @@ import {
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
-export async function DELETE() {
+export async function DELETE(request: Request) {
+  const rejected = guardMutationRequest(request);
+  if (rejected) return rejected;
   const sessionClient = await createSupabaseServerClient();
   const { data: { user }, error: authError } = await sessionClient.auth.getUser();
 
@@ -18,7 +21,8 @@ export async function DELETE() {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  if (!hasRecentSignIn(user.last_sign_in_at)) {
+  const { data: claimData, error: claimError } = await sessionClient.auth.getClaims();
+  if (claimError || !hasRecentSessionAuthentication(claimData?.claims, user.id)) {
     return NextResponse.json(
       { error: 'For your security, sign out and sign back in before deleting your account.' },
       { status: 403 },

@@ -41,7 +41,9 @@ export default function LoginPage() {
   const queryError = callbackErrorMessage(authResult?.get('error') ?? null);
   const notice = authResult?.get('accountDeleted') === '1'
     ? 'Your Orderly account and stored data were deleted.'
-    : '';
+    : authResult?.get('accountDeletionQueued') === '1'
+      ? 'Your account deletion request was accepted. Cleanup is still in progress; it is not yet confirmed complete.'
+      : '';
   const displayedError = error || queryError;
 
   const handleSubmit = async (e: React.FormEvent) => {

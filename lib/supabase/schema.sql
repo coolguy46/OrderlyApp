@@ -2,6 +2,8 @@
 -- FRESH BOOTSTRAP ONLY: run only against an empty application schema. This is
 -- not an upgrade migration and is intentionally not idempotent. Existing
 -- deployments must follow README.md's ordered incremental rollout instead.
+-- After all selected feature migrations, apply security-boundaries-migration.sql
+-- last so fresh installs also receive optional relationship/privilege hardening.
 
 BEGIN;
 

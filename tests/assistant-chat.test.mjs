@@ -1040,6 +1040,22 @@ test('usage reservation fails closed, disables quotas, and records actual provid
   }
 });
 
+test('usage transport errors are contained and never log private provider or account details', async () => {
+  const messages = [];
+  const originalConsoleError = console.error;
+  console.error = (...args) => messages.push(args);
+  try {
+    const client = { async rpc() { throw new Error('private-token-and-assignment-description'); } };
+    assert.deepEqual(await reserveAssistantUsage(client, 'test-request', {}), { reservation: null, error: 'unavailable' });
+    assert.equal(await completeAssistantUsage(client, 'test-request', { promptTokens: 0, completionTokens: 0, totalTokens: 0 }, 'fixture'), false);
+    assert.equal(await failAssistantUsage(client, 'test-request'), false);
+    assert.equal(messages.length, 3);
+    assert.ok(!JSON.stringify(messages).includes('private-token-and-assignment-description'));
+  } finally {
+    console.error = originalConsoleError;
+  }
+});
+
 test('usage migration is authenticated, keeps token logging, and supports disabled quotas', async () => {
   const migration = await readFile(
     new URL('../lib/supabase/assistant-usage-migration.sql', import.meta.url),
@@ -1083,9 +1099,9 @@ test('chat route is authenticated, usage-tracked without quotas, per-minute limi
   assert.match(route, /selectPlannerChatProviderContext/);
   assert.match(route, /request\.signal\.addEventListener\('abort'/);
   assert.match(route, /20_000/);
-  assert.match(route, /max_tokens:\s*1_000/);
+  assert.match(route, /assistantProviderBody\(model,[\s\S]*?\], 1_000\)/);
   assert.match(route, /Cache-Control', 'no-store/);
-  assert.match(route, /new TextEncoder\(\)\.encode\(rawBody\)\.byteLength/);
+  assert.match(route, /readJsonBody\(request, MAX_REQUEST_BYTES\)/);
   assert.match(route, /providerDispatched = true/);
   assert.match(
     route,

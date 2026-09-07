@@ -14,6 +14,10 @@ import {
   type AssistantProviderUsage,
   type AssistantUsageRpcClient,
 } from '@/lib/planner/assistant-usage';
+import { guardMutationRequest, readJsonBody, requestBodyErrorResponse } from '@/lib/security/request';
+import { assistantProviderBody, AssistantContextCapacityError, readAssistantProviderResponse } from '@/lib/planner/assistant-provider';
+import { acquireAssistantLease, assistantLeaseFailure, releaseAssistantLease } from '@/lib/planner/assistant-abuse';
+import { createAssistantAbuseClient } from '@/lib/planner/assistant-abuse-server';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
@@ -28,11 +32,6 @@ const EMPTY_PROVIDER_USAGE: AssistantProviderUsage = {
 };
 const requestWindows = new Map<string, { startedAt: number; count: number }>();
 
-interface DeepSeekResponse {
-  choices?: Array<{ message?: { content?: string } }>;
-  usage?: unknown;
-}
-
 function noStoreJson(body: object, init?: ResponseInit) {
   const response = NextResponse.json(body, init);
   response.headers.set('Cache-Control', 'no-store');
@@ -46,6 +45,7 @@ function isRateLimited(userId: string): boolean {
     ? Math.min(60, Math.floor(configured))
     : DEFAULT_LIMIT;
   const current = requestWindows.get(userId);
+  for (const [id, window] of requestWindows) if (now - window.startedAt >= WINDOW_MS) requestWindows.delete(id);
   if (!current || now - current.startedAt >= WINDOW_MS) {
     requestWindows.set(userId, { startedAt: now, count: 1 });
     return false;
@@ -55,6 +55,8 @@ function isRateLimited(userId: string): boolean {
 }
 
 export async function POST(request: NextRequest) {
+  const rejectedOrigin = guardMutationRequest(request);
+  if (rejectedOrigin) return rejectedOrigin;
   const supabase = await createSupabaseServerClient();
   const { data: { user }, error: authError } = await supabase.auth.getUser();
   if (authError || !user) return noStoreJson({ error: 'Unauthorized' }, { status: 401 });
@@ -65,19 +67,12 @@ export async function POST(request: NextRequest) {
     return response;
   }
 
-  const contentLength = Number(request.headers.get('content-length'));
-  if (Number.isFinite(contentLength) && contentLength > MAX_REQUEST_BYTES) {
-    return noStoreJson({ error: 'Request is too large' }, { status: 413 });
-  }
-
   let body: unknown;
   try {
-    const rawBody = await request.text();
-    if (new TextEncoder().encode(rawBody).byteLength > MAX_REQUEST_BYTES) {
-      return noStoreJson({ error: 'Request is too large' }, { status: 413 });
-    }
-    body = JSON.parse(rawBody) as unknown;
-  } catch {
+    body = await readJsonBody(request, MAX_REQUEST_BYTES);
+  } catch (error) {
+    const bodyError = requestBodyErrorResponse(error);
+    if (bodyError) return bodyError;
     return noStoreJson({ error: 'Invalid request' }, { status: 400 });
   }
   const input = sanitizePlannerCommandAIInput(body);
@@ -89,15 +84,25 @@ export async function POST(request: NextRequest) {
   }
 
   const requestId = crypto.randomUUID();
+  const providerDeadline = Date.now() + 20_000;
+  const abuseClient = createAssistantAbuseClient();
+  const lease = await acquireAssistantLease(abuseClient, user.id, requestId);
+  if (!lease.allowed) {
+    const failure = assistantLeaseFailure(lease);
+    return noStoreJson({ normalizedCommand: input.prompt, aiUsed: false, error: failure.message }, { status: failure.status, headers: failure.headers });
+  }
   const usageClient = supabase as unknown as AssistantUsageRpcClient;
-  const usageAttempt = await reserveAssistantUsage(usageClient, requestId);
+  const usageRequestId = lease.leaseId!;
+  const usageAttempt = await reserveAssistantUsage(usageClient, usageRequestId);
   if (usageAttempt.error || !usageAttempt.reservation) {
+    await releaseAssistantLease(abuseClient, user.id, lease.leaseId);
     return noStoreJson(
       { normalizedCommand: input.prompt, aiUsed: false, error: 'Assistant usage limits are unavailable' },
       { status: 503 },
     );
   }
   if (!usageAttempt.reservation.allowed) {
+    await releaseAssistantLease(abuseClient, user.id, lease.leaseId);
     return noStoreJson(
       { normalizedCommand: input.prompt, aiUsed: false, error: 'Assistant message limit reached' },
       { status: 429 },
@@ -107,7 +112,8 @@ export async function POST(request: NextRequest) {
   const controller = new AbortController();
   const abortForRequest = () => controller.abort();
   request.signal.addEventListener('abort', abortForRequest, { once: true });
-  const timeout = setTimeout(() => controller.abort(), 20_000);
+  if (request.signal.aborted || Date.now() >= providerDeadline) abortForRequest();
+  const timeout = setTimeout(() => controller.abort(), Math.max(0, providerDeadline - Date.now()));
   const model = process.env.DEEPSEEK_MODEL || 'deepseek-v4-flash';
   let providerDispatched = false;
   const providerInput = {
@@ -119,37 +125,32 @@ export async function POST(request: NextRequest) {
     },
   };
   try {
+    const providerBody = assistantProviderBody(model, [
+      { role: 'system', content: PLANNER_COMMAND_SYSTEM_PROMPT },
+      { role: 'user', content: buildPlannerCommandUserPrompt(providerInput) },
+    ], 500);
+    if (controller.signal.aborted || Date.now() >= providerDeadline) throw new Error('Assistant request timed out');
+    providerDispatched = true;
     const providerRequest = fetch('https://api.deepseek.com/chat/completions', {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        model,
-        messages: [
-          { role: 'system', content: PLANNER_COMMAND_SYSTEM_PROMPT },
-          { role: 'user', content: buildPlannerCommandUserPrompt(providerInput) },
-        ],
-        temperature: 0,
-        max_tokens: 500,
-        stream: false,
-        response_format: { type: 'json_object' },
-        thinking: { type: 'disabled' },
-      }),
+      body: providerBody,
       signal: controller.signal,
       cache: 'no-store',
+      redirect: 'error',
     });
-    providerDispatched = true;
     const response = await providerRequest;
     if (!response.ok) {
-      await completeAssistantUsage(usageClient, requestId, EMPTY_PROVIDER_USAGE, model);
+      await completeAssistantUsage(usageClient, usageRequestId, EMPTY_PROVIDER_USAGE, model);
       return noStoreJson({ normalizedCommand: input.prompt, aiUsed: false });
     }
-    const payload = await response.json() as DeepSeekResponse;
+    const payload = await readAssistantProviderResponse(response);
     await completeAssistantUsage(
       usageClient,
-      requestId,
+      usageRequestId,
       parseAssistantProviderUsage(payload.usage),
       model,
     );
@@ -159,15 +160,17 @@ export async function POST(request: NextRequest) {
       aiUsed: Boolean(normalizedCommand),
       usage: usageAttempt.reservation.usage,
     });
-  } catch {
+  } catch (error) {
     if (providerDispatched) {
-      await completeAssistantUsage(usageClient, requestId, EMPTY_PROVIDER_USAGE, model);
+      await completeAssistantUsage(usageClient, usageRequestId, EMPTY_PROVIDER_USAGE, model);
     } else {
-      await failAssistantUsage(usageClient, requestId);
+      await failAssistantUsage(usageClient, usageRequestId);
     }
-    return noStoreJson({ normalizedCommand: input.prompt, aiUsed: false });
+    return noStoreJson({ normalizedCommand: input.prompt, aiUsed: false,
+      ...(error instanceof AssistantContextCapacityError ? { error: error.message } : {}) });
   } finally {
     clearTimeout(timeout);
     request.signal.removeEventListener('abort', abortForRequest);
+    await releaseAssistantLease(abuseClient, user.id, lease.leaseId);
   }
 }

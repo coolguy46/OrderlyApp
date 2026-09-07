@@ -1,4 +1,5 @@
 'use client';
+import { safeErrorCode } from '@/lib/security/log';
 
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
@@ -472,7 +473,7 @@ function queuePlannerPersistence(userId: string, expectedGeneration: number): vo
         };
       });
     } catch (error) {
-      console.warn('Could not persist planner data; keeping it queued locally.', error);
+      console.warn('Could not persist planner data; keeping it queued locally.', safeErrorCode(error));
       return;
     }
   }).finally(() => {

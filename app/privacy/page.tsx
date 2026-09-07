@@ -28,7 +28,7 @@ export default function PrivacyPolicyPage() {
       <main className="pt-28 pb-20 px-6">
         <div className="max-w-3xl mx-auto prose prose-invert">
           <h1 className="text-4xl font-bold mb-2">Privacy Policy</h1>
-          <p className="text-muted-foreground text-lg mb-10">Last updated: August 27, 2026</p>
+          <p className="text-muted-foreground text-lg mb-10">Last updated: September 6, 2026</p>
 
           <section className="space-y-6">
             <div>
@@ -77,11 +77,17 @@ export default function PrivacyPolicyPage() {
             <div>
               <h2 className="text-2xl font-semibold mb-3">AI Assistant</h2>
               <p className="text-muted-foreground leading-relaxed">
-                When you submit a request to the Assistant, Orderly sends your request and a limited set of
-                relevant task and schedule details to DeepSeek so the request can be interpreted. This may
-                include task titles, assignment descriptions, deadlines, scheduled work, and busy times.
-                This information is sent only when you use the Assistant. The Assistant produces a preview;
-                it does not change your schedule until you approve the preview.
+                When you use the Assistant, Orderly sends your messages, recent conversation context, and
+                account planning information to DeepSeek to interpret and answer your request. Depending
+                on the request, this includes task titles, assignment descriptions, deadlines and completion
+                status, scheduled work, events, exams, routines, busy times, and planning preferences.
+                Do not include passwords, private calendar-feed links, or other secrets in your messages.
+              </p>
+              <p className="text-muted-foreground leading-relaxed mt-3">
+                When you ask the Assistant to make changes, it can save tasks, events, and schedule changes
+                directly after application checks; a separate preview approval is not always required.
+                Orderly stores saved action results to support conversation continuity and safe retries,
+                and records request and token usage for service operation and abuse protection.
               </p>
             </div>
 

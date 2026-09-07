@@ -1,3 +1,4 @@
+import { safeErrorCode } from '@/lib/security/log';
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import type { User } from '@supabase/supabase-js';
@@ -91,11 +92,12 @@ function clearLocalAccountData(userId: string | null | undefined): void {
   if (typeof window !== 'undefined') {
     cleanupSteps.push(
       () => removeUserScopedStorageValues(window.localStorage, userId),
+      () => removeUserScopedStorageValues(window.sessionStorage, userId),
       () => window.localStorage.removeItem(`canvas_sync_interval_${userId}`),
     );
   }
   runBestEffortAccountCleanup(cleanupSteps, (error, index) => {
-    console.warn(`Local account cleanup step ${index + 1} failed:`, error);
+    console.warn(`Local account cleanup step ${index + 1} failed:`, safeErrorCode(error));
   });
 }
 
@@ -354,7 +356,7 @@ async function hydrateAuthenticatedUser(authUser: User, requestGeneration: numbe
     } catch (error) {
       // Cleanup is retried on the next sign-in. It must never hold the app's
       // normal data hydration hostage when the network is unhealthy.
-      console.error('Deferred task cleanup failed:', error);
+      console.error('Deferred task cleanup failed:', safeErrorCode(error));
     }
     if (!requestIsCurrent()) return;
     const profilePromise = withTimeout(
@@ -370,14 +372,14 @@ async function hydrateAuthenticatedUser(authUser: User, requestGeneration: numbe
         useAppStore.setState({ user: profileResult.value });
       }
     } else if (profileResult.status === 'rejected') {
-      console.error('Authenticated profile hydration failed:', profileResult.reason);
+      console.error('Authenticated profile hydration failed:', safeErrorCode(profileResult.reason));
     }
 
     // loadUserData publishes a visible error state before rejecting. Logging
     // here preserves the background failure without producing an unhandled
     // promise rejection.
     if (dataResult.status === 'rejected') {
-      console.error('Authenticated data hydration failed:', dataResult.reason);
+      console.error('Authenticated data hydration failed:', safeErrorCode(dataResult.reason));
     }
   })().finally(() => {
     if (userHydrationPromises.get(hydrationKey) === hydration) {
@@ -496,7 +498,7 @@ export const useAppStore = create<AppState>()(
             if (isAbortLikeError(error)) {
               console.warn('Auth initialization was interrupted:', errorMessage(error));
             } else {
-              console.error('Error initializing auth:', error);
+              console.error('Error initializing auth:', safeErrorCode(error));
             }
             set({
               authError: errorMessage(error, 'Unable to check your session.'),
@@ -543,7 +545,7 @@ export const useAppStore = create<AppState>()(
         ).catch((error: unknown) => {
           // Planner tables are an additive deployment. A failed planner read
           // must not erase the local/offline cache or block core account data.
-          console.warn('Could not hydrate planner data; keeping the local cache.', error);
+          console.warn('Could not hydrate planner data; keeping the local cache.', safeErrorCode(error));
           return null;
         });
         const strictRead = { throwOnError: true } as const;
@@ -624,7 +626,7 @@ export const useAppStore = create<AppState>()(
           ) {
             console.warn('Account data load was interrupted:', failureMessage);
           } else {
-            console.error('Error loading account data:', loadError);
+            console.error('Error loading account data:', safeErrorCode(loadError));
           }
           throw loadError;
         }
@@ -653,7 +655,7 @@ export const useAppStore = create<AppState>()(
           }
           return false;
         } catch (error) {
-          console.error('Login error:', error);
+          console.error('Login error:', safeErrorCode(error));
           throw error;
         }
       },
@@ -677,23 +679,34 @@ export const useAppStore = create<AppState>()(
           }
           return outcome;
         } catch (error) {
-          console.error('Registration error:', error);
+          console.error('Registration error:', safeErrorCode(error));
           throw error;
         }
       },
       
       logout: async () => {
+        let requiresReload = false;
         try {
-          await withTimeout(db.signOut(), AUTH_ACTION_TIMEOUT_MS, 'Sign out');
+          const result = await db.signOut();
+          requiresReload = result.requiresReload;
+          if (!result.remoteConfirmed) {
+            toast.warning('Sign-in data was removed from this device. The server could not confirm remote session revocation.');
+          }
         } catch (error) {
-          console.error('Remote logout error:', error);
-          toast.error('Orderly could not contact the server, but this device was signed out.');
+          console.error('Local sign-out cleanup failed:', safeErrorCode(error));
+          toast.error('This browser could not finish signing out. Close it before sharing this device.');
+          throw error;
         } finally {
           // Local account data is sensitive and must be cleared even if the
           // remote sign-out request fails or the device is offline.
           authEventGeneration += 1;
           clearAuthenticatedState();
           initializationDone = false; // allow re-init after next login
+        }
+        if (requiresReload && typeof window !== 'undefined') {
+          // Cookie cleanup alone cannot discard a pending SDK refresh callback.
+          // Leave the document entirely, rather than merely resetting Zustand.
+          window.location.replace('/auth/login?localSignOut=1');
         }
       },
       
@@ -1021,7 +1034,7 @@ export const useAppStore = create<AppState>()(
           }).catch(error => {
             // Completion has already saved. A secondary stats refresh must
             // not hold the button busy or report the task as failed.
-            console.warn('Profile refresh after task completion failed:', error);
+            console.warn('Profile refresh after task completion failed:', safeErrorCode(error));
           });
           return true;
         } catch {
@@ -1269,7 +1282,7 @@ export const useAppStore = create<AppState>()(
             return false;
           }
         } catch (error) {
-          console.error('Failed to save study session:', error);
+          console.error('Failed to save study session:', safeErrorCode(error));
           if (get().user?.id === accountId) {
             toast.error('Could not save the study session. Please retry.');
           }

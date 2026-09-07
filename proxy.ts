@@ -22,6 +22,7 @@ export async function proxy(request: NextRequest) {
 
   const withSecurityPolicy = (response: NextResponse) => {
     response.headers.set('Content-Security-Policy', contentSecurityPolicy);
+    response.headers.set('Cache-Control', 'private, no-store');
     return response;
   };
 

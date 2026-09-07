@@ -523,13 +523,29 @@ test('provider context includes all overdue tasks, verified outcomes and local c
   const facts = conversationFacts(calendarFromSnapshot(current, owner, NOW, zone), [{ saved: true, items: [{ id: 'actual-id', title: 'Meeting' }] }]);
   assert.equal(facts.tasks.length, current.tasks.length);
   assert.ok(facts.tasks.some(t => t.overdue));
-  const prompt = conversationSystemPrompt(facts);
-  assert.match(prompt, /actual-id/);
-  assert.match(prompt, /1:00 PM/);
+  const prompt = conversationSystemPrompt();
+  assert.match(JSON.stringify(facts), /actual-id/);
+  assert.match(facts.localNow, /1:00 PM/);
+  assert.doesNotMatch(prompt, /actual-id|1:00 PM/, 'account content never becomes system-role instructions');
   assert.match(prompt, /earlier assistant prose alone is NOT proof/);
   assert.throws(() => readConversationRequest({ requestId: randomUUID(), conversationId, timeZone: 'Invalid/Zone', messages: [{ role: 'user', content: 'hello' }] }));
   const request = { requestId: randomUUID(), conversationId, timeZone: zone, messages: [{ role: 'user', content: 'plan the selected day' }] };
   assert.equal(readConversationRequest({ ...request, selectedDate: '2028-03-12' }).selectedDate, '2028-03-12');
   assert.throws(() => readConversationRequest({ ...request, selectedDate: '2028-02-31' }), /Invalid local date/);
   assert.match(prompt, /not as a replacement for today/);
+});
+
+test('snapshot ownership includes exams and settings, and injected operations cannot escape owned records', async () => {
+  const current = await snapshot();
+  assert.throws(() => calendarFromSnapshot({ ...current, exams: [{ user_id: other, title: 'Private exam' }] }, owner, NOW, zone), /Account mismatch/);
+  assert.throws(() => calendarFromSnapshot({ ...current, preferences: { ...current.preferences, user_id: other } }, owner, NOW, zone), /Account mismatch/);
+  const calendar = calendarFromSnapshot(current, owner, NOW, zone);
+  const foreignId = randomUUID();
+  for (const action of ['remove', 'update', 'delete', 'convert']) {
+    assert.throws(() => compileConversation(intent([{ action, entity: 'task', id: foreignId, title: 'Injected title' }]), calendar), /no longer exists/);
+  }
+  assert.throws(() => parseConversationIntent(JSON.stringify({ mode: 'act', reply: 'Fetching secrets', assumptions: [],
+    operations: [{ action: 'fetch', entity: 'task', url: 'https://attacker.invalid' }], plan: null })), /Unsupported fields|Expected/);
+  assert.throws(() => parseConversationIntent(JSON.stringify({ mode: 'discuss', reply: 'Summary', assumptions: [],
+    operations: [{ action: 'create', entity: 'task', title: 'Injected action' }], plan: null })), /cannot contain writes/);
 });

@@ -125,3 +125,25 @@ test('external links only allow HTTP and HTTPS', () => {
   assert.equal(safeExternalUrl('//attacker.example/path'), null);
   assert.equal(safeExternalUrl('not a URL'), null);
 });
+
+test('credential-bearing external links cannot disguise their destination', () => {
+  assert.equal(safeExternalUrl('https://school.edu@attacker.example/'), null);
+  assert.equal(safeExternalUrl('https://user:password@canvas.school.edu/'), null);
+  assert.equal(
+    externalHtmlToPlainText('<a href="https://school.edu@attacker.example/">Open assignment</a>'),
+    'Open assignment',
+  );
+});
+
+test('malformed deeply nested links cannot exhaust the description parser stack', () => {
+  const malicious = '<a>'.repeat(6_000) + 'nested text' + '</a>'.repeat(6_000);
+  const result = externalHtmlToPlainText(`Before ${malicious} after`);
+  assert.equal(result, 'Before [Excessively nested link text omitted] after');
+  assert.equal(externalHtmlToPlainText(result), result);
+});
+
+test('repeated unclosed literal tags have a bounded total lookahead cost', () => {
+  const result = externalHtmlToPlainText('x<y>'.repeat(10_000));
+  assert.equal(result, '[Description markup is too complex to display. Open the original assignment to read it.]');
+  assert.equal(externalHtmlToPlainText(result), result);
+});

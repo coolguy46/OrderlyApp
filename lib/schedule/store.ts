@@ -1,4 +1,5 @@
 'use client';
+import { safeErrorCode } from '@/lib/security/log';
 
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
@@ -213,7 +214,7 @@ function queueSchedulePersistence(
     } catch (error) {
       // The local cache remains fully usable offline. A later online event,
       // hydration, or explicit account activation retries this exact revision.
-      console.warn('Could not persist task schedule; keeping it queued locally.', error);
+      console.warn('Could not persist task schedule; keeping it queued locally.', safeErrorCode(error));
       return;
     }
 

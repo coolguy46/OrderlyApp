@@ -451,6 +451,7 @@ test('provider exact command bundles keep duration and recurrence attached to ea
 test('the Assistant route keeps the API key server-side and falls back safely', async () => {
   const route = await readFile(new URL('../app/api/planner/command/route.ts', import.meta.url), 'utf8');
   const chatRoute = await readFile(new URL('../app/api/planner/chat/route.ts', import.meta.url), 'utf8');
+  const provider = await readFile(new URL('../lib/planner/assistant-provider.ts', import.meta.url), 'utf8');
   const planner = await readFile(new URL('../components/planner/Planner.tsx', import.meta.url), 'utf8');
 
   assert.match(route, /process\.env\.DEEPSEEK_API_KEY/);
@@ -459,12 +460,12 @@ test('the Assistant route keeps the API key server-side and falls back safely', 
   assert.match(route, /reserveAssistantUsage/);
   assert.match(route, /completeAssistantUsage/);
   assert.match(route, /status:\s*401/);
-  assert.match(route, /max_tokens:\s*500/);
+  assert.match(route, /assistantProviderBody\(model, \[[\s\S]*?\], 500\)/);
   assert.match(route, /normalizedCommand:\s*input\.prompt,\s*aiUsed:\s*false/);
   assert.match(route, /Cache-Control', 'no-store/);
   assert.match(route, /request\.signal\.addEventListener\('abort'/);
   assert.match(route, /MAX_REQUEST_BYTES = 96 \* 1024/);
-  assert.match(route, /new TextEncoder\(\)\.encode\(rawBody\)\.byteLength/);
+  assert.match(route, /readJsonBody\(request, MAX_REQUEST_BYTES\)/);
   assert.match(route, /providerDispatched = true/);
   assert.match(
     route,
@@ -476,10 +477,11 @@ test('the Assistant route keeps the API key server-side and falls back safely', 
   assert.match(chatRoute, /plannerChatPlanRequestPreservesIntent/);
   assert.match(chatRoute, /plannerChatNormalizedCommandsPreserveIntent/);
   assert.match(chatRoute, /providerPlanRejected/);
-  assert.match(chatRoute, /response_format:\s*\{ type: 'json_object' \}/);
-  assert.match(planner, /fetch\('\/api\/planner\/chat'/);
-  assert.match(planner, /CHAT_TIMEOUT_MS = 25_000/);
-  assert.match(planner, /interpretScheduleCommands\(payload\.normalizedCommands/);
-  assert.match(planner, /plannerChatNormalizedCommandsPreserveIntent/);
+  assert.match(chatRoute, /assistantProviderBody/);
+  assert.match(provider, /response_format:\s*\{ type: 'json_object' \}/);
+  // The legacy translators remain guarded for older clients, while the current
+  // UI sends its conversation to the atomic semantic endpoint.
+  assert.match(planner, /fetch\('\/api\/planner\/conversation'/);
+  assert.match(planner, /new AbortController/);
   assert.doesNotMatch(planner, /DEEPSEEK_API_KEY/);
 });

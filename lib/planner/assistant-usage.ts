@@ -1,3 +1,5 @@
+import { safeErrorCode } from '../security/log.ts';
+
 export const DEFAULT_ASSISTANT_DAILY_LIMIT = 10;
 export const DEFAULT_ASSISTANT_MONTHLY_LIMIT = 100;
 
@@ -34,6 +36,16 @@ export interface AssistantUsageRpcClient {
 export interface AssistantUsageAttempt {
   reservation: AssistantUsageReservation | null;
   error: 'unavailable' | null;
+}
+
+async function usageRpc(client: AssistantUsageRpcClient, name: string, parameters: Record<string, unknown>): Promise<RpcResult> {
+  try {
+    return await client.rpc(name, parameters);
+  } catch (error) {
+    // Transport failures must not skip lease release or turn a saved action into
+    // an apparent failure that users might retry. Never retain exception text.
+    return { data: null, error: { code: safeErrorCode(error) } };
+  }
 }
 
 function boundedLimit(value: string | undefined, fallback: number, maximum: number): number {
@@ -116,13 +128,13 @@ export async function reserveAssistantUsage(
   environment: NodeJS.ProcessEnv = process.env,
 ): Promise<AssistantUsageAttempt> {
   const limits = getAssistantUsageLimits(environment);
-  const { data, error } = await client.rpc('assistant_reserve_ai_request', {
+  const { data, error } = await usageRpc(client, 'assistant_reserve_ai_request', {
     p_request_id: requestId,
     p_daily_limit: limits?.daily || 0,
     p_monthly_limit: limits?.monthly || 0,
   });
   if (error) {
-    console.error('Assistant usage reservation failed:', error.code || error.message || 'unknown error');
+    console.error('Assistant usage reservation failed:', safeErrorCode(error));
     return { reservation: null, error: 'unavailable' };
   }
   const reservation = parseAssistantUsageReservation(data, requestId);
@@ -141,7 +153,7 @@ export async function completeAssistantUsage(
   providerUsage: AssistantProviderUsage,
   model: string,
 ): Promise<boolean> {
-  const { data, error } = await client.rpc('assistant_complete_ai_request', {
+  const { data, error } = await usageRpc(client, 'assistant_complete_ai_request', {
     p_request_id: requestId,
     p_prompt_tokens: providerUsage.promptTokens,
     p_completion_tokens: providerUsage.completionTokens,
@@ -149,7 +161,7 @@ export async function completeAssistantUsage(
     p_model: model,
   });
   if (error) {
-    console.error('Assistant usage completion failed:', error.code || error.message || 'unknown error');
+    console.error('Assistant usage completion failed:', safeErrorCode(error));
     return false;
   }
   if (data !== true) {
@@ -163,11 +175,11 @@ export async function failAssistantUsage(
   client: AssistantUsageRpcClient,
   requestId: string,
 ): Promise<boolean> {
-  const { data, error } = await client.rpc('assistant_fail_ai_request', {
+  const { data, error } = await usageRpc(client, 'assistant_fail_ai_request', {
     p_request_id: requestId,
   });
   if (error) {
-    console.error('Assistant usage failure marker failed:', error.code || error.message || 'unknown error');
+    console.error('Assistant usage failure marker failed:', safeErrorCode(error));
     return false;
   }
   if (data !== true) {

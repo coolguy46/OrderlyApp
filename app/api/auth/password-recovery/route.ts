@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { guardMutationRequest, readJsonBody, requestBodyErrorResponse } from '@/lib/security/request';
 import { createClient } from '@supabase/supabase-js';
 import {
   PASSWORD_RECOVERY_COOKIE,
@@ -74,6 +75,8 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const rejected = guardMutationRequest(request);
+  if (rejected) return rejected;
   try {
     const recovery = await getAuthorizedRecoveryUser(request);
     if (!recovery) {
@@ -83,7 +86,7 @@ export async function POST(request: NextRequest) {
       ));
     }
 
-    const body = await request.json().catch(() => null) as {
+    const body = await readJsonBody(request, 4096) as {
       password?: unknown;
       confirmation?: unknown;
     } | null;
@@ -118,7 +121,9 @@ export async function POST(request: NextRequest) {
     }
 
     return clearRecoveryCookie(NextResponse.json({ success: true }));
-  } catch {
+  } catch (error) {
+    const invalidBody = requestBodyErrorResponse(error);
+    if (invalidBody) return invalidBody;
     return NextResponse.json(
       { error: 'Password reset is temporarily unavailable. Please try again later.' },
       { status: 503 },

@@ -126,6 +126,29 @@ this release, so they must not be presented as live statistics. Never expose
 `SUPABASE_SERVICE_ROLE_KEY`, `CANVAS_SYNC_CRON_SECRET`, or any Vault value to
 the browser.
 
+## September 2026 security rollout
+
+See [the security review and rollout checklist](docs/security-audit-2026-09-06.md)
+and the metadata/count-only [database preflight](docs/security-preflight.sql).
+For an existing installation, apply the approved
+`lib/supabase/security-boundaries-migration.sql`, then
+`lib/supabase/assistant-abuse-guard-migration.sql` **before deploying the new
+Assistant routes**. The first transaction aborts on inconsistent legacy
+references instead of rewriting them. Neither migration activates a cron job.
+Fresh installs need both after their application/Assistant prerequisites too.
+
+Verify the existing server-only `SUPABASE_SERVICE_ROLE_KEY` in the Vercel project
+that serves the public domain. Assistant burst protection now uses PostgreSQL,
+not a per-instance map; missing protection fails closed. The existing allowance
+defaults to six requests per minute, with two concurrent requests per account.
+No daily/monthly token quota was introduced. Git push does not install SQL.
+
+Verification: `npm test`, `npm run lint`, `npx tsc --noEmit`, `npm run build`,
+`npm run test:database-security`, `npm run security:secrets`.
+`test:calendar-ui` and `test:tutorial-ui` require Playwright and Chrome; set
+`ORDERLY_PLAYWRIGHT_MODULE` to an existing Playwright module if it is not in
+the project dependencies. Browser fixtures block external network requests.
+
 ## Google sign-in production configuration
 
 The application code uses Supabase's PKCE callback at `/auth/callback`. Complete

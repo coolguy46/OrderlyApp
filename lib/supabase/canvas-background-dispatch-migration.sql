@@ -28,7 +28,7 @@ CREATE OR REPLACE FUNCTION public.dispatch_due_canvas_syncs()
 RETURNS TABLE(canvas_user_id UUID, request_id BIGINT)
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = pg_catalog, public, vault, net
+SET search_path = pg_catalog, public, pg_temp
 AS $function$
 DECLARE
   cron_secret TEXT;
@@ -116,7 +116,9 @@ BEGIN
 END;
 $function$;
 
-REVOKE ALL ON FUNCTION public.dispatch_due_canvas_syncs() FROM PUBLIC;
+-- Supabase can grant EXECUTE directly through default privileges. Revoking
+-- PUBLIC alone does not remove those role-specific grants.
+REVOKE ALL ON FUNCTION public.dispatch_due_canvas_syncs() FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.dispatch_due_canvas_syncs() TO postgres;
 
 DO $schedule$

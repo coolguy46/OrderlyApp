@@ -328,7 +328,9 @@ export default function SettingsPage() {
       localStorage.removeItem('canvas_sync_settings');
       localStorage.removeItem('canvas_assignments');
       await logout();
-      router.replace('/auth/login?accountDeleted=1');
+      router.replace(result?.status === 'completed'
+        ? '/auth/login?accountDeleted=1'
+        : '/auth/login?accountDeletionQueued=1');
       router.refresh();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Failed to delete account');

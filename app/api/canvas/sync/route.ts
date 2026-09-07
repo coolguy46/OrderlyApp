@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { guardMutationRequest } from '@/lib/security/request';
 import { createClient } from '@supabase/supabase-js';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import {
@@ -22,7 +23,9 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
 /** POST /api/canvas/sync — sync the signed-in user's Canvas calendar. */
-export async function POST() {
+export async function POST(request: Request) {
+  const rejected = guardMutationRequest(request);
+  if (rejected) return rejected;
   try {
     return await withCanvasDeadline(async () => {
       const sessionClient = await createSupabaseServerClient();

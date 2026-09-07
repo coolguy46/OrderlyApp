@@ -4,6 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "test:security": "node --test --experimental-strip-types tests/*security*.test.mjs",
+    "test:database-security": "node --test tests/database-security.test.mjs",
+    "security:secrets": "node scripts/security-secret-scan.mjs --history --build",
     "dev": "next dev",
     "build": "next build",
     "lint": "eslint .",
@@ -21,7 +24,7 @@
     "test:date-semantics": "node --test --experimental-strip-types tests/date-semantics.test.mjs",
     "test:schedule-command-text": "node --test --experimental-strip-types tests/schedule-command-text.test.mjs",
     "test:assistant-command-fallback": "node --test --experimental-strip-types tests/assistant-command-fallback.test.mjs",
-    "test:assistant": "node --test --experimental-strip-types tests/assistant-chat.test.mjs tests/assistant-chat-ui.test.mjs tests/assistant-command-fallback.test.mjs tests/assistant-mutation.test.mjs tests/assistant-planner-regressions.test.mjs tests/assistant-task-query.test.mjs tests/schedule-commands.test.mjs tests/schedule-undo.test.mjs tests/conversation-integration.test.mjs",
+    "test:assistant": "node --test --experimental-strip-types tests/assistant-chat.test.mjs tests/assistant-chat-ui.test.mjs tests/assistant-command-fallback.test.mjs tests/assistant-mutation.test.mjs tests/assistant-planner-regressions.test.mjs tests/assistant-task-query.test.mjs tests/schedule-commands.test.mjs tests/schedule-undo.test.mjs tests/conversation-integration.test.mjs tests/deepseek-command.test.mjs",
     "test:scheduler-workflows": "node --test --experimental-strip-types tests/week-time-grid-slot.test.mjs tests/schedule-calendar-create-entry.test.mjs tests/dashboard-schedule-create-entry.test.mjs tests/task-calendar-edit-entry.test.mjs tests/task-form-imported-schedule.test.mjs tests/task-form-event-edit.test.mjs tests/persistence-confirmation.test.mjs",
     "test:calendar-ui": "node --test tests/calendar-ui.test.mjs",
     "test:tutorial": "node --test --experimental-strip-types tests/tutorial-progress.test.mjs tests/canvas-guide.test.mjs",
@@ -44,7 +47,7 @@
     "test:planner-persistence": "node --test --experimental-strip-types tests/planner-persistence.test.mjs",
     "test:setup-safety": "node --test --experimental-strip-types tests/setup-safety.test.mjs",
     "test:account-deletion": "node --test --experimental-strip-types tests/account-deletion.test.mjs",
-    "test": "npm run test:canvas-sync && npm run test:canvas-sync-lease && npm run test:canvas-provider-throttle && npm run test:task-status && npm run test:dashboard-tasks && npm run test:safe-content && npm run test:navigation && npm run test:password-reset && npm run test:canvas-parser-safety && npm run test:schedule-timezone && npm run test:date-semantics && npm run test:schedule-command-text && npm run test:assistant && npm run test:scheduler-workflows && npm run test:unscheduled-tasks && npm run test:goal-status && npm run test:calendar-segments && npm run test:user-scoped-storage && npm run test:user-data-load && npm run test:store-account-safety && npm run test:timer-clock && npm run test:timer-recovery && npm run test:timer-settings && npm run test:recent-auth && npm run test:task-form-save-sequence && npm run test:interaction-safety && npm run test:csp && npm run test:migration-contracts && npm run test:schedule-persistence && npm run test:planner-persistence && npm run test:setup-safety && npm run test:account-deletion"
+    "test": "npm run test:canvas-sync && npm run test:canvas-sync-lease && npm run test:canvas-provider-throttle && npm run test:task-status && npm run test:dashboard-tasks && npm run test:safe-content && npm run test:navigation && npm run test:password-reset && npm run test:canvas-parser-safety && npm run test:schedule-timezone && npm run test:date-semantics && npm run test:schedule-command-text && npm run test:assistant && npm run test:scheduler-workflows && npm run test:unscheduled-tasks && npm run test:goal-status && npm run test:calendar-segments && npm run test:user-scoped-storage && npm run test:user-data-load && npm run test:store-account-safety && npm run test:timer-clock && npm run test:timer-recovery && npm run test:timer-settings && npm run test:recent-auth && npm run test:task-form-save-sequence && npm run test:interaction-safety && npm run test:csp && npm run test:migration-contracts && npm run test:schedule-persistence && npm run test:planner-persistence && npm run test:setup-safety && npm run test:account-deletion && npm run test:security"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

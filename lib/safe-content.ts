@@ -55,6 +55,10 @@ interface TagToken {
 
 type MarkupToken = CommentToken | DeclarationToken | TagToken;
 
+interface MarkupBudget { remaining: number }
+class DescriptionComplexityError extends Error {}
+const newMarkupBudget = (): MarkupBudget => ({ remaining: 500_000 });
+
 function scanToTagEnd(value: string, start: number): { end: number; terminated: boolean } {
   let quote: '"' | "'" | null = null;
 
@@ -122,7 +126,7 @@ function hasAttributes(token: TagToken): boolean {
   return token.attributes.replace(/\/\s*$/, '').trim().length > 0;
 }
 
-function isEmbeddedLiteralCandidate(value: string, token: TagToken): boolean {
+function isEmbeddedLiteralCandidate(value: string, token: TagToken, budget: MarkupBudget): boolean {
   if (
     token.closing
     || token.selfClosing
@@ -135,10 +139,10 @@ function isEmbeddedLiteralCandidate(value: string, token: TagToken): boolean {
     return false;
   }
 
-  return findClosingTag(value, token.end, token.name) === null;
+  return findClosingTag(value, token.end, token.name, budget) === null;
 }
 
-function hasUnambiguousMarkup(value: string): boolean {
+function hasUnambiguousMarkup(value: string, budget = newMarkupBudget()): boolean {
   const openFormattingTags = new Map<string, number>();
   const closeFormattingTags = new Map<string, number>();
 
@@ -150,7 +154,7 @@ function hasUnambiguousMarkup(value: string): boolean {
     }
 
     if (token.kind !== 'tag') return true;
-    if (isEmbeddedLiteralCandidate(value, token)) {
+    if (isEmbeddedLiteralCandidate(value, token, budget)) {
       index = token.end;
       continue;
     }
@@ -211,10 +215,15 @@ function findClosingTag(
   value: string,
   start: number,
   name: string,
+  budget: MarkupBudget,
 ): { start: number; end: number } | null {
   let depth = 1;
 
   for (let index = start; index < value.length;) {
+    // Ambiguous instructional tags require lookahead. Share a work budget
+    // across lookaheads so repeated unclosed tags cannot cause quadratic CPU
+    // use on an otherwise small untrusted description.
+    if (--budget.remaining < 0) throw new DescriptionComplexityError();
     const token = readMarkupToken(value, index);
     if (!token) {
       index += 1;
@@ -282,7 +291,10 @@ function readableAnchor(attributes: string, entityEncodedContents: string): stri
   return `${label} (${href})`;
 }
 
-function htmlMarkupToEntityText(value: string): string {
+function htmlMarkupToEntityText(value: string, budget: MarkupBudget, linkDepth = 0): string {
+  // Imported HTML is untrusted even when ultimately displayed as React text.
+  // Invalid, deeply nested anchors must not exhaust the server/browser stack.
+  if (linkDepth >= 32) return '[Excessively nested link text omitted]';
   let text = '';
 
   for (let index = 0; index < value.length;) {
@@ -296,7 +308,7 @@ function htmlMarkupToEntityText(value: string): string {
     index = token.end;
     if (token.kind !== 'tag') continue;
 
-    if (isEmbeddedLiteralCandidate(value, token)) {
+    if (isEmbeddedLiteralCandidate(value, token, budget)) {
       text += value.slice(token.start, token.end);
       continue;
     }
@@ -308,7 +320,7 @@ function htmlMarkupToEntityText(value: string): string {
 
     if (DISCARD_CONTENT_TAG_NAMES.has(token.name)) {
       if (token.selfClosing) continue;
-      const closingTag = findClosingTag(value, token.end, token.name);
+      const closingTag = findClosingTag(value, token.end, token.name, budget);
       index = closingTag?.end ?? value.length;
       continue;
     }
@@ -318,9 +330,9 @@ function htmlMarkupToEntityText(value: string): string {
         text += readableAnchor(token.attributes, '');
         continue;
       }
-      const closingTag = findClosingTag(value, token.end, token.name);
+      const closingTag = findClosingTag(value, token.end, token.name, budget);
       const contentEnd = closingTag?.start ?? value.length;
-      const contents = htmlMarkupToEntityText(value.slice(token.end, contentEnd));
+      const contents = htmlMarkupToEntityText(value.slice(token.end, contentEnd), budget, linkDepth + 1);
       text += readableAnchor(token.attributes, contents);
       index = closingTag?.end ?? value.length;
       continue;
@@ -348,8 +360,14 @@ function normalizeWhitespace(value: string): string {
  */
 export function externalHtmlToPlainText(value: string | null | undefined): string {
   if (!value) return '';
-  if (!hasUnambiguousMarkup(value)) return normalizeWhitespace(value);
-  return normalizeWhitespace(decodeTextEntities(htmlMarkupToEntityText(value)));
+  const budget = newMarkupBudget();
+  try {
+    if (!hasUnambiguousMarkup(value, budget)) return normalizeWhitespace(value);
+    return normalizeWhitespace(decodeTextEntities(htmlMarkupToEntityText(value, budget)));
+  } catch (error) {
+    if (!(error instanceof DescriptionComplexityError)) throw error;
+    return '[Description markup is too complex to display. Open the original assignment to read it.]';
+  }
 }
 
 /** Only HTTP(S) links from external task providers may be opened. */
@@ -359,6 +377,9 @@ export function safeExternalUrl(value: string | null | undefined): string | null
   try {
     const parsed = new URL(value);
     if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return null;
+    // Credentials are not needed for assignment links and can disguise the
+    // destination (https://trusted.school@attacker.example/).
+    if (parsed.username || parsed.password) return null;
     return parsed.href;
   } catch {
     return null;

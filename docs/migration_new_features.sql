@@ -2,6 +2,9 @@
 --  Orderly App – New Features Migration
 --  Run this in Supabase SQL Editor (Dashboard > SQL Editor)
 --  All tables use RLS tied to auth.uid()
+--  Legacy optional features only. If installing these tables, apply
+--  lib/supabase/security-boundaries-migration.sql afterwards to enforce nested
+--  record ownership and private study-file metadata paths as well as row RLS.
 -- ============================================================
 
 -- ────────────────────────────────────────────────────────────

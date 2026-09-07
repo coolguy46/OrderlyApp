@@ -1,3 +1,4 @@
+import { safeErrorCode } from '@/lib/security/log';
 // Supabase Service Functions for Database Operations
 import {
   supabase,
@@ -5,6 +6,7 @@ import {
   requireSupabaseAvailable,
   supabasePublishableKey,
   supabaseUrl,
+  clearSupabaseBrowserAuthStorage,
 } from './client';
 import type { 
   Database,
@@ -18,6 +20,7 @@ import type {
   Exam,
 } from './types';
 import { AUTH_ACTION_TIMEOUT_MS, authCallbackUrl, withTimeout } from '@/lib/auth/lifecycle';
+import { signOutWithLocalFallback } from '@/lib/auth/logout-safety';
 import { deleteOwnedTaskWithToken } from './task-compensation';
 import { persistTaskCompletion, type TaskCompletionResult, type TaskSuccessorInput } from './task-completion';
 export type { TaskCompletionResult, TaskSuccessorInput } from './task-completion';
@@ -49,7 +52,7 @@ function readFailure<T>(
   fallback: T,
   options?: ReadOptions,
 ): T {
-  console.error(context, error);
+  console.error(context, safeErrorCode(error));
   if (options?.throwOnError) throw error;
   return fallback;
 }
@@ -96,7 +99,7 @@ export async function updateProfile(userId: string, updates: Partial<EditablePro
     .single();
   
   if (error) {
-    console.error('Error updating profile:', error);
+    console.error('Error updating profile:', safeErrorCode(error));
     return null;
   }
   return data as Profile | null;
@@ -164,7 +167,7 @@ export async function createSubject(subject: SubjectInsert): Promise<Subject | n
     .single();
   
   if (error) {
-    console.error('Error creating subject:', error);
+    console.error('Error creating subject:', safeErrorCode(error));
     return null;
   }
   return data as Subject | null;
@@ -181,7 +184,7 @@ export async function updateSubject(id: string, updates: SubjectUpdate): Promise
     .single();
   
   if (error) {
-    console.error('Error updating subject:', error);
+    console.error('Error updating subject:', safeErrorCode(error));
     return null;
   }
   return data as Subject | null;
@@ -196,7 +199,7 @@ export async function deleteSubject(id: string): Promise<boolean> {
     .eq('id', id);
   
   if (error) {
-    console.error('Error deleting subject:', error);
+    console.error('Error deleting subject:', safeErrorCode(error));
     return false;
   }
   return true;
@@ -242,7 +245,7 @@ export async function createTask(task: TaskInsert): Promise<Task | null> {
     .single();
   
   if (error) {
-    console.error('Error creating task:', error.message, error.details, error.hint);
+    console.error('Error creating task:', safeErrorCode(error));
     return null;
   }
   return data as Task | null;
@@ -259,7 +262,7 @@ export async function updateTask(id: string, updates: TaskUpdate): Promise<Task 
     .single();
   
   if (error) {
-    console.error('Error updating task:', error);
+    console.error('Error updating task:', safeErrorCode(error));
     return null;
   }
   return data as Task | null;
@@ -273,7 +276,7 @@ export async function deleteTask(id: string): Promise<boolean> {
     .select('id');
   
   if (error) {
-    console.error('Error deleting task:', error);
+    console.error('Error deleting task:', safeErrorCode(error));
     return false;
   }
   // DELETE is idempotent. Supabase returns an empty representation when a
@@ -319,7 +322,7 @@ export async function completeTask(
     // Serialize the useful fields: logging the SDK object alone hides the
     // database error behind "Object" in browser diagnostics.
     const detail = error as { code?: string; message?: string; details?: string };
-    console.error('Error completing task:', detail.code, detail.message, detail.details);
+    console.error('Error completing task:', safeErrorCode(detail));
     return null;
   }
 }
@@ -341,7 +344,7 @@ export async function getTaskByExternalId(
     .single();
   
   if (error && error.code !== 'PGRST116') { // PGRST116 = no rows returned
-    console.error('Error fetching task by external ID:', error);
+    console.error('Error fetching task by external ID:', safeErrorCode(error));
   }
   return (data as Task | null) || null;
 }
@@ -359,7 +362,7 @@ export async function removeOrphanedCanvasTasks(userId: string, currentCanvasIds
     .not('external_id', 'is', null);
   
   if (fetchError) {
-    console.error('Error fetching Canvas tasks:', fetchError);
+    console.error('Error fetching Canvas tasks:', safeErrorCode(fetchError));
     return 0;
   }
   
@@ -380,7 +383,7 @@ export async function removeOrphanedCanvasTasks(userId: string, currentCanvasIds
     .in('id', orphanedTaskIds);
   
   if (deleteError) {
-    console.error('Error deleting orphaned Canvas tasks:', deleteError);
+    console.error('Error deleting orphaned Canvas tasks:', safeErrorCode(deleteError));
     return 0;
   }
   
@@ -401,7 +404,7 @@ export async function upsertCanvasTask(task: Omit<Task, 'id' | 'created_at' | 'u
     .single();
   
   if (error) {
-    console.error('Error upserting Canvas task:', error);
+    console.error('Error upserting Canvas task:', safeErrorCode(error));
     return null;
   }
   return data as Task | null;
@@ -434,7 +437,7 @@ export async function createGoal(goal: Omit<Goal, 'id' | 'created_at' | 'updated
     .single();
   
   if (error) {
-    console.error('Error creating goal:', error);
+    console.error('Error creating goal:', safeErrorCode(error));
     return null;
   }
   return data as Goal | null;
@@ -451,7 +454,7 @@ export async function updateGoal(id: string, updates: GoalUpdate): Promise<Goal 
     .single();
   
   if (error) {
-    console.error('Error updating goal:', error);
+    console.error('Error updating goal:', safeErrorCode(error));
     return null;
   }
   return data as Goal | null;
@@ -466,7 +469,7 @@ export async function deleteGoal(id: string): Promise<boolean> {
     .eq('id', id);
   
   if (error) {
-    console.error('Error deleting goal:', error);
+    console.error('Error deleting goal:', safeErrorCode(error));
     return false;
   }
   return true;
@@ -505,7 +508,7 @@ export async function createStudySession(session: NewStudySession): Promise<Stud
   const { data, error } = await mutation.select().single();
   
   if (error) {
-    console.error('Error creating study session:', error);
+    console.error('Error creating study session:', safeErrorCode(error));
     return null;
   }
   return data as StudySession | null;
@@ -538,7 +541,7 @@ export async function createExam(exam: Omit<Exam, 'id' | 'created_at' | 'updated
     .single();
   
   if (error) {
-    console.error('Error creating exam:', error);
+    console.error('Error creating exam:', safeErrorCode(error));
     return null;
   }
   return data as Exam | null;
@@ -555,7 +558,7 @@ export async function updateExam(id: string, updates: ExamUpdate): Promise<Exam 
     .single();
   
   if (error) {
-    console.error('Error updating exam:', error);
+    console.error('Error updating exam:', safeErrorCode(error));
     return null;
   }
   return data as Exam | null;
@@ -570,7 +573,7 @@ export async function deleteExam(id: string): Promise<boolean> {
     .eq('id', id);
   
   if (error) {
-    console.error('Error deleting exam:', error);
+    console.error('Error deleting exam:', safeErrorCode(error));
     return false;
   }
   return true;
@@ -604,7 +607,7 @@ export async function getCanvasSettings(userId: string): Promise<CanvasSettings 
     .single();
   
   if (error && error.code !== 'PGRST116') {
-    console.error('Error fetching canvas settings:', error);
+    console.error('Error fetching canvas settings:', safeErrorCode(error));
   }
   return (data as CanvasSettings | null) || null;
 }
@@ -631,7 +634,7 @@ export async function upsertCanvasSettings(userId: string, settings: {
     .maybeSingle();
 
   if (updateError) {
-    console.error('Error updating canvas settings:', updateError);
+    console.error('Error updating canvas settings:', safeErrorCode(updateError));
     return null;
   }
   if (updated) return updated as CanvasSettings;
@@ -660,11 +663,11 @@ export async function upsertCanvasSettings(userId: string, settings: {
       .select('*')
       .single();
     if (!retryError) return retried as CanvasSettings;
-    console.error('Error retrying canvas settings update:', retryError);
+    console.error('Error retrying canvas settings update:', safeErrorCode(retryError));
     return null;
   }
 
-  console.error('Error inserting canvas settings:', insertError);
+  console.error('Error inserting canvas settings:', safeErrorCode(insertError));
   return null;
 }
 
@@ -692,7 +695,7 @@ export async function initializeCanvasSettings(userId: string, settings: {
   if (!error) return data as CanvasSettings;
   if (error.code === '23505') return getCanvasSettings(userId);
 
-  console.error('Error initializing canvas settings:', error);
+  console.error('Error initializing canvas settings:', safeErrorCode(error));
   return null;
 }
 
@@ -728,7 +731,7 @@ export async function migrateCanvasSyncInterval(
     .maybeSingle();
 
   if (error) {
-    console.error('Error migrating Canvas sync interval:', error);
+    console.error('Error migrating Canvas sync interval:', safeErrorCode(error));
     return null;
   }
 
@@ -746,7 +749,7 @@ export async function deleteCanvasSettings(userId: string): Promise<boolean> {
     .eq('user_id', userId);
   
   if (error) {
-    console.error('Error deleting canvas settings:', error);
+    console.error('Error deleting canvas settings:', safeErrorCode(error));
     return false;
   }
   return true;
@@ -781,7 +784,7 @@ export async function getTimerState(userId: string): Promise<TimerState | null> 
     .single();
 
   if (error && error.code !== 'PGRST116') {
-    console.error('Error fetching timer state:', error);
+    console.error('Error fetching timer state:', safeErrorCode(error));
     throw error;
   }
   return (data as TimerState | null) || null;
@@ -807,7 +810,7 @@ export async function upsertTimerState(userId: string, state: Omit<TimerState, '
     .single();
 
   if (error) {
-    console.error('Error upserting timer state:', error);
+    console.error('Error upserting timer state:', safeErrorCode(error));
     return null;
   }
   return data as TimerState | null;
@@ -819,7 +822,7 @@ export async function deleteTimerState(userId: string): Promise<boolean> {
   });
 
   if (error || data !== true) {
-    console.error('Error deleting timer state:', error);
+    console.error('Error deleting timer state:', safeErrorCode(error));
     return false;
   }
   return true;
@@ -872,7 +875,7 @@ export async function sendFriendRequest(userId: string, friendId: string): Promi
     .insert({ user_id: userId, friend_id: friendId, status: 'pending' });
 
   if (error) {
-    console.error('Error sending friend request:', error);
+    console.error('Error sending friend request:', safeErrorCode(error));
     return false;
   }
   return true;
@@ -892,7 +895,7 @@ export async function respondToFriendRequest(friendshipId: string, accept: boole
     .maybeSingle();
 
   if (error || !data) {
-    console.error('Error responding to friend request:', error);
+    console.error('Error responding to friend request:', safeErrorCode(error));
     return false;
   }
   return true;
@@ -911,7 +914,7 @@ export async function removeFriend(friendshipId: string): Promise<boolean> {
     .maybeSingle();
 
   if (error || !data) {
-    console.error('Error removing friend:', error);
+    console.error('Error removing friend:', safeErrorCode(error));
     return false;
   }
   return true;
@@ -925,7 +928,7 @@ export async function searchUsersByEmail(query: string, currentUserId: string): 
     .rpc('search_profiles_for_friendship', { search_query: normalizedQuery });
 
   if (error) {
-    console.error('Error searching users:', error);
+    console.error('Error searching users:', safeErrorCode(error));
     return [];
   }
   return (data || []) as FriendSearchResult[];
@@ -938,7 +941,7 @@ export async function getCurrentUser() {
   
   const { data: { user }, error } = await db.auth.getUser();
   if (error) {
-    console.error('Error getting current user:', error);
+    console.error('Error getting current user:', safeErrorCode(error));
     return null;
   }
   return user;
@@ -979,11 +982,7 @@ export async function signUp(email: string, password: string, fullName?: string)
 
 export async function signOut() {
   requireSupabaseAvailable();
-  
-  const { error } = await db.auth.signOut();
-  if (error) {
-    throw error;
-  }
+  return signOutWithLocalFallback(db.auth, clearSupabaseBrowserAuthStorage, AUTH_ACTION_TIMEOUT_MS);
 }
 
 export async function signInWithGoogle() {
@@ -1048,7 +1047,7 @@ export async function getResumeItems(userId: string): Promise<ResumeItem[]> {
     .order('sort_order', { ascending: true });
   if (error) {
     if (isAbortError(error)) return [];
-    console.error('getResumeItems::', error); return [];
+    console.error('getResumeItems::', safeErrorCode(error)); return [];
   }
   return data ?? [];
 }
@@ -1065,7 +1064,7 @@ export async function upsertResumeItem(
     .single();
   if (error) {
     if (isAbortError(error)) return null;
-    console.error('upsertResumeItem::', error); return null;
+    console.error('upsertResumeItem::', safeErrorCode(error)); return null;
   }
   return data;
 }
@@ -1074,7 +1073,7 @@ export async function deleteResumeItem(id: string): Promise<boolean> {
   const { error } = await db.from('resume_items').delete().eq('id', id);
   if (error) {
     if (isAbortError(error)) return false;
-    console.error('deleteResumeItem::', error); return false;
+    console.error('deleteResumeItem::', safeErrorCode(error)); return false;
   }
   return true;
 }
@@ -1088,7 +1087,7 @@ export async function getCollegeCourses(userId: string): Promise<CollegeCourse[]
     .order('created_at', { ascending: true });
   if (error) {
     if (isAbortError(error)) return [];
-    console.error('getCollegeCourses::', error); return [];
+    console.error('getCollegeCourses::', safeErrorCode(error)); return [];
   }
   return data ?? [];
 }
@@ -1103,7 +1102,7 @@ export async function createCollegeCourse(
     .single();
   if (error) {
     if (isAbortError(error)) return null;
-    console.error('createCollegeCourse::', error); return null;
+    console.error('createCollegeCourse::', safeErrorCode(error)); return null;
   }
   return data;
 }
@@ -1120,7 +1119,7 @@ export async function updateCollegeCourse(
     .single();
   if (error) {
     if (isAbortError(error)) return null;
-    console.error('updateCollegeCourse::', error); return null;
+    console.error('updateCollegeCourse::', safeErrorCode(error)); return null;
   }
   return data;
 }
@@ -1129,7 +1128,7 @@ export async function deleteCollegeCourse(id: string): Promise<boolean> {
   const { error } = await db.from('college_courses').delete().eq('id', id);
   if (error) {
     if (isAbortError(error)) return false;
-    console.error('deleteCollegeCourse::', error); return false;
+    console.error('deleteCollegeCourse::', safeErrorCode(error)); return false;
   }
   return true;
 }
@@ -1143,7 +1142,7 @@ export async function getExtracurriculars(userId: string): Promise<Extracurricul
     .order('sort_order', { ascending: true });
   if (error) {
     if (isAbortError(error)) return [];
-    console.error('getExtracurriculars::', error); return [];
+    console.error('getExtracurriculars::', safeErrorCode(error)); return [];
   }
   return data ?? [];
 }
@@ -1158,7 +1157,7 @@ export async function createExtracurricular(
     .single();
   if (error) {
     if (isAbortError(error)) return null;
-    console.error('createExtracurricular::', error); return null;
+    console.error('createExtracurricular::', safeErrorCode(error)); return null;
   }
   return data;
 }
@@ -1175,7 +1174,7 @@ export async function updateExtracurricular(
     .single();
   if (error) {
     if (isAbortError(error)) return null;
-    console.error('updateExtracurricular::', error); return null;
+    console.error('updateExtracurricular::', safeErrorCode(error)); return null;
   }
   return data;
 }
@@ -1184,7 +1183,7 @@ export async function deleteExtracurricular(id: string): Promise<boolean> {
   const { error } = await db.from('extracurriculars').delete().eq('id', id);
   if (error) {
     if (isAbortError(error)) return false;
-    console.error('deleteExtracurricular::', error); return false;
+    console.error('deleteExtracurricular::', safeErrorCode(error)); return false;
   }
   return true;
 }
@@ -1198,7 +1197,7 @@ export async function getCollegeApplications(userId: string): Promise<CollegeApp
     .order('deadline', { ascending: true, nullsFirst: false });
   if (error) {
     if (isAbortError(error)) return [];
-    console.error('getCollegeApplications::', error); return [];
+    console.error('getCollegeApplications::', safeErrorCode(error)); return [];
   }
   return data ?? [];
 }
@@ -1213,7 +1212,7 @@ export async function createCollegeApplication(
     .single();
   if (error) {
     if (isAbortError(error)) return null;
-    console.error('createCollegeApplication::', error); return null;
+    console.error('createCollegeApplication::', safeErrorCode(error)); return null;
   }
   return data;
 }
@@ -1230,7 +1229,7 @@ export async function updateCollegeApplication(
     .single();
   if (error) {
     if (isAbortError(error)) return null;
-    console.error('updateCollegeApplication::', error); return null;
+    console.error('updateCollegeApplication::', safeErrorCode(error)); return null;
   }
   return data;
 }
@@ -1239,7 +1238,7 @@ export async function deleteCollegeApplication(id: string): Promise<boolean> {
   const { error } = await db.from('college_applications').delete().eq('id', id);
   if (error) {
     if (isAbortError(error)) return false;
-    console.error('deleteCollegeApplication::', error); return false;
+    console.error('deleteCollegeApplication::', safeErrorCode(error)); return false;
   }
   return true;
 }
@@ -1253,7 +1252,7 @@ export async function getTestScores(userId: string): Promise<TestScore[]> {
     .order('date_taken', { ascending: false, nullsFirst: false });
   if (error) {
     if (isAbortError(error)) return [];
-    console.error('getTestScores::', error); return [];
+    console.error('getTestScores::', safeErrorCode(error)); return [];
   }
   return data ?? [];
 }
@@ -1268,7 +1267,7 @@ export async function createTestScore(
     .single();
   if (error) {
     if (isAbortError(error)) return null;
-    console.error('createTestScore::', error); return null;
+    console.error('createTestScore::', safeErrorCode(error)); return null;
   }
   return data;
 }
@@ -1277,7 +1276,7 @@ export async function deleteTestScore(id: string): Promise<boolean> {
   const { error } = await db.from('test_scores').delete().eq('id', id);
   if (error) {
     if (isAbortError(error)) return false;
-    console.error('deleteTestScore::', error); return false;
+    console.error('deleteTestScore::', safeErrorCode(error)); return false;
   }
   return true;
 }
@@ -1291,7 +1290,7 @@ export async function getRecommendations(userId: string): Promise<Recommendation
     .order('created_at', { ascending: true });
   if (error) {
     if (isAbortError(error)) return [];
-    console.error('getRecommendations::', error); return [];
+    console.error('getRecommendations::', safeErrorCode(error)); return [];
   }
   return data ?? [];
 }
@@ -1306,7 +1305,7 @@ export async function createRecommendation(
     .single();
   if (error) {
     if (isAbortError(error)) return null;
-    console.error('createRecommendation::', error); return null;
+    console.error('createRecommendation::', safeErrorCode(error)); return null;
   }
   return data;
 }
@@ -1323,7 +1322,7 @@ export async function updateRecommendation(
     .single();
   if (error) {
     if (isAbortError(error)) return null;
-    console.error('updateRecommendation::', error); return null;
+    console.error('updateRecommendation::', safeErrorCode(error)); return null;
   }
   return data;
 }
@@ -1332,7 +1331,7 @@ export async function deleteRecommendation(id: string): Promise<boolean> {
   const { error } = await db.from('recommendations').delete().eq('id', id);
   if (error) {
     if (isAbortError(error)) return false;
-    console.error('deleteRecommendation::', error); return false;
+    console.error('deleteRecommendation::', safeErrorCode(error)); return false;
   }
   return true;
 }
@@ -1346,7 +1345,7 @@ export async function getStudySets(userId: string): Promise<StudySet[]> {
     .order('created_at', { ascending: false });
   if (error) {
     if (isAbortError(error)) return [];
-    console.error('getStudySets::', error); return [];
+    console.error('getStudySets::', safeErrorCode(error)); return [];
   }
   // cast jsonb → string[]
   return ((data ?? []) as Array<StudySet & { linked_task_ids?: string[] | null }>)
@@ -1363,7 +1362,7 @@ export async function createStudySet(
     .single();
   if (error) {
     if (isAbortError(error)) return null;
-    console.error('createStudySet::', error); return null;
+    console.error('createStudySet::', safeErrorCode(error)); return null;
   }
   return { ...data, linked_task_ids: data.linked_task_ids ?? [] };
 }
@@ -1380,7 +1379,7 @@ export async function updateStudySet(
     .single();
   if (error) {
     if (isAbortError(error)) return null;
-    console.error('updateStudySet::', error); return null;
+    console.error('updateStudySet::', safeErrorCode(error)); return null;
   }
   return { ...data, linked_task_ids: data.linked_task_ids ?? [] };
 }
@@ -1389,7 +1388,7 @@ export async function deleteStudySet(id: string): Promise<boolean> {
   const { error } = await db.from('study_sets').delete().eq('id', id);
   if (error) {
     if (isAbortError(error)) return false;
-    console.error('deleteStudySet::', error); return false;
+    console.error('deleteStudySet::', safeErrorCode(error)); return false;
   }
   return true;
 }
@@ -1403,7 +1402,7 @@ export async function getFlashcards(studySetId: string): Promise<Flashcard[]> {
     .order('sort_order', { ascending: true });
   if (error) {
     if (isAbortError(error)) return [];
-    console.error('getFlashcards::', error); return [];
+    console.error('getFlashcards::', safeErrorCode(error)); return [];
   }
   return data ?? [];
 }
@@ -1418,7 +1417,7 @@ export async function createFlashcard(
     .single();
   if (error) {
     if (isAbortError(error)) return null;
-    console.error('createFlashcard::', error); return null;
+    console.error('createFlashcard::', safeErrorCode(error)); return null;
   }
   return data;
 }
@@ -1427,7 +1426,7 @@ export async function deleteFlashcard(id: string): Promise<boolean> {
   const { error } = await db.from('flashcards').delete().eq('id', id);
   if (error) {
     if (isAbortError(error)) return false;
-    console.error('deleteFlashcard::', error); return false;
+    console.error('deleteFlashcard::', safeErrorCode(error)); return false;
   }
   return true;
 }
@@ -1441,7 +1440,7 @@ export async function getMCQQuestions(studySetId: string): Promise<MCQQuestion[]
     .order('sort_order', { ascending: true });
   if (error) {
     if (isAbortError(error)) return [];
-    console.error('getMCQQuestions::', error); return [];
+    console.error('getMCQQuestions::', safeErrorCode(error)); return [];
   }
   return ((data ?? []) as Array<MCQQuestion & { options?: string[] | null }>)
     .map((question) => ({ ...question, options: question.options ?? [] }));
@@ -1457,7 +1456,7 @@ export async function createMCQQuestion(
     .single();
   if (error) {
     if (isAbortError(error)) return null;
-    console.error('createMCQQuestion::', error); return null;
+    console.error('createMCQQuestion::', safeErrorCode(error)); return null;
   }
   return { ...data, options: data.options ?? [] };
 }
@@ -1466,7 +1465,7 @@ export async function deleteMCQQuestion(id: string): Promise<boolean> {
   const { error } = await db.from('mcq_questions').delete().eq('id', id);
   if (error) {
     if (isAbortError(error)) return false;
-    console.error('deleteMCQQuestion::', error); return false;
+    console.error('deleteMCQQuestion::', safeErrorCode(error)); return false;
   }
   return true;
 }
@@ -1480,7 +1479,7 @@ export async function getStudySetFiles(studySetId: string): Promise<StudySetFile
     .order('created_at', { ascending: true });
   if (error) {
     if (isAbortError(error)) return [];
-    console.error('getStudySetFiles::', error); return [];
+    console.error('getStudySetFiles::', safeErrorCode(error)); return [];
   }
   return data ?? [];
 }
@@ -1495,7 +1494,7 @@ export async function createStudySetFile(
     .single();
   if (error) {
     if (isAbortError(error)) return null;
-    console.error('createStudySetFile::', error); return null;
+    console.error('createStudySetFile::', safeErrorCode(error)); return null;
   }
   return data;
 }
@@ -1506,7 +1505,7 @@ export async function deleteStudySetFile(id: string, storagePath: string): Promi
   const { error } = await db.from('study_set_files').delete().eq('id', id);
   if (error) {
     if (isAbortError(error)) return false;
-    console.error('deleteStudySetFile::', error); return false;
+    console.error('deleteStudySetFile::', safeErrorCode(error)); return false;
   }
   return true;
 }
@@ -1524,7 +1523,7 @@ export async function uploadStudyFile(
     .from('study-materials')
     .upload(path, file, { upsert: false });
 
-  if (uploadError) { console.error('uploadStudyFile:', uploadError); return null; }
+  if (uploadError) { console.error('uploadStudyFile:', safeErrorCode(uploadError)); return null; }
 
   const { data, error: signedUrlError } = await db.storage
     .from('study-materials')
@@ -1545,7 +1544,7 @@ export async function getSatActProgress(userId: string): Promise<SatActProgress[
     .eq('user_id', userId);
   if (error) {
     if (isAbortError(error)) return [];
-    console.error('getSatActProgress::', error); return [];
+    console.error('getSatActProgress::', safeErrorCode(error)); return [];
   }
   return data ?? [];
 }
@@ -1570,7 +1569,7 @@ export async function upsertSatActProgress(
     .single();
   if (error) {
     if (isAbortError(error)) return null;
-    console.error('upsertSatActProgress::', error); return null;
+    console.error('upsertSatActProgress::', safeErrorCode(error)); return null;
   }
   return data;
 }

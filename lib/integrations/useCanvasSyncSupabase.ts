@@ -226,14 +226,14 @@ export function useCanvasSyncSupabase(options: UseCanvasSyncOptions): UseCanvasS
           autoSyncInterval,
         });
         setStateOwnerId(userId);
-      } catch (err) {
-        console.error('Error loading Canvas settings:', err);
+      } catch {
+        console.error('Could not load Canvas settings');
         if (initialLoad && !cancelled) {
           setAssignments([]);
           setSettings(emptyCanvasSettings(defaultInterval));
           setNewAssignmentsCount(0);
           setRemovedAssignmentsCount(0);
-          setError(err instanceof Error ? err.message : 'Could not load Canvas settings.');
+          setError('Could not load Canvas settings. Try again shortly.');
           setStateOwnerId(userId);
         }
       } finally {
@@ -401,8 +401,8 @@ export function useCanvasSyncSupabase(options: UseCanvasSyncOptions): UseCanvasS
       const { assignments: completedAssignments, removedCount } = completedSync;
       void Promise.resolve()
         .then(() => onSyncComplete(completedAssignments, removedCount))
-        .catch(refreshError => {
-          console.error('Canvas synced, but app data could not be refreshed:', refreshError);
+        .catch(() => {
+          console.error('Canvas synced, but app data could not be refreshed');
         });
     }
   }, [accountSession.generation, settings.icalUrl, stateOwnerId, userId, onSyncComplete, onSyncError]);

@@ -1,14 +1,12 @@
 import 'server-only';
 
-import { lookup } from 'node:dns/promises';
-import { isIP } from 'node:net';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
   hydrateCanvasDueDate,
   parseICalFile,
   type CanvasAssignment,
 } from '@/lib/integrations/canvas';
-import { normalizeCanvasFeedUrl } from '@/lib/integrations/canvas-feed-url';
+import { fetchCanvasFeed } from '@/lib/integrations/canvas-feed-fetch';
 import {
   countCanvasCourses,
   countCanvasCoursesForCompleteSnapshot,
@@ -36,9 +34,6 @@ const SUBJECT_COLORS = [
   '#6366f1', '#ec4899', '#f59e0b', '#10b981', '#3b82f6',
   '#8b5cf6', '#ef4444', '#14b8a6', '#f97316', '#06b6d4',
 ];
-const FETCH_TIMEOUT_MS = 15_000;
-const MAX_FEED_BYTES = 5 * 1024 * 1024;
-const MAX_REDIRECTS = 3;
 // A first Canvas import can contain hundreds of events. Keeping this bounded
 // avoids a long serial chain of Supabase requests without creating an
 // unbounded burst (the background route also syncs a few users in parallel).
@@ -230,181 +225,6 @@ async function mapWithConcurrency<T, R>(
   return results;
 }
 
-function isPrivateOrReservedIpv4(address: string): boolean {
-  const octets = address.split('.').map(Number);
-  if (octets.length !== 4 || octets.some(octet => !Number.isInteger(octet) || octet < 0 || octet > 255)) {
-    return true;
-  }
-
-  const [a, b] = octets;
-  return a === 0
-    || a === 10
-    || a === 127
-    || (a === 100 && b >= 64 && b <= 127)
-    || (a === 169 && b === 254)
-    || (a === 172 && b >= 16 && b <= 31)
-    || (a === 192 && b === 0)
-    || (a === 192 && b === 168)
-    || (a === 198 && (b === 18 || b === 19))
-    || a >= 224;
-}
-
-function isPrivateOrReservedIp(address: string): boolean {
-  const version = isIP(address);
-  if (version === 4) return isPrivateOrReservedIpv4(address);
-  if (version !== 6) return true;
-
-  const normalized = address.toLowerCase();
-  if (normalized === '::' || normalized === '::1') return true;
-  if (normalized.startsWith('::ffff:')) return true;
-  if (normalized.startsWith('fc') || normalized.startsWith('fd')) return true;
-  if (/^fe[89ab]/.test(normalized)) return true;
-
-  const mappedIpv4 = normalized.match(/::ffff:(\d+\.\d+\.\d+\.\d+)$/)?.[1];
-  return mappedIpv4 ? isPrivateOrReservedIpv4(mappedIpv4) : false;
-}
-
-function withAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
-  if (signal.aborted) return Promise.reject(new DOMException('Aborted', 'AbortError'));
-
-  return new Promise<T>((resolve, reject) => {
-    const handleAbort = () => {
-      cleanup();
-      reject(new DOMException('Aborted', 'AbortError'));
-    };
-    const cleanup = () => signal.removeEventListener('abort', handleAbort);
-    signal.addEventListener('abort', handleAbort, { once: true });
-    promise.then(
-      value => {
-        cleanup();
-        resolve(value);
-      },
-      error => {
-        cleanup();
-        reject(error);
-      }
-    );
-  });
-}
-
-async function assertSafeFeedUrl(
-  rawUrl: string,
-  signal: AbortSignal
-): Promise<URL> {
-  const url = new URL(normalizeCanvasFeedUrl(rawUrl));
-
-  const hostname = url.hostname.toLowerCase().replace(/\.$/, '').replace(/^\[|\]$/g, '');
-  if (
-    hostname === 'localhost'
-    || hostname.endsWith('.localhost')
-    || hostname.endsWith('.local')
-    || hostname.endsWith('.internal')
-    || hostname.endsWith('.home.arpa')
-  ) {
-    throw new Error('Canvas feed URL cannot use a private hostname');
-  }
-
-  if (isIP(hostname)) {
-    if (isPrivateOrReservedIp(hostname)) {
-      throw new Error('Canvas feed URL cannot use a private network address');
-    }
-    return url;
-  }
-
-  let addresses: Array<{ address: string; family: number }>;
-  try {
-    addresses = await withAbort(
-      lookup(hostname, { all: true, verbatim: true }),
-      signal
-    );
-  } catch {
-    throw new Error('Canvas feed hostname could not be resolved');
-  }
-
-  if (addresses.length === 0 || addresses.some(result => isPrivateOrReservedIp(result.address))) {
-    throw new Error('Canvas feed hostname resolved to a private network address');
-  }
-
-  return url;
-}
-
-async function readLimitedResponse(response: Response): Promise<string> {
-  const declaredLength = Number(response.headers.get('content-length'));
-  if (Number.isFinite(declaredLength) && declaredLength > MAX_FEED_BYTES) {
-    throw new Error('Canvas feed is larger than the 5 MB limit');
-  }
-
-  if (!response.body) return '';
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let byteCount = 0;
-  let content = '';
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    byteCount += value.byteLength;
-    if (byteCount > MAX_FEED_BYTES) {
-      await reader.cancel();
-      throw new Error('Canvas feed is larger than the 5 MB limit');
-    }
-    content += decoder.decode(value, { stream: true });
-  }
-
-  return content + decoder.decode();
-}
-
-async function fetchCanvasFeed(rawUrl: string): Promise<string> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-
-  try {
-    let currentUrl = await assertSafeFeedUrl(rawUrl, controller.signal);
-
-    for (let redirectCount = 0; redirectCount <= MAX_REDIRECTS; redirectCount++) {
-      const response = await fetch(currentUrl, {
-        headers: { Accept: 'text/calendar, text/plain;q=0.9' },
-        redirect: 'manual',
-        cache: 'no-store',
-        signal: controller.signal,
-      });
-
-      if ([301, 302, 303, 307, 308].includes(response.status)) {
-        if (redirectCount === MAX_REDIRECTS) {
-          throw new Error('Canvas feed redirected too many times');
-        }
-        const location = response.headers.get('location');
-        if (!location) throw new Error('Canvas feed returned an invalid redirect');
-        currentUrl = await assertSafeFeedUrl(
-          new URL(location, currentUrl).toString(),
-          controller.signal
-        );
-        continue;
-      }
-
-      if (!response.ok) {
-        throw new Error(`Canvas feed returned ${response.status} ${response.statusText}`.trim());
-      }
-
-      const content = await readLimitedResponse(response);
-      if (!/^BEGIN:VCALENDAR\s*$/mi.test(content) || !/^END:VCALENDAR\s*$/mi.test(content)) {
-        throw new Error('Canvas feed did not return a valid iCalendar document');
-      }
-      return content;
-    }
-
-    throw new Error('Canvas feed could not be fetched');
-  } catch (error) {
-    if (controller.signal.aborted) {
-      throw new Error('Canvas feed request timed out');
-    }
-    throw error;
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
 async function loadCanvasAssignments(icalUrl: string): Promise<LoadedCanvasAssignments> {
   const content = await fetchCanvasFeed(icalUrl);
   const { beginCount: eventCount, endCount: eventEndCount } = countCanvasEventBoundaries(content);
@@ -572,7 +392,8 @@ async function syncCanvasUserWithLease(
 
       if (existing) {
         if (canvasTaskChanged(existing, taskValues)) {
-          const { error } = await admin.from('tasks').update(taskValues).eq('id', existing.id);
+          const { error } = await admin.from('tasks').update(taskValues)
+            .eq('id', existing.id).eq('user_id', setting.user_id).eq('source', 'canvas');
           if (error) throw new Error(`Could not update Canvas task: ${error.message}`);
           counts.updated = 1;
         }
@@ -617,7 +438,7 @@ async function syncCanvasUserWithLease(
               description: taskValues.description,
               exam_date: dueDate.toISOString(),
               subject_id: subjectId,
-            }).eq('id', existingExam.id);
+            }).eq('id', existingExam.id).eq('user_id', setting.user_id).eq('source', 'canvas');
             if (error) throw new Error(`Could not update Canvas exam: ${error.message}`);
             Object.assign(existingExam, {
               title: taskTitle,
@@ -725,13 +546,15 @@ async function syncCanvasUserWithLease(
 
   const orphanIds = orphanCleanupSkipped ? [] : candidateOrphanIds;
   if (orphanIds.length > 0) {
-    const { error } = await admin.from('tasks').delete().in('id', orphanIds);
+    const { error } = await admin.from('tasks').delete().in('id', orphanIds)
+      .eq('user_id', setting.user_id).eq('source', 'canvas');
     if (error) throw new Error(`Could not remove old Canvas tasks: ${error.message}`);
   }
 
   const orphanExamIds = orphanCleanupSkipped ? [] : candidateOrphanExamIds;
   if (orphanExamIds.length > 0) {
-    const { error } = await admin.from('exams').delete().in('id', orphanExamIds);
+    const { error } = await admin.from('exams').delete().in('id', orphanExamIds)
+      .eq('user_id', setting.user_id).eq('source', 'canvas');
     if (error) throw new Error(`Could not remove old Canvas exams: ${error.message}`);
   }
 
