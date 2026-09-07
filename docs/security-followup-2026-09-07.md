@@ -42,6 +42,15 @@ Vercel project `coolguy46s-projects/orderlyappp`, `www.myorderlyapp.com`.
 - Older incremental profile/trigger grants and search paths were tightened so
   applying them after the earlier security migration cannot reopen those RPCs.
   Worker installers now abort before scheduling if required settings are absent.
+- The hardened native HTTPS transport omitted the User-Agent that the previous
+  fetch transport supplied automatically. The 21:40 UTC live cycle identified
+  HTTP 403 for all nine connections. A two-request comparison against a
+  deliberately nonexistent public feed path reproduced Canvas's explicit
+  missing-User-Agent rejection; identifying Orderly reached the application's
+  invalid-feed response instead. Added a static, honest Orderly User-Agent on
+  every hop without including user or feed information. DNS pinning, redirect
+  validation, TLS verification, timeout and byte caps remain unchanged.
+  This matches [Instructure's documented client-identification requirement](https://community.instructure.com/en/discussion/664378/2026-api-and-cli-change-log).
 
 ## Applied-file evidence
 
@@ -77,8 +86,10 @@ destructive rollback was used. `schema.sql` was **not** run on production.
   signup/task/study writes, competition denial, Canvas cooldown/token fencing,
   deletion claim recovery, dispatcher configuration, and exact-job pause/resume.
   No real credentials, network requests, or live jobs are used by these tests.
-- Full `npm test` passed, including 58 security tests (the prior 49 plus eight
-  migration tests and one redacted-diagnostic test). After the UUID compatibility correction, the targeted
+- Full `npm test` passed after the final User-Agent correction, including 59
+  security tests (the prior 49 plus eight migration tests, one diagnostic test,
+  and one provider-identification regression). All 11 feed-transport tests pass,
+  including a fixture that rejects unidentified clients. After the UUID compatibility correction, the targeted
   database, migration-contract and follow-up tests passed again (33 tests).
 - Lint, TypeScript checking, and optimized `next build --webpack` passed.
   Webpack is the installed framework's supported local-build alternative to the
@@ -101,7 +112,9 @@ destructive rollback was used. `schema.sql` was **not** run on production.
   Its database rollout is verified; **successful feed imports are not yet
   verified**. Added fixed-stage feed diagnostics so logs distinguish DNS,
   connection, response-status, encoding and parsing failures without recording
-  a private feed URL, response body, or arbitrary provider error.
+  a private feed URL, response body, or arbitrary provider error. Those diagnostics
+  confirmed the client-identification defect described above; post-fix production
+  import verification is pending the final deployment and normal worker cycle.
 
 ## Owner actions still required
 

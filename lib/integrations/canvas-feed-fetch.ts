@@ -96,6 +96,10 @@ export function createCanvasFeedLoader(dependencies: FeedDependencies = {}) {
           maxHeaderSize: 16 * 1024,
           headers: {
             Accept: 'text/calendar, text/plain;q=0.9',
+            // Canvas rejects requests without a User-Agent. Native HTTPS does
+            // not supply fetch()'s default, so identify this client explicitly
+            // on every hop without including an account, feed URL or token.
+            'User-Agent': 'Orderly/1.0 (+https://www.myorderlyapp.com)',
             // Do not accept compressed streams that could evade the byte cap.
             'Accept-Encoding': 'identity',
           },

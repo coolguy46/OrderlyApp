@@ -76,7 +76,8 @@ test('pins the validated DNS address while preserving TLS hostname and no creden
     assert.equal(family, 4);
   });
   assert.equal(dnsCalls, 1, 'socket DNS lookup must not resolve attacker-controlled DNS a second time');
-  assert.deepEqual(Object.keys(options.headers).sort(), ['Accept', 'Accept-Encoding']);
+  assert.deepEqual(Object.keys(options.headers).sort(), ['Accept', 'Accept-Encoding', 'User-Agent']);
+  assert.equal(options.headers['User-Agent'], 'Orderly/1.0 (+https://www.myorderlyapp.com)');
 });
 
 test('rejects every mixed public/private DNS answer before any connection', async () => {
@@ -101,6 +102,23 @@ test('validates and independently pins legitimate redirects without leaking a Re
   assert.deepEqual(resolvedHosts, ['canvas.school.edu', 'school.instructure.com']);
   assert.equal(stub.streams.every(stream => stream.destroyed), true);
   assert.equal(stub.calls[1].options.headers.Referer, undefined);
+  for (const call of stub.calls) {
+    assert.equal(call.options.headers['User-Agent'], 'Orderly/1.0 (+https://www.myorderlyapp.com)');
+    assert.doesNotMatch(JSON.stringify(call.options.headers), /fixture-secret|new-secret|school\.edu/);
+  }
+});
+
+test('satisfies provider client-identification enforcement without changing transport safeguards', async () => {
+  let attempts = 0;
+  const guardedRequest = (target, options, callback) => {
+    attempts += 1;
+    const identified = options.headers['User-Agent'] === 'Orderly/1.0 (+https://www.myorderlyapp.com)';
+    const stub = transport([{ status: identified ? 200 : 403, body: identified ? feed : 'User-Agent required' }]);
+    return stub.request(target, options, callback);
+  };
+  const load = createCanvasFeedLoader({ request: guardedRequest, resolve: async () => publicAddresses });
+  assert.equal(await load(url), feed);
+  assert.equal(attempts, 1, 'identify the initial request instead of retrying blocked requests');
 });
 
 test('rejects unsafe redirects, including a public-looking host resolving privately', async () => {
