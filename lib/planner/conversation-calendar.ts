@@ -168,8 +168,18 @@ export class RecurringScopeError extends Error {
   }
 }
 
+export class TaskDeletionIntentError extends Error {
+  constructor() {
+    super('I can remove the scheduled time while keeping the task and its deadline. Erasing the task from the Tasks list is a separate action available on the Tasks page.');
+    this.name = 'TaskDeletionIntentError';
+  }
+}
+
 export function conversationValidationFeedback(error: unknown): string {
   const message = error instanceof Error ? error.message : 'The proposed operation was invalid.';
+  if (error instanceof TaskDeletionIntentError) {
+    return `${message} Review the user's intent: ordinary remove/cancel/take-off-calendar requests should be represented with action:remove for both tasks and events. Repair that representation without asking the user to say unschedule, and retain every named item in the bundle. If the user explicitly wants to erase the task record itself, explain the available Tasks-page action; do not silently replace it with schedule removal.`;
+  }
   return error instanceof RecurringScopeError
     ? `${message} This is a missing structured scope, not necessarily missing user permission. Review the full conversation, including the question the user just answered. If the user already requested or confirmed the whole series, repair with wholeSeries:true; do not ask again. If a particular occurrence was requested, supply its original occurrenceDate. Only clarify if scope is genuinely unresolved. Never expose field names to the user.`
     : message;
@@ -193,6 +203,12 @@ export function compileConversation(intent: ConversationIntent, calendar: Conver
   };
   for (const operation of intent.operations) {
     const op = { ...operation };
+    if (op.action === 'remove') op.action = op.entity === 'task' ? 'unschedule' : 'delete';
+    if (op.action === 'unschedule' && op.entity === 'event') op.action = 'delete';
+    if ((op.action === 'delete' || op.action === 'unschedule')
+      && (op.days !== undefined || op.recurrence !== undefined || op.repeatUntil !== undefined)) {
+      throw new Error('To change which weekdays repeat, update the repeat rule with the remaining weekdays. To remove one occurrence, choose its date; do not delete the series.');
+    }
     const working = applyWrites(calendar, writes);
     const task = op.id ? working.snapshot.tasks.find(task => task.id === op.id) : undefined;
     const event = op.id && working.snapshot.events.some(row => row.client_commitment_id === op.id)
@@ -214,7 +230,7 @@ export function compileConversation(intent: ConversationIntent, calendar: Conver
     if (op.action === 'convert' && task && (task.source !== 'manual' || task.recurrence !== 'none' || task.due_date || task.status === 'completed')) throw new Error('This is an assignment or repeating/completed task, not a disposable calendar task. Keep its deadline/history and offer a separate event instead of deleting it.');
     if (op.action === 'convert' && event && eventSchedule(event).recurrence !== 'none') throw new Error('This is a repeating event. Ask whether to convert a single occurrence or keep the series; do not delete the series.');
     if (op.action === 'delete') {
-      if (!event) throw new Error('Task deletion is not supported in chat. Use unschedule to keep the assignment.');
+      if (!event) throw new TaskDeletionIntentError();
       if (eventSchedule(event).recurrence !== 'none' && !op.wholeSeries) {
         if (!op.occurrenceDate) throw new RecurringScopeError();
         const targetDate = event.occurrenceOverrides?.[op.occurrenceDate]?.scheduledDate || op.occurrenceDate;
@@ -226,9 +242,30 @@ export function compileConversation(intent: ConversationIntent, calendar: Conver
     }
     if (op.action === 'unschedule') {
       if (!task) throw new Error('Only tasks can be unscheduled.');
-      if (task.recurrence !== 'none') throw new Error('Specify a recurring occurrence to move instead of unscheduling the whole series.');
-      writes.push({ entity: 'task', op: 'put', id: task.id, data: { scheduled_date: null, scheduled_start_at: null } });
-      lines.push(`Unscheduled **${task.title}**; the task and its deadline are unchanged.`);
+      const entry = existingSchedule;
+      const repeating = entry?.recurrence !== 'none' && !!entry;
+      const overrides = scheduleEntriesFromTasks([task], calendar.userId)[0]?.occurrenceOverrides || {};
+      let scope = '';
+      if (repeating && !op.wholeSeries) {
+        if (!op.occurrenceDate) throw new RecurringScopeError();
+        const target = overrides[op.occurrenceDate]?.scheduledDate || op.occurrenceDate;
+        const occurrences = buildScheduleOccurrences({ tasks: [task], entries: scheduleEntriesFromTasks([task], calendar.userId),
+          startDate: target, endDate: target, timeZone: zone });
+        const occurrence = [...occurrences.timed, ...occurrences.untimed].find(item => item.recurrenceSourceDate === op.occurrenceDate);
+        if (!occurrence) throw new Error('That recurring occurrence does not exist or was removed. Which date should come off the schedule?');
+        writes.push({ entity: 'task', op: 'put', id: task.id, data: {
+          schedule_occurrence_overrides: { ...overrides, [op.occurrenceDate]: { ...overrides[op.occurrenceDate], startAt: null } },
+        } });
+        scope = ` on ${occurrence.date}`;
+      } else {
+        writes.push({ entity: 'task', op: 'put', id: task.id, data: {
+          scheduled_date: repeating ? entry.scheduledDate : null,
+          scheduled_start_at: null,
+          schedule_occurrence_overrides: Object.fromEntries(Object.entries(overrides).map(([date, override]) => [date, { ...override, startAt: null }])),
+        } });
+        scope = repeating ? ' (all occurrences)' : '';
+      }
+      lines.push(`Removed **${task.title}**${scope} from the schedule; it remains in Tasks with its deadline unchanged.`);
       continue;
     }
     let title = op.title || task?.title || event?.title;
@@ -329,7 +366,7 @@ export function compileConversation(intent: ConversationIntent, calendar: Conver
     const task = after.snapshot.tasks.find(task => write.entity === 'task' && task.id === write.id);
     const event = commitments(after).find(event => write.entity === 'event' && event.id === write.id);
     const schedule = task ? scheduleEntriesFromTasks([task], calendar.userId)[0] : event ? eventSchedule(event) : undefined;
-    if (schedule?.scheduledDate) {
+    if (schedule?.scheduledDate && schedule.startAt) {
       const repeating = schedule.recurrence && schedule.recurrence !== 'none';
       const from = repeating && schedule.scheduledDate < today ? today : schedule.scheduledDate;
       const limit = addLocalDays(from, MAX_CALENDAR_DAYS - 1);
@@ -344,7 +381,8 @@ export function compileConversation(intent: ConversationIntent, calendar: Conver
     const overrides = task ? scheduleEntriesFromTasks([task], calendar.userId)[0]?.occurrenceOverrides : event?.occurrenceOverrides;
     for (const [source, override] of Object.entries(overrides || {})) {
       const target = override.scheduledDate || source;
-      if (!override.skipped) ranges.push({ from: target, through: target });
+      const hasTime = 'startAt' in override ? !!override.startAt : !!schedule?.startAt;
+      if (!override.skipped && hasTime) ranges.push({ from: target, through: target });
     }
   }
   const expand = (state: ConversationCalendar) => {

@@ -32,7 +32,7 @@ async function compile(relative) {
 await compile('lib/planner/conversation.ts');
 await compile('lib/planner/conversation-calendar.ts');
 const { parseConversationIntent, conversationSystemPrompt, readConversationRequest } = require(join(temporary, 'lib/planner/conversation.cjs'));
-const { calendarFromSnapshot, compileConversation, conversationFacts, calendarIntervals, conversationValidationFeedback, RecurringScopeError } = require(join(temporary, 'lib/planner/conversation-calendar.cjs'));
+const { calendarFromSnapshot, compileConversation, conversationFacts, calendarIntervals, conversationValidationFeedback, RecurringScopeError, TaskDeletionIntentError } = require(join(temporary, 'lib/planner/conversation-calendar.cjs'));
 const { buildScheduleOccurrences, localTimeFromIso } = require(join(temporary, 'lib/schedule/selectors.cjs'));
 const { scheduleEntriesFromTasks } = require(join(temporary, 'lib/schedule/persistence.cjs'));
 await compile('lib/schedule/calendar-navigation.ts');
@@ -203,6 +203,90 @@ test('changing repeat weekdays edits the series even if the model omits redundan
   assert.match(conversationValidationFeedback(new RecurringScopeError()), /including the question the user just answered/);
   assert.doesNotMatch(new RecurringScopeError().message, /wholeSeries|occurrenceDate/);
   await turn('delete series', [{ action: 'delete', entity: 'event', id, wholeSeries: true }]);
+});
+
+test('one remove request handles a task and multiple events atomically, persists, retries and undoes', async () => {
+  const created = await turn('add three items', [
+    { action: 'create', entity: 'task', title: 'Application essay', date: '2027-04-03', start: '15:00', durationMinutes: 90 },
+    { action: 'create', entity: 'event', title: 'Adviser meeting', date: '2027-04-03', start: '17:00', end: '17:30' },
+    { action: 'create', entity: 'event', title: 'Dance rehearsal', date: '2027-04-03', start: '18:00', end: '19:00' },
+  ]);
+  const task = created.state.tasks.find(t => t.title === 'Application essay');
+  const parsed = intent(created.receipt.items.map(item => ({ action: 'remove', entity: item.entity, id: item.id })));
+  const compiled = compileConversation(parsed, calendarFromSnapshot(created.state, owner, NOW, zone));
+  assert.equal(compiled.writes.length, 3);
+  const requestId = randomUUID();
+  const removed = await apply(compiled, created.state.revision, requestId, parsed);
+  const retry = await apply(compiled, created.state.revision, requestId, parsed);
+  assert.deepEqual(retry, removed);
+  const reloaded = await snapshot();
+  assert.equal(reloaded.tasks.find(t => t.id === task.id).scheduled_start_at, null);
+  assert.equal(reloaded.tasks.find(t => t.id === task.id).due_date, task.due_date);
+  assert.equal(reloaded.tasks.find(t => t.id === task.id).status, task.status);
+  assert.ok(created.receipt.items.filter(i => i.entity === 'event').every(i => !reloaded.events.some(e => e.client_commitment_id === i.id)));
+  assert.match(removed.reply, /remains in Tasks/);
+  const restored = await undo(removed);
+  const afterUndo = await snapshot();
+  assert.equal(afterUndo.tasks.find(t => t.id === task.id).scheduled_start_at, task.scheduled_start_at);
+  assert.ok(created.receipt.items.filter(i => i.entity === 'event').every(i => afterUndo.events.some(e => e.client_commitment_id === i.id)));
+  await apply({ writes: created.receipt.undoOperations, reply: 'cleanup', items: [] }, restored.revision);
+});
+
+test('removing one moved repeating task occurrence preserves its siblings; removing all clears override times too', async () => {
+  const created = await turn('add recurring study', [{ action: 'create', entity: 'task', title: 'Language practice', date: '2027-05-04', start: '18:00', durationMinutes: 30, recurrence: 'weekly', days: [2,4], repeatUntil: '2027-05-31' }]);
+  const id = created.receipt.items[0].id;
+  const moved = await turn('move a session', [{ action: 'update', entity: 'task', id, occurrenceDate: '2027-05-06', date: '2027-05-07', title: 'Special practice' }]);
+  const removed = await turn('remove this session', [{ action: 'remove', entity: 'task', id, occurrenceDate: '2027-05-06' }]);
+  const occurrences = state => {
+    const task = state.tasks.find(t => t.id === id);
+    return buildScheduleOccurrences({ tasks: [task], entries: scheduleEntriesFromTasks([task], owner), startDate: '2027-05-01', endDate: '2027-05-31', timeZone: zone });
+  };
+  assert.ok(occurrences(removed.state).untimed.some(i => i.date === '2027-05-07' && i.title === 'Special practice'));
+  assert.ok(occurrences(removed.state).timed.some(i => i.date === '2027-05-11'));
+  const calendar = calendarFromSnapshot(removed.state, owner, NOW, zone);
+  assert.throws(() => compileConversation(intent([{ action: 'remove', entity: 'task', id }]), calendar), RecurringScopeError);
+  assert.throws(() => compileConversation(intent([{ action: 'remove', entity: 'task', id, occurrenceDate: '2027-05-08' }]), calendar), /does not exist/);
+  await undo(removed.receipt);
+  const all = await turn('take all sessions off the schedule', [{ action: 'remove', entity: 'task', id, wholeSeries: true }]);
+  assert.equal(occurrences(all.state).timed.length, 0);
+  assert.equal(occurrences(all.state).untimed.length, occurrences(moved.state).timed.length);
+  const task = all.state.tasks.find(t => t.id === id);
+  assert.deepEqual(task.recurrence_days, [2,4]);
+  assert.equal(task.schedule_recurrence_end_date, '2027-05-31');
+  assert.equal(task.schedule_occurrence_overrides['2027-05-06'].startAt, null);
+  await apply({ writes: created.receipt.undoOperations, reply: 'cleanup', items: [] }, all.state.revision);
+});
+
+test('calendar removal preserves imported deadlines, completion history and account ownership', async () => {
+  const id = randomUUID();
+  await db.query(`insert into tasks(id,user_id,title,source,status,completed_at,due_date,due_time,scheduled_date,scheduled_start_at,duration_seconds)
+    values($1,$2,'Imported assignment','canvas','completed','2026-09-05T20:00:00Z','2026-09-05T22:00:00Z','15:00','2026-09-05','2026-09-05T21:00:00Z',1800)`, [id, owner]);
+  const before = await snapshot();
+  const calendar = calendarFromSnapshot(before, owner, NOW, zone);
+  assert.throws(() => compileConversation(intent([{ action: 'remove', entity: 'task', id: randomUUID() }]), calendar), /no longer exists in this account/);
+  assert.throws(() => compileConversation(intent([{ action: 'delete', entity: 'task', id }]), calendar), TaskDeletionIntentError);
+  assert.match(conversationValidationFeedback(new TaskDeletionIntentError()), /without asking the user to say unschedule/);
+  const removed = await turn('take that imported task off my calendar', [{ action: 'remove', entity: 'task', id }]);
+  const previous = before.tasks.find(t => t.id === id), saved = removed.state.tasks.find(t => t.id === id);
+  for (const key of ['source','status','completed_at','due_date','due_time','title']) assert.equal(saved[key], previous[key]);
+  assert.equal(saved.scheduled_start_at, null);
+  await undo(removed.receipt);
+  assert.equal((await snapshot()).tasks.find(t => t.id === id).scheduled_start_at, previous.scheduled_start_at);
+  await db.query('delete from tasks where id=$1', [id]);
+});
+
+test('event removal accepts ordinary unschedule wording and preserves recurring scope', async () => {
+  const created = await turn('create a class', [{ action: 'create', entity: 'event', title: 'Art class', date: '2027-06-05', start: '09:00', end: '10:00', recurrence: 'weekly', days: [6], repeatUntil: '2027-06-26' }]);
+  const id = created.receipt.items[0].id;
+  const calendar = calendarFromSnapshot(created.state, owner, NOW, zone);
+  assert.throws(() => compileConversation(intent([{ action: 'remove', entity: 'event', id }]), calendar), RecurringScopeError);
+  assert.throws(() => compileConversation(intent([{ action: 'remove', entity: 'event', id, days: [6] }]), calendar), /remaining weekdays/);
+  const removed = await turn('unschedule next Saturday class', [{ action: 'unschedule', entity: 'event', id, occurrenceDate: '2027-06-12' }]);
+  const intervals = calendarIntervals(calendarFromSnapshot(removed.state, owner, NOW, zone), '2027-06-05', '2027-06-26').filter(i => i.owner === `event:${id}`);
+  assert.equal(intervals.length, 3);
+  assert.ok(intervals.every(i => i.sourceDate !== '2027-06-12'));
+  await turn('remove all remaining classes', [{ action: 'remove', entity: 'event', id, wholeSeries: true }]);
+  assert.ok(!(await snapshot()).events.some(e => e.client_commitment_id === id));
 });
 
 test('untimed recurrence and monthly tasks retain boundaries; single-occurrence task edits preserve the task and deadline', async () => {
