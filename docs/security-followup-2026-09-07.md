@@ -107,14 +107,21 @@ destructive rollback was used. `schema.sql` was **not** run on production.
 - The 21:30 UTC worker cycle returned HTTP 200 with `claimed:0, failed:0` for
   the corrected deletion worker, with no pending requests. This verifies the
   real worker/secret/queue connection without deleting an account.
-- Canvas acquired its database locks for all nine enabled connections, but
-  those import invocations returned `synced:0, failed:1` despite HTTP 200.
-  Its database rollout is verified; **successful feed imports are not yet
-  verified**. Added fixed-stage feed diagnostics so logs distinguish DNS,
+- Initially Canvas acquired its database locks for all nine enabled connections,
+  but those invocations returned `synced:0, failed:1` despite HTTP 200.
+  Added fixed-stage feed diagnostics so logs distinguish DNS,
   connection, response-status, encoding and parsing failures without recording
   a private feed URL, response body, or arbitrary provider error. Those diagnostics
-  confirmed the client-identification defect described above; post-fix production
-  import verification is pending the final deployment and normal worker cycle.
+  confirmed the client-identification defect described above.
+- The corrected code, commit `7be76b5f718063740a1db3847415f4fdac4d04be`, was
+  verified **Ready / Production** with `www.myorderlyapp.com` assigned at
+  21:46:44 UTC: [Vercel deployment](https://vercel.com/coolguy46s-projects/orderlyappp/E9wDGukMzr67jW2KjmoKNxkWJDW1).
+  At the normal **21:50 UTC** worker cycle, aggregate-only production checks
+  showed **all 9 enabled connections successfully synced since release**.
+  The nine Canvas responses were HTTP 200, each `synced:1, failed:0`.
+  The deletion worker also returned HTTP 200, `claimed:0, failed:0`.
+  This confirms actual persisted sync completion, not merely successful cron
+  dispatch or an HTTP 200 response. No extra manual feed run was triggered.
 
 ## Owner actions still required
 
