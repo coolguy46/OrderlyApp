@@ -125,6 +125,17 @@ DO $schedule$
 DECLARE
   existing_job_id BIGINT;
 BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM vault.decrypted_secrets
+    WHERE name = 'canvas_sync_cron_secret' AND length(decrypted_secret) > 0
+  ) OR NOT EXISTS (
+    SELECT 1 FROM vault.decrypted_secrets
+    WHERE name = 'canvas_sync_endpoint_url'
+      AND BTRIM(decrypted_secret) ~ '^https://[^/?#]+/api/canvas/background-sync$'
+  ) THEN
+    RAISE EXCEPTION 'Canvas scheduler preflight: configure the worker secret and exact HTTPS endpoint first';
+  END IF;
+
   FOR existing_job_id IN
     SELECT jobid
     FROM cron.job

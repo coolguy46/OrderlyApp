@@ -11,7 +11,7 @@ CREATE OR REPLACE FUNCTION public.dispatch_account_deletions()
 RETURNS BIGINT
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = pg_catalog, public, vault, net
+SET search_path = pg_catalog, public, pg_temp
 AS $function$
 DECLARE
   cron_secret TEXT;
@@ -67,6 +67,19 @@ DO $schedule$
 DECLARE
   existing_job_id BIGINT;
 BEGIN
+  -- Abort installation before activating a job with missing configuration.
+  -- Check values inside the database; never return credentials to the editor.
+  IF NOT EXISTS (
+    SELECT 1 FROM vault.decrypted_secrets
+    WHERE name = 'canvas_sync_cron_secret' AND length(decrypted_secret) > 0
+  ) OR NOT EXISTS (
+    SELECT 1 FROM vault.decrypted_secrets
+    WHERE name = 'account_deletion_endpoint_url'
+      AND BTRIM(decrypted_secret) ~ '^https://[^/?#]+/api/account/deletion/process$'
+  ) THEN
+    RAISE EXCEPTION 'Account deletion scheduler preflight: configure the worker secret and exact HTTPS endpoint first';
+  END IF;
+
   FOR existing_job_id IN
     SELECT jobid
     FROM cron.job

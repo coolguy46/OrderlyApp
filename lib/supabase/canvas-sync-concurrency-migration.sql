@@ -200,7 +200,7 @@ BEGIN
 END;
 $function$;
 
-REVOKE ALL ON FUNCTION public.protect_canvas_sync_internal_state() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.protect_canvas_sync_internal_state() FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.claim_canvas_sync(UUID) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.renew_canvas_sync_lease(UUID, UUID, BIGINT) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.complete_canvas_sync(UUID, UUID, BIGINT, TEXT, TIMESTAMP WITH TIME ZONE) FROM PUBLIC, anon, authenticated;

@@ -40,7 +40,7 @@ CREATE OR REPLACE FUNCTION public.claim_account_deletion_requests(
 RETURNS SETOF public.account_deletion_requests
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = pg_catalog, public
+SET search_path = pg_catalog, public, pg_temp
 AS $function$
 BEGIN
   IF request_limit IS NULL OR request_limit < 1 OR request_limit > 5 THEN
@@ -70,7 +70,9 @@ BEGIN
   UPDATE public.account_deletion_requests AS request
   SET status = 'processing',
       attempts = request.attempts + 1,
-      lease_token = public.uuid_generate_v4(),
+      -- Supabase may install uuid-ossp in extensions rather than public.
+      -- Use the built-in generator, independent of extension placement.
+      lease_token = pg_catalog.gen_random_uuid(),
       lease_expires_at = statement_timestamp() + interval '2 minutes',
       updated_at = statement_timestamp()
   FROM candidates

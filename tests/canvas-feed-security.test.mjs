@@ -155,3 +155,19 @@ test('deadline includes DNS and stalled response body, and errors never contain 
     return true;
   });
 });
+
+test('failed feeds retain only a fixed operational category, never provider text or a URL', async () => {
+  for (const [response,diagnostic] of [
+    [{status:403},'feed-http-403'],
+    [{headers:{'content-encoding':'gzip'}},'feed-encoding'],
+    [{body:'<html>private provider reply</html>'},'feed-document'],
+    [{error:new Error(`Secret ${url}`)},'feed-connect'],
+  ]) {
+    const stub=transport([response]);
+    await assert.rejects(createCanvasFeedLoader({request:stub.request,resolve:async()=>publicAddresses})(url),error=>{
+      assert.equal(error.diagnostic,diagnostic);
+      assert.doesNotMatch(JSON.stringify(error),/fixture-secret|school.edu|private provider reply/);
+      return true;
+    });
+  }
+});

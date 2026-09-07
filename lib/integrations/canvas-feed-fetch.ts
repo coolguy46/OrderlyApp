@@ -39,6 +39,18 @@ interface FeedDependencies {
   timeoutMs?: number;
 }
 
+type FeedStage = 'url' | 'dns' | 'address' | 'connect' | 'redirect' | 'http' | 'encoding' | 'size' | 'body' | 'document' | 'timeout';
+
+/** Fixed diagnostic categories only: never retain a private URL or raw cause. */
+export class CanvasFeedReadError extends Error {
+  readonly diagnostic: string;
+  constructor(stage: FeedStage, status?: number) {
+    super(stage === 'timeout' ? 'Canvas feed request timed out' : 'Canvas feed could not be read securely');
+    this.name = 'CanvasFeedReadError';
+    this.diagnostic = `feed-${stage}${stage === 'http' && Number.isInteger(status) && status! >= 100 && status! <= 599 ? `-${status}` : ''}`;
+  }
+}
+
 function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
   if (signal.aborted) return Promise.reject(new Error('Canvas feed request timed out'));
   return new Promise((resolve, reject) => {
@@ -57,11 +69,15 @@ export function createCanvasFeedLoader(dependencies: FeedDependencies = {}) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), dependencies.timeoutMs ?? FETCH_TIMEOUT_MS);
     let activeResponse: IncomingMessage | undefined;
+    let stage: FeedStage = 'url';
+    let httpStatus: number | undefined;
 
     try {
       let currentUrl = new URL(normalizeCanvasFeedUrl(rawUrl));
       for (let redirects = 0; redirects <= MAX_REDIRECTS; redirects += 1) {
+        stage = 'dns';
         const addresses = await abortable(resolve(currentUrl.hostname), controller.signal);
+        stage = 'address';
         if (!addresses.length || addresses.some(({ address, family }) => (
           !isPublicCanvasAddress(address) || isIP(address) !== family
         ))) throw new Error('Canvas feed hostname must resolve only to public addresses');
@@ -84,6 +100,7 @@ export function createCanvasFeedLoader(dependencies: FeedDependencies = {}) {
             'Accept-Encoding': 'identity',
           },
         };
+        stage = 'connect';
         activeResponse = await abortable(new Promise<IncomingMessage>((resolveResponse, reject) => {
           const req = request(currentUrl, options, resolveResponse);
           req.once('error', reject);
@@ -91,7 +108,9 @@ export function createCanvasFeedLoader(dependencies: FeedDependencies = {}) {
         }), controller.signal);
         const response = activeResponse;
         const status = response.statusCode ?? 0;
+        httpStatus = status;
         if ([301, 302, 303, 307, 308].includes(status)) {
+          stage = 'redirect';
           const location = response.headers.location;
           response.destroy();
           if (redirects === MAX_REDIRECTS || !location) throw new Error('Canvas feed returned an invalid redirect');
@@ -100,21 +119,29 @@ export function createCanvasFeedLoader(dependencies: FeedDependencies = {}) {
           currentUrl = new URL(normalizeCanvasFeedUrl(new URL(location, currentUrl).toString()));
           continue;
         }
-        if (status < 200 || status >= 300) throw new Error(`Canvas feed returned status ${status}`);
+        stage = 'http';
+        if (status < 200 || status >= 300) throw new Error('Canvas feed returned an unsuccessful status');
+        stage = 'encoding';
         if (response.headers['content-encoding'] && response.headers['content-encoding'] !== 'identity') {
           throw new Error('Canvas feed returned an unsupported encoding');
         }
+        stage = 'size';
         const declaredLength = Number(response.headers['content-length']);
         if (declaredLength > MAX_FEED_BYTES) throw new Error('Canvas feed exceeds the 5 MB limit');
         let byteCount = 0;
         const chunks: Buffer[] = [];
+        stage = 'body';
         for await (const chunk of response) {
           const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
           byteCount += buffer.length;
-          if (byteCount > MAX_FEED_BYTES) throw new Error('Canvas feed exceeds the 5 MB limit');
+          if (byteCount > MAX_FEED_BYTES) {
+            stage = 'size';
+            throw new Error('Canvas feed exceeds the 5 MB limit');
+          }
           chunks.push(buffer);
         }
         const content = Buffer.concat(chunks).toString('utf8');
+        stage = 'document';
         if (!/^BEGIN:VCALENDAR\s*$/mi.test(content) || !/^END:VCALENDAR\s*$/mi.test(content)) {
           throw new Error('Canvas feed did not return an iCalendar document');
         }
@@ -123,9 +150,7 @@ export function createCanvasFeedLoader(dependencies: FeedDependencies = {}) {
       throw new Error('Canvas feed could not be fetched');
     } catch {
       // Native request errors may contain a private URL or response metadata.
-      throw new Error(controller.signal.aborted
-        ? 'Canvas feed request timed out'
-        : 'Canvas feed could not be read securely');
+      throw new CanvasFeedReadError(controller.signal.aborted ? 'timeout' : stage, httpStatus);
     } finally {
       activeResponse?.destroy();
       controller.abort();

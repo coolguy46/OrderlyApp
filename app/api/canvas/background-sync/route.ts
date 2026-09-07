@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { CanvasFeedReadError } from '@/lib/integrations/canvas-feed-fetch';
+import { safeErrorCode } from '@/lib/security/log';
 import {
   CanvasSyncInProgressError,
   CanvasSyncMigrationRequiredError,
@@ -180,7 +182,8 @@ export async function POST(request: NextRequest) {
         }
         // Feed/network errors can retain the private iCal URL. Keep both user
         // identifiers and raw provider errors out of HTTP bodies and logs.
-        console.error(`Canvas background sync failed (${syncError instanceof Error ? syncError.name : 'UnknownError'})`);
+        console.error('Canvas background sync failed', syncError instanceof CanvasFeedReadError
+          ? syncError.diagnostic : safeErrorCode(syncError));
         return { success: false };
       }
     }));

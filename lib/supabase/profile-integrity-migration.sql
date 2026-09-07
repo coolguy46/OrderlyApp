@@ -54,7 +54,7 @@ CHECK (duration_minutes >= 1 AND duration_minutes <= 1440);
 CREATE OR REPLACE FUNCTION public.protect_profile_managed_fields()
 RETURNS TRIGGER
 LANGUAGE plpgsql
-SET search_path = public
+SET search_path = pg_catalog, public, pg_temp
 AS $$
 BEGIN
   -- Top-level browser updates may edit display fields only. Nested updates from
@@ -85,7 +85,7 @@ CREATE OR REPLACE FUNCTION public.adjust_completed_task_count()
 RETURNS TRIGGER
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public
+SET search_path = pg_catalog, public, pg_temp
 AS $$
 DECLARE
   old_delta INTEGER := 0;
@@ -121,7 +121,7 @@ CREATE OR REPLACE FUNCTION public.adjust_total_study_time()
 RETURNS TRIGGER
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public
+SET search_path = pg_catalog, public, pg_temp
 AS $$
 DECLARE
   old_minutes INTEGER := CASE WHEN TG_OP = 'INSERT' THEN 0 ELSE GREATEST(0, OLD.duration_minutes) END;
@@ -169,8 +169,8 @@ COMMENT ON COLUMN public.profiles.current_streak IS
 COMMENT ON COLUMN public.profiles.longest_streak IS
   'Legacy compatibility value; not maintained by the current application.';
 
-REVOKE ALL ON FUNCTION public.protect_profile_managed_fields() FROM PUBLIC;
-REVOKE ALL ON FUNCTION public.adjust_completed_task_count() FROM PUBLIC;
-REVOKE ALL ON FUNCTION public.adjust_total_study_time() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.protect_profile_managed_fields() FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.adjust_completed_task_count() FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.adjust_total_study_time() FROM PUBLIC, anon, authenticated;
 
 COMMIT;

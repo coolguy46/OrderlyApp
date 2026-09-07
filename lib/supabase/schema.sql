@@ -91,7 +91,7 @@ BEGIN
   UPDATE account_deletion_requests AS request
   SET status = 'processing',
       attempts = request.attempts + 1,
-      lease_token = uuid_generate_v4(),
+      lease_token = pg_catalog.gen_random_uuid(),
       lease_expires_at = statement_timestamp() + interval '2 minutes',
       updated_at = statement_timestamp()
   FROM candidates

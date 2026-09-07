@@ -1,5 +1,10 @@
 # Orderly security review — September 6, 2026
 
+September 7 update: the owner approved the remaining database rollout. See the
+[follow-up evidence](security-followup-2026-09-07.md) for installed protections,
+the deletion compatibility correction, and the remaining MFA/backup owner steps.
+The missing-migration observations below describe the earlier snapshot.
+
 ## Release status
 
 Security repairs are implemented in this checkout. This is **not a certificate that production is secure**.
