@@ -1,10 +1,10 @@
 # Orderly functional audit — September 7, 2026
 
-Status: audit and repairs verified locally; production release in progress.
+Status: all six audit steps completed; repairs pushed and verified live on September 7, 2026 (Pacific time).
 
 Baseline: `1478c7defc16d21f7c3ed710fbd1f525b2ffbff4`, clean `main`.
 Code recovery checkpoint: `codex/pre-functional-audit-2026-09-07`.
-Intended production: `coolguy46s-projects/orderlyappp`, `www.myorderlyapp.com`.
+Verified production: `coolguy46s-projects/orderlyappp`, `www.myorderlyapp.com`.
 Do not treat a local edit, commit status, or existing report as live verification.
 
 ## Plan
@@ -70,9 +70,12 @@ steps from the earlier security report are not implicitly resolved by this audit
 - All **five grouped browser journeys passed**: calendar/grid/editor, AuthGuard, Canvas settings, Settings/goals/exams/profile/reminders/export, tutorial/header. Browser fixtures require loopback-server permissions; their initial sandbox-only run was denied, then the authorized run passed. They block outside requests and use only synthetic accounts/data.
 - Synthetic screenshots captured for desktop/laptop/phone, dark/light, task/event editors, Assistant, calendar and tutorial. Manually inspected imported-task editor, phone Assistant, phone event form and narrow Canvas tutorial: controls remain reachable, descriptions are readable, and no new horizontal clipping was observed.
 - Revalidated baseline Vercel deployment `3xbmu7ob5QNX2FBEEfCwrny2bNGw`: Ready, Production Current, source `1478c7d`, domain `www.myorderlyapp.com`.
-- Baseline public landing/login/privacy/terms returned 200 and the expected Orderly title. This alone is not functional verification.
+- Baseline public landing/auth-login/privacy/terms returned 200 and the expected Orderly title. This alone is not functional verification.
 - No production database migration is needed for these repairs.
-- New push, production assignment and post-release smoke: pending.
+- Pushed repair commit: `5143f1fcd15c92d44d51ebf038832e845f8a79ef` on `main`.
+- Verified release: [Vercel deployment 6mfwCSGfHdhypAiHwzHZRr9Lp9Yv](https://vercel.com/coolguy46s-projects/orderlyappp/6mfwCSGfHdhypAiHwzHZRr9Lp9Yv). Dashboard showed **Ready / Production / Current**, source `5143f1f`, and assigned domain `www.myorderlyapp.com`; the correct `Vercel – orderlyappp` commit check succeeded. Verification time: September 8, 2026, approximately 00:37 UTC.
+- Signed-out post-release checks: `/landing`, `/auth/login`, `/auth/register`, `/privacy`, `/terms`, and the `/tasks` guard shell returned 200 with the expected Orderly title and private/no-store cache directives. The protected task shell includes CSP; its HTTP 200 does not establish authenticated access or render private data. `/api/account/export` returned **401** and `Cache-Control: private, no-store`, demonstrating the new route is deployed and denies anonymous export. A check of `/login` returned 404 because the existing login route is `/auth/login`; no alias is advertised or required.
+- This report-only follow-up does not change the tested application code. It records the verified repair release above; any subsequent deployment of this documentation has identical application code.
 
 Confirmed functional issues repaired: **15**, grouped by root cause in the ledger (not by every affected screen). No known reproduced functional issue from this ledger is being deferred. The limitations below remain; these checks do not establish that every possible bug is gone.
 
