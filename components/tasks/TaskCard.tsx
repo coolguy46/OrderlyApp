@@ -115,9 +115,9 @@ export const TaskCard = memo(function TaskCard({ task, onEdit, compact = false, 
 
   // Priority config
   const priorityConfig = {
-    high: { color: 'text-red-400', bg: 'bg-red-500/15', border: 'border-red-500/20', ring: 'ring-red-500/20', dot: 'bg-red-500', label: 'High' },
-    medium: { color: 'text-amber-400', bg: 'bg-amber-500/15', border: 'border-amber-500/20', ring: 'ring-amber-500/20', dot: 'bg-amber-500', label: 'Medium' },
-    low: { color: 'text-emerald-400', bg: 'bg-emerald-500/15', border: 'border-emerald-500/20', ring: 'ring-emerald-500/20', dot: 'bg-emerald-500', label: 'Low' },
+    high: { color: 'text-red-700 dark:text-red-400', bg: 'bg-red-500/10', dot: 'bg-red-500', label: 'High' },
+    medium: { color: 'text-amber-700 dark:text-amber-400', bg: 'bg-amber-500/10', dot: 'bg-amber-500', label: 'Medium' },
+    low: { color: 'text-emerald-700 dark:text-emerald-400', bg: 'bg-emerald-500/10', dot: 'bg-emerald-500', label: 'Low' },
   };
 
   const pConfig = priorityConfig[displayPriority];
@@ -176,11 +176,10 @@ export const TaskCard = memo(function TaskCard({ task, onEdit, compact = false, 
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, x: -20, transition: { duration: 0.2 } }}
-          whileHover={{ x: 4 }}
           transition={{ type: 'spring' as const, stiffness: 300, damping: 24 }}
           className={cn(
-            'flex items-center gap-3 px-3 py-2.5 rounded-lg border bg-card/50 hover:bg-accent/50 transition-all group cursor-pointer',
-            isCompleted && 'opacity-50',
+            'flex items-center gap-3 px-3 py-3 rounded-lg border border-border/70 bg-card hover:bg-muted/50 transition-colors group cursor-pointer',
+            isCompleted && 'opacity-70',
             isOverdue && 'border-red-500/30 bg-red-500/5'
           )}
           onClick={() => setShowViewer(true)}
@@ -216,7 +215,7 @@ export const TaskCard = memo(function TaskCard({ task, onEdit, compact = false, 
             aria-label={`Open task: ${task.title}`}
           >
             <span className={cn(
-              'block text-xs font-medium truncate',
+              'block text-sm font-medium truncate',
               isCompleted && 'line-through text-muted-foreground'
             )}>
               {task.title}
@@ -224,8 +223,8 @@ export const TaskCard = memo(function TaskCard({ task, onEdit, compact = false, 
           </button>
           {dueInfo && (
             <span className={cn(
-              'text-[10px] shrink-0',
-              dueInfo.urgent ? 'text-red-400' : dueInfo.warning ? 'text-amber-400' : 'text-muted-foreground'
+              'text-xs shrink-0',
+              dueInfo.urgent ? 'text-red-700 dark:text-red-400' : dueInfo.warning ? 'text-amber-700 dark:text-amber-400' : 'text-muted-foreground'
             )}>
               {dueInfo.text}
               {!isCompleted && task.due_time && ` ${formatTime(task.due_time)}`}
@@ -254,45 +253,16 @@ export const TaskCard = memo(function TaskCard({ task, onEdit, compact = false, 
         initial={{ opacity: 0, y: 16 }}
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.95, transition: { duration: 0.2 } }}
-        whileHover={{ y: -2 }}
         transition={{ type: 'spring' as const, stiffness: 300, damping: 24 }}
         className={cn(
-          'group relative rounded-xl border bg-card/80 backdrop-blur-sm overflow-hidden',
-          'hover:shadow-lg hover:shadow-black/5 dark:hover:shadow-black/20 transition-all duration-300',
-          'hover:border-border/80',
-          isCompleted && 'opacity-60',
-          isOverdue && 'border-red-500/25 hover:border-red-500/40',
-          isInProgress && 'border-indigo-500/25 hover:border-indigo-500/40'
+          'group relative rounded-xl border border-border bg-card overflow-hidden transition-colors',
+          'hover:border-primary/30',
+          isCompleted && 'opacity-70',
+          isOverdue && 'border-l-[3px] border-l-red-500/70',
+          isInProgress && !isOverdue && 'border-l-[3px] border-l-primary/70'
         )}
       >
-        {/* Top priority accent line */}
-        <div className={cn(
-          'absolute top-0 left-0 right-0 h-[2px]',
-          displayPriority === 'high' ? 'bg-gradient-to-r from-red-500 via-orange-500 to-red-500' :
-          displayPriority === 'medium' ? 'bg-gradient-to-r from-amber-500/60 via-yellow-500/60 to-amber-500/60' :
-          'bg-gradient-to-r from-emerald-500/40 via-green-500/40 to-emerald-500/40'
-        )} />
-        
-        {/* Urgent pulsing glow */}
-        {displayPriority === 'high' && !isCompleted && (
-          <motion.div
-            className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-red-500 via-orange-400 to-red-500"
-            animate={{ opacity: [1, 0.3, 1] }}
-            transition={{ duration: 2, repeat: Infinity }}
-          />
-        )}
-
-        {/* In-progress indicator */}
-        {isInProgress && !isCompleted && (
-          <motion.div
-            className="absolute top-0 left-0 h-[2px] bg-indigo-500"
-            initial={{ width: '0%' }}
-            animate={{ width: ['0%', '100%'] }}
-            transition={{ duration: 2, repeat: Infinity, ease: 'linear' }}
-          />
-        )}
-
-        <div className="p-4 sm:p-5">
+        <div className="p-4 sm:px-5">
           <div className="flex items-start gap-3.5">
             {/* Checkbox */}
             <motion.button
@@ -322,13 +292,6 @@ export const TaskCard = memo(function TaskCard({ task, onEdit, compact = false, 
                     'w-[22px] h-[22px]',
                     isOverdue && 'text-red-400/60'
                   )} />
-                  {isOverdue && (
-                    <motion.div
-                      className="absolute inset-0 rounded-full border-2 border-red-500/40"
-                      animate={{ scale: [1, 1.3, 1], opacity: [0.5, 0, 0.5] }}
-                      transition={{ duration: 2, repeat: Infinity }}
-                    />
-                  )}
                 </div>
               )}
             </motion.button>
@@ -336,20 +299,23 @@ export const TaskCard = memo(function TaskCard({ task, onEdit, compact = false, 
             {/* Content */}
             <div className="flex-1 min-w-0">
               {/* Title row */}
-              <div className="flex items-start justify-between gap-2">
+              <div className="flex flex-wrap items-start justify-between gap-2 sm:flex-nowrap">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <h3
-                      className={cn(
-                        'text-sm font-semibold leading-snug cursor-pointer hover:text-primary transition-colors',
-                        isCompleted && 'line-through text-muted-foreground'
-                      )}
-                      onClick={() => setShowViewer(true)}
-                    >
-                      {task.title}
+                    <h3 className="min-w-0">
+                      <button
+                        type="button"
+                        className={cn(
+                          'text-left text-sm font-semibold leading-relaxed hover:text-primary transition-colors',
+                          isCompleted && 'line-through text-muted-foreground'
+                        )}
+                        onClick={() => setShowViewer(true)}
+                      >
+                        {task.title}
+                      </button>
                     </h3>
                     {isInProgress && !isCompleted && (
-                      <span className="flex items-center gap-1 text-[10px] font-medium text-indigo-400 bg-indigo-500/15 px-1.5 py-0.5 rounded-full">
+                      <span className="flex items-center gap-1 text-[11px] font-medium text-primary bg-primary/10 px-1.5 py-0.5 rounded-md">
                         <Zap className="w-2.5 h-2.5" />
                         In Progress
                       </span>
@@ -372,7 +338,7 @@ export const TaskCard = memo(function TaskCard({ task, onEdit, compact = false, 
                 {/* Actions */}
                 <div className="flex items-center gap-1 shrink-0">
                   {/* Quick action buttons - always visible on mobile, hover on desktop */}
-                  <div className="flex items-center gap-0.5 sm:opacity-0 sm:group-hover:opacity-100 transition-all duration-200">
+                  <div className="flex items-center gap-0.5 opacity-75 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
                     {task.status === 'pending' && (
                       <motion.div whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}>
                         <Button
@@ -405,7 +371,7 @@ export const TaskCard = memo(function TaskCard({ task, onEdit, compact = false, 
                       <Button 
                         variant="ghost" 
                         size="icon-sm"
-                        className="h-8 w-8 sm:h-7 sm:w-7 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity"
+                        className="h-8 w-8 sm:h-7 sm:w-7 text-muted-foreground"
                         aria-label={`More actions for ${task.title}`}
                       >
                         <MoreHorizontal className="w-4 h-4" />
@@ -458,7 +424,7 @@ export const TaskCard = memo(function TaskCard({ task, onEdit, compact = false, 
               )}
 
               {/* Footer: metadata + due date */}
-              <div className="flex items-center justify-between mt-3 pt-2.5 border-t border-border/30">
+              <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 mt-3">
                 <div className="flex items-center gap-2 flex-wrap">
                   {/* Priority pill */}
                   <span className={cn(
@@ -474,7 +440,7 @@ export const TaskCard = memo(function TaskCard({ task, onEdit, compact = false, 
                   )}
 
                   {isRecurring && (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium bg-indigo-500/15 text-indigo-400">
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium bg-primary/10 text-primary">
                       <Repeat className="w-3 h-3" />
                       {task.recurrence === 'daily' ? 'Daily' : task.recurrence === 'weekly' ? (task.recurrence_days?.length ? `Weekly (${task.recurrence_days.map(d => ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d]).join(', ')})` : 'Weekly') : 'Monthly'}
                     </span>
@@ -488,7 +454,7 @@ export const TaskCard = memo(function TaskCard({ task, onEdit, compact = false, 
                   )}
 
                   {scheduledLabel && (
-                    <span className="inline-flex items-center gap-1 rounded-md bg-indigo-500/10 px-2 py-0.5 text-[11px] font-medium text-indigo-400">
+                    <span className="inline-flex items-center gap-1 rounded-md bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary">
                       <Calendar className="h-3 w-3" />
                       Scheduled {scheduledLabel}
                     </span>
@@ -499,8 +465,8 @@ export const TaskCard = memo(function TaskCard({ task, onEdit, compact = false, 
                 {dueInfo && (
                   <span className={cn(
                     'flex items-center gap-1.5 text-xs font-medium shrink-0',
-                    dueInfo.urgent ? 'text-red-400' :
-                    dueInfo.warning ? 'text-amber-400' :
+                    dueInfo.urgent ? 'text-red-700 dark:text-red-400' :
+                    dueInfo.warning ? 'text-amber-700 dark:text-amber-400' :
                     'text-muted-foreground/70'
                   )}>
                     {dueInfo.urgent ? (

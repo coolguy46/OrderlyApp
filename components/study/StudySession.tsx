@@ -141,18 +141,29 @@ export function StudySession() {
       variants={containerVariants}
       initial="hidden"
       animate="show"
-      className="space-y-4"
+      className="workspace-page"
     >
+      <div className="workspace-header">
+        <div>
+          <p className="workspace-eyebrow">A little focus goes a long way</p>
+          <h1 className="workspace-title">Study</h1>
+          <p className="workspace-description">Settle into a session. Your tasks and daily progress are right here.</p>
+        </div>
+        <div className="rounded-lg border border-border bg-card px-4 py-2.5 text-sm">
+          <span className="font-semibold tabular-nums">{formatDuration(todayStats.totalMinutes)}</span>
+          <span className="ml-2 text-muted-foreground">studied today</span>
+        </div>
+      </div>
       <div>
-          <motion.div variants={itemVariants} className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <motion.div variants={itemVariants} className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.35fr)_minmax(280px,1fr)] gap-5 items-start">
             {/* Pomodoro Timer */}
             <div>
               <PomodoroTimer />
             </div>
 
             {/* Gamified Progress */}
-            <Card className="glow-border">
-              <CardHeader className="pb-2">
+            <Card>
+              <CardHeader className="pb-4">
                 <div className="flex items-center justify-between">
                   <div>
                     <CardTitle className="text-base">Daily Progress</CardTitle>
@@ -160,7 +171,7 @@ export function StudySession() {
                       Study {goalHours >= 1 ? `${Math.floor(goalHours)}h` : ''}{goalHours % 1 !== 0 ? ` ${Math.round((goalHours % 1) * 60)}m` : goalHours >= 1 ? '' : `${Math.round(goalHours * 60)}m`} to {visualType === 'egg' ? 'hatch the egg' : 'melt the ice'}
                     </CardDescription>
                   </div>
-                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={openGoalSettings}>
+                  <Button variant="ghost" size="icon" className="h-8 w-8" onClick={openGoalSettings} aria-label="Edit daily study goal">
                     <Settings className="w-4 h-4" />
                   </Button>
                 </div>
@@ -171,7 +182,7 @@ export function StudySession() {
                     onClick={() => setVisualType('egg')}
                     className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
                       visualType === 'egg'
-                        ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                        ? 'bg-card text-foreground border border-border shadow-sm'
                         : 'text-muted-foreground hover:text-foreground hover:bg-muted'
                     }`}
                   >
@@ -182,7 +193,7 @@ export function StudySession() {
                     onClick={() => setVisualType('ice')}
                     className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
                       visualType === 'ice'
-                        ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30'
+                        ? 'bg-card text-foreground border border-border shadow-sm'
                         : 'text-muted-foreground hover:text-foreground hover:bg-muted'
                     }`}
                   >
@@ -225,16 +236,16 @@ export function StudySession() {
           </motion.div>
 
           {/* Pending Tasks */}
-          <motion.div variants={itemVariants} className="mt-4">
-            <Card className="glow-border">
-              <CardHeader className="pb-2">
+          <motion.div variants={itemVariants} className="mt-5">
+            <Card>
+              <CardHeader className="pb-4">
                 <div className="flex items-center gap-2">
                   <CheckCircle2 className="w-4 h-4 text-primary" />
                   <CardTitle className="text-base">Tasks to Complete</CardTitle>
                 </div>
               </CardHeader>
               <CardContent className="pt-0">
-                <div className="space-y-2">
+                <div className="space-y-2 max-h-80 overflow-y-auto overscroll-contain">
                   {pendingTasks.length > 0 ? (
                     pendingTasks.map((task) => (
                       <TaskCard key={task.id} task={task} compact currentTime={currentTime} timeZone={timeZone} />

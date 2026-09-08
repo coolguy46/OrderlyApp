@@ -15,6 +15,7 @@ import { useAppStore } from '@/lib/store';
 import { signInWithGoogle } from '@/lib/supabase/services';
 import { errorMessage } from '@/lib/auth/lifecycle';
 import { useHydrated } from '@/lib/use-hydrated';
+import { AuthFrame } from '@/components/auth/AuthFrame';
 
 function callbackErrorMessage(value: string | null): string {
   if (value === 'auth_callback_error') {
@@ -77,28 +78,22 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-background via-background to-indigo-500/10">
-      {/* Background decoration */}
-      <div className="fixed inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute -top-40 -right-40 w-80 h-80 bg-indigo-500/20 rounded-full blur-3xl" />
-        <div className="absolute -bottom-40 -left-40 w-80 h-80 bg-purple-500/20 rounded-full blur-3xl" />
-      </div>
-
+    <AuthFrame>
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5 }}
-        className="w-full max-w-md relative"
+        className="relative w-full"
       >
-        <Card className="border-border/50 bg-card/80 backdrop-blur-xl">
-          <CardHeader className="text-center space-y-4">
+        <Card className="rounded-2xl border-border bg-card shadow-sm sm:p-2">
+          <CardHeader className="space-y-4 pb-7 text-left">
             {/* Logo */}
-            <div className="mx-auto w-12 h-12 rounded-xl flex items-center justify-center">
+            <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-border bg-background lg:hidden">
               <Image src="/logo.svg" alt="Orderly Logo" width={48} height={48} className="w-12 h-12" priority />
             </div>
             <div>
-              <CardTitle className="text-2xl font-bold">Welcome back</CardTitle>
-              <CardDescription className="text-muted-foreground">
+              <CardTitle className="font-display text-3xl font-semibold tracking-tight">Welcome back</CardTitle>
+              <CardDescription className="mt-2 text-muted-foreground">
                 Sign in to continue to Orderly
               </CardDescription>
             </div>
@@ -129,7 +124,7 @@ export default function LoginPage() {
               <div
                 role="alert"
                 aria-live="assertive"
-                className="flex items-start gap-2 rounded-lg border border-red-500/25 bg-red-500/10 p-3 text-sm text-red-300"
+                className="flex items-start gap-2 rounded-lg border border-red-500/25 bg-red-500/10 p-3 text-sm text-red-700 dark:text-red-300"
               >
                 <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
                 <span>{displayedError}</span>
@@ -140,7 +135,7 @@ export default function LoginPage() {
               <div
                 role="status"
                 aria-live="polite"
-                className="flex items-start gap-2 rounded-lg border border-emerald-500/25 bg-emerald-500/10 p-3 text-sm text-emerald-300"
+                className="flex items-start gap-2 rounded-lg border border-emerald-500/25 bg-emerald-500/10 p-3 text-sm text-emerald-700 dark:text-emerald-300"
               >
                 <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
                 <span>{notice}</span>
@@ -173,7 +168,7 @@ export default function LoginPage() {
                   <Label htmlFor="password">Password</Label>
                   <Link
                     href="/auth/forgot-password"
-                    className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
+                    className="text-xs text-primary hover:underline underline-offset-4 transition-colors"
                   >
                     Forgot password?
                   </Link>
@@ -197,7 +192,7 @@ export default function LoginPage() {
 
               <Button
                 type="submit"
-                className="w-full bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700"
+                className="h-11 w-full"
                 disabled={isLoading}
               >
                 {isLoading ? (
@@ -212,12 +207,12 @@ export default function LoginPage() {
             </form>
           </CardContent>
 
-          <CardFooter className="justify-center">
+          <CardFooter className="justify-center border-t border-border pt-5">
             <p className="text-sm text-muted-foreground">
               Don&apos;t have an account?{' '}
               <Link
                 href="/auth/register"
-                className="text-indigo-400 hover:text-indigo-300 font-medium transition-colors"
+                className="font-medium text-primary hover:underline underline-offset-4 transition-colors"
               >
                 Sign up
               </Link>
@@ -237,6 +232,6 @@ export default function LoginPage() {
           </Link>
         </p>
       </motion.div>
-    </div>
+    </AuthFrame>
   );
 }

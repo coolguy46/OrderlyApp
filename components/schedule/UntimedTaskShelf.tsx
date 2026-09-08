@@ -70,7 +70,7 @@ function UntimedTask({
       }}
       disabled={!onClick && !draggable}
       className={cn(
-        'flex min-h-7 w-full min-w-0 items-center gap-1.5 rounded-md border px-1.5 py-1 text-left text-[11px] transition-[filter,opacity] hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-default',
+        'flex min-h-8 w-full min-w-0 items-center gap-1.5 rounded-lg border px-2 py-1.5 text-left text-[11px] transition-[filter,opacity] hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-default',
         draggable && 'cursor-grab touch-none active:cursor-grabbing',
         item.completed && 'opacity-50',
         isDragging && 'opacity-20',
@@ -119,8 +119,8 @@ function UntimedDay({
     <div
       ref={setNodeRef}
       className={cn(
-        'max-h-28 min-h-12 space-y-1 overflow-y-auto overscroll-contain border-r border-border/35 p-1.5 transition-colors last:border-r-0',
-        selected && 'bg-indigo-500/[0.05]',
+        'max-h-28 min-h-12 space-y-1.5 overflow-y-auto overscroll-contain border-r border-border/50 p-1.5 transition-colors last:border-r-0',
+        selected && 'bg-primary/[0.05]',
         isOver && 'bg-primary/15 ring-1 ring-inset ring-primary/50',
       )}
       aria-label={`Untimed tasks for ${format(day, 'EEEE, MMMM d')}`}
@@ -156,14 +156,14 @@ export function UntimedTaskShelf({
     <div
       ref={setShelfNodeRef}
       className={cn(
-        'grid min-h-12 border-b border-border/50 bg-card/95 transition-colors',
+        'grid min-h-12 border-b border-border bg-card transition-colors',
         isShelfOver && 'bg-primary/10 ring-1 ring-inset ring-primary/40',
       )}
       style={{ gridTemplateColumns: columns }}
       aria-label="Untimed tasks"
     >
       <div className={cn(
-        'sticky left-0 z-50 flex flex-col items-center justify-center gap-1 border-r border-border/40 bg-card/95 px-1 text-[10px] font-medium text-muted-foreground transition-colors',
+        'sticky left-0 z-50 flex flex-col items-center justify-center gap-1 border-r border-border/60 bg-card px-1 text-[10px] font-medium text-muted-foreground transition-colors',
         isShelfOver && 'bg-primary/15 text-primary',
       )}>
         <ListTodo className="h-3 w-3" />

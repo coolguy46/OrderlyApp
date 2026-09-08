@@ -633,8 +633,8 @@ export function ScheduleCalendar() {
   };
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-col gap-3">
-      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 py-1">
+    <div className="flex min-h-0 min-w-0 flex-col gap-4">
+      <div className="workspace-toolbar flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
         <div className="flex min-w-0 max-w-full items-center gap-0.5">
           <Button
             type="button"
@@ -668,7 +668,7 @@ export function ScheduleCalendar() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
-          <span>{occurrences.timed.length} timed · {occurrences.untimed.length} untimed</span>
+          <span className="rounded-md bg-muted/50 px-2.5 py-1.5 tabular-nums">{occurrences.timed.length} timed · {occurrences.untimed.length} untimed</span>
           <details className="group relative">
             <summary className="flex min-h-9 cursor-pointer list-none items-center gap-1.5 rounded-lg px-2 text-xs transition-colors hover:bg-muted/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary [&::-webkit-details-marker]:hidden">
               <CircleHelp className="h-3.5 w-3.5" />
@@ -710,7 +710,7 @@ export function ScheduleCalendar() {
         blocks={timedBlocks}
         editable
         variant="fullscreen"
-        viewportClassName="h-[calc(100dvh-13.5rem)] min-h-[420px]"
+        viewportClassName="h-[calc(100dvh-17.5rem)] min-h-[420px]"
         showSummaryHeader={false}
         showUntimedShelf
         untimedItems={untimedItems}

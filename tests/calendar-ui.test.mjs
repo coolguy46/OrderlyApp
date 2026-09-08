@@ -202,9 +202,13 @@ test('real calendar/grid/editor UI: navigation, recurrence, click/drag/resize, s
     assert.equal(await page.getByRole('complementary', { name: 'Day details' }).count(), 1);
     await page.getByRole('button', { name: 'Day details', exact: true }).click();
     await page.getByRole('button', { name: 'Expand calendar', exact: true }).click();
+    await page.getByRole('region', { name: 'Assistant calendar', exact: true }).scrollIntoViewIfNeeded();
+    await capture('assistant-calendar-expanded-desktop');
     await page.getByRole('button', { name: 'Use compact calendar', exact: true }).click();
     await page.getByRole('button', { name: 'Your calendar', exact: true }).click();
     assert.equal(await page.getByRole('tabpanel', { name: 'Schedule', exact: true }).count(), 0);
+    await page.getByRole('region', { name: 'Assistant calendar', exact: true }).scrollIntoViewIfNeeded();
+    await capture('assistant-calendar-collapsed-desktop');
     await page.getByRole('button', { name: 'Your calendar', exact: true }).click();
     assert.equal(await page.getByRole('textbox', { name: 'Message Orderly' }).inputValue(), 'Keep this draft through layout changes');
     await page.evaluate(() => window.scrollTo(0, 0));

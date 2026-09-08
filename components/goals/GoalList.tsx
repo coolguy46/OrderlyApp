@@ -91,17 +91,16 @@ function GoalCard({ goal, onEdit, now, timeZone }: GoalCardProps) {
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, x: -30 }}
-      whileHover={{ y: -3 }}
       transition={{ type: 'spring', stiffness: 300, damping: 24 }}
     >
-      <Card className={cn('group hover:shadow-md transition-shadow glow-border', isCompleted && 'border-green-500/30')}>
-        <CardContent className="p-5">
+      <Card className={cn('group h-full transition-colors hover:border-primary/30', isCompleted && 'border-l-[3px] border-l-emerald-500/60')}>
+        <CardContent className="p-5 sm:p-6">
           <div className="flex items-start gap-4">
             <CircularProgress
               value={goal.current_value}
               max={goal.target_value}
-              size={72}
-              strokeWidth={5}
+              size={56}
+              strokeWidth={4}
               animated
               color={isCompleted ? '#10b981' : '#6366f1'}
             >
@@ -117,13 +116,13 @@ function GoalCard({ goal, onEdit, now, timeZone }: GoalCardProps) {
             <div className="flex-1 min-w-0 space-y-2">
               <div className="flex items-start justify-between gap-2">
                 <div className="space-y-1">
-                  <h3 className={cn('font-semibold text-sm', isCompleted && 'text-green-400')}>{goal.title}</h3>
+                  <h3 className="font-semibold text-sm leading-relaxed">{goal.title}</h3>
                   <div className="flex items-center gap-2 flex-wrap">
                     <Badge variant="secondary" className={cn(
                       'text-[10px]',
                       goal.goal_type === 'short_term'
-                        ? 'bg-blue-500/20 text-blue-400 border-blue-500/30'
-                        : 'bg-purple-500/20 text-purple-400 border-purple-500/30'
+                        ? 'bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/20'
+                        : 'bg-purple-500/10 text-purple-700 dark:text-purple-400 border-purple-500/20'
                     )}>
                       {goal.goal_type === 'short_term' ? 'Short Term' : 'Long Term'}
                     </Badge>
@@ -136,7 +135,7 @@ function GoalCard({ goal, onEdit, now, timeZone }: GoalCardProps) {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
+                <div className="flex items-center gap-1 text-muted-foreground">
                   <Button variant="ghost" size="icon-sm" onClick={() => onEdit(goal)} aria-label={`Edit ${goal.title}`}>
                     <Edit3 className="w-3.5 h-3.5" />
                   </Button>
@@ -147,7 +146,7 @@ function GoalCard({ goal, onEdit, now, timeZone }: GoalCardProps) {
               </div>
 
               {goal.description && (
-                <p className="text-xs text-muted-foreground line-clamp-1">{goal.description}</p>
+                <p className="text-sm leading-relaxed text-muted-foreground line-clamp-2">{goal.description}</p>
               )}
 
               <div className="space-y-1.5">
@@ -390,12 +389,13 @@ export function GoalList() {
     : 0;
 
   return (
-    <motion.div variants={containerVariants} initial="hidden" animate="show" className="space-y-6">
+    <motion.div variants={containerVariants} initial="hidden" animate="show" className="workspace-page">
       <div className="w-full">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
+        <div className="workspace-header mb-6">
           <div>
-            <h1 className="text-2xl font-bold font-display">Goals</h1>
-            <p className="text-sm text-muted-foreground">Track your academic and personal goals</p>
+            <p className="workspace-eyebrow">Build momentum</p>
+            <h1 className="workspace-title">Goals</h1>
+            <p className="workspace-description">Small steps toward your academic and personal goals.</p>
           </div>
           <Button onClick={() => setShowForm(true)} size="sm" className="gap-1.5">
             <Plus className="w-4 h-4" /> Add Goal
@@ -403,7 +403,7 @@ export function GoalList() {
         </div>
 
         {/* Overview stats */}
-        <motion.div variants={itemVariants} className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
+        <motion.div variants={itemVariants} className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
           {[
             { icon: Target, label: 'Total Goals', value: goals.length, iconClass: 'bg-indigo-500/10 text-indigo-500', grad: 'from-indigo-500/10 to-indigo-500/5' },
             { icon: TrendingUp, label: 'In Progress', value: activeGoals.length, iconClass: 'bg-blue-500/10 text-blue-500', grad: 'from-blue-500/10 to-blue-500/5' },
@@ -412,14 +412,14 @@ export function GoalList() {
           ].map(s => {
             const Icon = s.icon;
             return (
-              <Card key={s.label} className={`bg-gradient-to-br ${s.grad} glow-border`}>
+              <Card key={s.label} className="shadow-none">
                 <CardContent className="p-4">
                   <div className="flex items-center gap-3">
-                    <div className={cn('p-2 rounded-xl', s.iconClass)}>
+                    <div className={cn('p-2 rounded-lg', s.iconClass)}>
                       <Icon className="w-5 h-5" />
                     </div>
                     <div>
-                      <p className="text-2xl font-bold font-display">{s.value}</p>
+                      <p className="text-xl font-semibold tabular-nums">{s.value}</p>
                       <p className="text-xs text-muted-foreground">{s.label}</p>
                     </div>
                   </div>
@@ -430,30 +430,31 @@ export function GoalList() {
         </motion.div>
 
         {/* Filter */}
-          <div className="flex items-center gap-2 bg-muted/50 rounded-lg p-1.5 w-fit mb-5">
+          <div className="workspace-tabs flex w-fit max-w-full items-center gap-1 mb-5 overflow-x-auto">
             {(['all', 'active', 'completed'] as const).map((f) => (
               <button
                 key={f}
                 onClick={() => setFilter(f)}
+                aria-pressed={filter === f}
                 className={cn(
-                  'relative px-4 py-1.5 text-xs font-medium rounded-md transition-all capitalize',
-                  filter === f ? 'text-primary-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+                  'relative px-4 py-2 text-xs font-medium rounded-lg transition-colors capitalize',
+                  filter === f ? 'text-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-muted'
                 )}
               >
                 {filter === f && (
-                  <motion.div layoutId="goalFilterIndicator" className="absolute inset-0 bg-primary rounded-md shadow-sm" transition={{ type: 'spring', stiffness: 400, damping: 30 }} />
+                  <motion.div layoutId="goalFilterIndicator" className="absolute inset-0 bg-card border border-border rounded-lg shadow-sm" transition={{ type: 'spring', stiffness: 400, damping: 30 }} />
                 )}
                 <span className="relative z-10">{f}</span>
               </button>
             ))}
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
             <AnimatePresence mode="popLayout">
               {filteredGoals.length === 0 ? (
-                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="col-span-2 text-center py-16">
-                  <motion.div animate={{ y: [0, -8, 0] }} transition={{ duration: 3, repeat: Infinity }} className="w-16 h-16 mx-auto mb-4 rounded-full bg-muted flex items-center justify-center">
-                    <Target className="w-8 h-8 text-muted-foreground" />
+                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="col-span-full rounded-xl border border-dashed border-border bg-card text-center py-16 px-5">
+                  <motion.div className="w-12 h-12 mx-auto mb-4 rounded-xl bg-primary/10 flex items-center justify-center">
+                    <Target className="w-5 h-5 text-primary" />
                   </motion.div>
                   <p className="font-medium">No goals found</p>
                   <p className="text-sm text-muted-foreground mt-1">Create a new goal to start tracking your progress</p>

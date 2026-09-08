@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { useAppStore } from '@/lib/store';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import { useHotkeys } from '@/lib/useHotkeys';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
@@ -34,6 +34,8 @@ import { TutorialHelpButton } from '@/components/tutorial/Tutorial';
 
 export function Header() {
   const router = useRouter();
+  const pathname = usePathname();
+  const pageLabel = ({ tasks: 'Tasks', calendar: 'Calendar', planner: 'Assistant', goals: 'Goals', study: 'Study', exams: 'Exams', settings: 'Settings', profile: 'Profile' } as Record<string, string>)[pathname.split('/')[1]] || 'Dashboard';
   const { user, logout, tasks, goals, exams } = useAppStore();
   const [searchOpen, setSearchOpen] = useState(false);
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
@@ -239,23 +241,29 @@ export function Header() {
 
   return (
     <>
-      <header className="h-14 sm:h-16 border-b border-border/40 bg-background/80 backdrop-blur-xl sticky top-0 z-30 transition-shadow">
-        <div className="h-full flex items-center justify-between px-4 sm:px-8 gap-3 sm:gap-8">
+      <header className="sticky top-0 z-30 h-16 border-b border-border/70 bg-background/95 backdrop-blur-md">
+        <div className="h-full flex items-center justify-between px-4 sm:px-6 lg:px-8 gap-3 sm:gap-6">
           {/* Left side: Logo on mobile, hamburger hidden since we have bottom nav */}
           <div className="flex items-center gap-3 lg:hidden shrink-0">
             <Image src="/logo.svg" alt="Orderly" width={32} height={32} className="w-8 h-8 rounded-lg" priority />
             <span className="font-bold text-base font-display tracking-tight">Orderly</span>
           </div>
 
+          <div className="hidden min-w-0 items-center gap-3 text-xs lg:flex">
+            <span className="text-muted-foreground">Workspace</span>
+            <span className="text-muted-foreground/50" aria-hidden="true">/</span>
+            <span className="font-medium">{pageLabel}</span>
+          </div>
+
           {/* Desktop search */}
-          <div className="hidden sm:flex flex-1 max-w-md" ref={searchContainerRef}>
+          <div className="hidden sm:flex flex-1 max-w-sm lg:ml-auto" ref={searchContainerRef}>
             <div className="relative w-full">
               <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none z-10" />
               <Input 
                 ref={searchInputRef}
                 aria-label="Search tasks, goals, and exams"
                 placeholder="Search tasks, goals, exams..." 
-                className="!pl-12 bg-muted/30 border-border/50 focus:bg-background/80 transition-colors"
+                className="!pl-11 md:pr-16 h-9 bg-card border-border/70 focus:bg-card transition-colors"
                 value={searchQuery}
                 onChange={(e) => {
                   setSearchQuery(e.target.value);
@@ -300,9 +308,9 @@ export function Header() {
             <TutorialHelpButton />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" className="gap-2 px-2 h-10">
-                  <Avatar className="h-8 w-8 ring-2 ring-indigo-500/20 ring-offset-1 ring-offset-background transition-all hover:ring-indigo-500/40">
-                    <AvatarFallback className="bg-gradient-to-br from-indigo-500 to-purple-600 text-white text-xs">
+                <Button variant="ghost" className="gap-2 px-2 h-10" aria-label="Profile menu">
+                  <Avatar className="h-8 w-8 rounded-lg border border-border">
+                    <AvatarFallback className="rounded-lg bg-primary/10 text-primary text-xs font-semibold">
                       {user?.full_name?.[0] || 'U'}
                     </AvatarFallback>
                   </Avatar>
@@ -316,7 +324,7 @@ export function Header() {
                   <div className="flex flex-col">
                     <span>{user?.full_name || 'Demo User'}</span>
                     <span className="text-xs font-normal text-muted-foreground">
-                      {user?.tasks_completed || 0} tasks completed
+                      {user?.tasks_completed || 0} {user?.tasks_completed === 1 ? 'task' : 'tasks'} completed
                     </span>
                   </div>
                 </DropdownMenuLabel>

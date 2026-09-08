@@ -776,27 +776,26 @@ export function TaskForm({
     <>
       <Dialog open={isOpen} onOpenChange={(open) => !open && closeForm()}>
         <DialogContent
-          className="flex max-h-none flex-col gap-0 overflow-hidden p-0 sm:max-w-[620px] sm:overflow-hidden"
+          className="flex max-h-none flex-col gap-0 overflow-hidden rounded-2xl border-border bg-card p-0 sm:max-w-[660px] sm:overflow-hidden"
           style={{ maxHeight: 'min(calc(100dvh - 1rem), 900px)' }}
         >
         {/* Header */}
-        <div className="shrink-0 px-5 pb-4 pt-5 sm:px-6">
+        <div className="shrink-0 border-b border-border bg-muted/20 px-5 py-5 sm:px-6">
           <DialogHeader className="text-left">
             <div className="flex items-center gap-3 pr-7">
               <div className={cn(
-                'p-2 rounded-xl',
-                task ? 'bg-amber-500/15' : isEventMode ? 'bg-cyan-500/15' : 'bg-indigo-500/15'
+                'rounded-xl border border-primary/15 bg-primary/10 p-2.5 text-primary',
               )}>
                 {task ? (
-                  <FileText className="w-5 h-5 text-amber-400" />
+                  <FileText className="w-5 h-5" />
                 ) : isEventMode ? (
-                  <CalendarDays className="h-5 w-5 text-cyan-400" />
+                  <CalendarDays className="h-5 w-5" />
                 ) : (
-                  <Sparkles className="w-5 h-5 text-indigo-400" />
+                  <Sparkles className="w-5 h-5" />
                 )}
               </div>
               <div>
-                <DialogTitle className="text-lg font-bold">
+                <DialogTitle className="text-xl font-semibold tracking-tight">
                   {task ? 'Edit Task' : commitment ? 'Edit Event' : isEventMode ? 'New Event' : 'New Task'}
                 </DialogTitle>
                 <DialogDescription className="text-xs mt-0.5">
@@ -818,14 +817,14 @@ export function TaskForm({
             role="region"
             aria-label={isEventMode ? 'Event details' : 'Task details'}
             tabIndex={0}
-            className="px-5 pb-5 sm:px-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-400"
+            className="px-5 py-5 sm:px-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
           >
-          <div className="space-y-4 [&_label]:font-medium [&_label]:normal-case [&_label]:tracking-normal">
+          <div className="space-y-5 [&_label]:font-medium [&_label]:normal-case [&_label]:tracking-normal">
           {!task && !commitment && (
             <div
               role="tablist"
               aria-label="Create a task or event"
-              className="grid grid-cols-2 rounded-lg bg-muted/40 p-1"
+              className="workspace-tabs grid grid-cols-2"
             >
               {(['task', 'event'] as const).map(nextMode => (
                 <button
@@ -840,9 +839,9 @@ export function TaskForm({
                     setSaveError('');
                   }}
                   className={cn(
-                    'flex h-9 items-center justify-center gap-2 rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                    'flex h-10 items-center justify-center gap-2 rounded-lg text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                     mode === nextMode
-                      ? 'bg-background text-foreground shadow-sm'
+                      ? 'bg-card text-foreground shadow-sm ring-1 ring-border/60'
                       : 'text-muted-foreground hover:text-foreground',
                   )}
                 >
@@ -879,7 +878,7 @@ export function TaskForm({
               }}
               aria-invalid={Boolean(titleError)}
               aria-describedby={titleError ? 'task-title-error' : undefined}
-              className="h-10 bg-muted/30 border-border/50 focus:bg-background"
+              className="h-12 border-border bg-background/60 text-base focus:bg-background"
             />
             {titleError && (
               <p id="task-title-error" role="alert" className="text-xs text-red-400">
@@ -918,7 +917,7 @@ export function TaskForm({
           {!isEventMode ? (
           <>
           {editingTaskOccurrence && <p className="text-xs text-muted-foreground">Changing this work session only. Status, deadline and repeat settings belong to the entire series.</p>}
-          <fieldset disabled={editingTaskOccurrence} className="space-y-4 disabled:opacity-60">
+          <fieldset disabled={editingTaskOccurrence} className="space-y-4 rounded-xl border border-border bg-muted/15 p-3.5 disabled:opacity-60 sm:p-4">
           {/* Priority & Status row */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="space-y-1.5">
@@ -1191,7 +1190,7 @@ export function TaskForm({
                     className={cn(
                       'flex-1 h-8 rounded-md text-xs font-medium transition-all',
                       recurrenceDays.includes(i)
-                        ? 'bg-indigo-500 text-white shadow-sm'
+                        ? 'bg-primary text-primary-foreground shadow-sm'
                         : 'bg-muted/30 text-muted-foreground hover:bg-muted/50 border border-border/50'
                     )}
                   >
@@ -1210,7 +1209,7 @@ export function TaskForm({
             </div>
           )}
           </fieldset>
-          <div className="space-y-3 border-t border-border/60 pt-4">
+          <div className="space-y-4 rounded-xl border border-primary/20 bg-primary/[0.035] p-3.5 sm:p-4">
             <div>
               <div className="flex items-center gap-2 text-sm font-medium text-foreground">
                 <Calendar className="h-4 w-4 text-muted-foreground" />
@@ -1473,7 +1472,7 @@ export function TaskForm({
                     className={cn(
                       'h-8 flex-1 rounded-md text-xs font-medium transition-all',
                       eventRecurrenceDays.includes(index)
-                        ? 'bg-cyan-500 text-slate-950 shadow-sm'
+                        ? 'bg-primary text-primary-foreground shadow-sm'
                         : 'border border-border/50 bg-muted/30 text-muted-foreground hover:bg-muted/50',
                     )}
                   >
@@ -1503,7 +1502,7 @@ export function TaskForm({
           </DialogBody>
 
           {/* Actions */}
-          <div className="grid shrink-0 grid-cols-2 gap-2 border-t border-border/50 bg-background/95 px-5 py-4 sm:flex sm:justify-end sm:px-6">
+          <div className="grid shrink-0 grid-cols-2 gap-2 border-t border-border bg-card px-5 py-4 sm:flex sm:justify-end sm:px-6">
             {commitment && (
               <Button
                 type="button"

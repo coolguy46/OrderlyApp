@@ -140,33 +140,20 @@ export function TaskList({ initialFilter = 'pending' }: { initialFilter?: Filter
   ];
 
   return (
-    <div className="space-y-6">
+    <div className="workspace-page">
       {/* Header Section */}
       <motion.div
         initial={{ opacity: 0, y: -10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ type: 'spring' as const, stiffness: 300, damping: 25 }}
-        className="flex flex-col gap-1"
+        className="workspace-header"
       >
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="relative">
-              <motion.div
-                className="p-2.5 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 shadow-lg shadow-indigo-500/25"
-                whileHover={{ scale: 1.05, rotate: 5 }}
-                whileTap={{ scale: 0.95 }}
-              >
-                <ListTodo className="w-5 h-5 text-white" />
-              </motion.div>
-              <motion.div
-                className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-green-400 rounded-full border-2 border-background"
-                animate={{ scale: [1, 1.2, 1] }}
-                transition={{ duration: 2, repeat: Infinity }}
-              />
-            </div>
+        <div className="flex w-full flex-wrap items-center justify-between gap-4">
+          <div>
+            <p className="workspace-eyebrow">Your workspace</p>
             <div>
-              <h1 className="text-2xl font-bold tracking-tight font-display">Tasks</h1>
-              <p className="text-sm text-muted-foreground">
+              <h1 className="workspace-title">Tasks</h1>
+              <p className="workspace-description">
                 {stats.incomplete > 0
                   ? `${stats.incomplete} task${stats.incomplete !== 1 ? 's' : ''} to complete`
                   : 'All caught up! 🎉'}
@@ -174,9 +161,9 @@ export function TaskList({ initialFilter = 'pending' }: { initialFilter?: Filter
             </div>
           </div>
           <motion.div whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}>
-            <Button onClick={() => setShowForm(true)} className="gap-2 shadow-md shadow-primary/20">
+            <Button onClick={() => setShowForm(true)} className="gap-2">
               <Plus className="w-4 h-4" />
-              <span className="hidden sm:inline">New Task</span>
+              <span>New Task</span>
             </Button>
           </motion.div>
         </div>
@@ -188,26 +175,22 @@ export function TaskList({ initialFilter = 'pending' }: { initialFilter?: Filter
         className="grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3"
       >
         {[
-          { label: 'Total', value: stats.total, icon: ListTodo, gradient: 'from-slate-500/15 to-slate-400/5', iconBg: 'bg-slate-500/20', iconColor: 'text-slate-400' },
-          { label: 'Active', value: stats.pending, icon: Clock, gradient: 'from-amber-500/15 to-orange-400/5', iconBg: 'bg-amber-500/20', iconColor: 'text-amber-400' },
-          { label: 'Missing', value: stats.missing, icon: AlertTriangle, gradient: 'from-red-500/15 to-rose-400/5', iconBg: 'bg-red-500/20', iconColor: 'text-red-400' },
-          { label: 'Done', value: stats.completed, icon: CheckCircle2, gradient: 'from-emerald-500/15 to-green-400/5', iconBg: 'bg-emerald-500/20', iconColor: 'text-emerald-400' },
+          { label: 'Total', value: stats.total, icon: ListTodo, iconColor: 'text-muted-foreground' },
+          { label: 'Active', value: stats.pending, icon: Clock, iconColor: 'text-amber-600 dark:text-amber-400' },
+          { label: 'Missing', value: stats.missing, icon: AlertTriangle, iconColor: 'text-red-600 dark:text-red-400' },
+          { label: 'Done', value: stats.completed, icon: CheckCircle2, iconColor: 'text-emerald-600 dark:text-emerald-400' },
         ].map((stat) => (
           <motion.div key={stat.label} variants={itemVariants}>
             <div
-              className={cn(
-                'relative overflow-hidden rounded-xl border border-border/50 p-3 sm:p-3.5',
-                'bg-gradient-to-br backdrop-blur-sm',
-                stat.gradient
-              )}
+              className="workspace-stat"
             >
               <div className="flex items-center gap-2.5 sm:gap-3">
-                <div className={cn('p-1.5 sm:p-2 rounded-lg', stat.iconBg)}>
+                <div className="rounded-lg bg-muted/60 p-2">
                   <stat.icon className={cn('w-3.5 h-3.5 sm:w-4 sm:h-4', stat.iconColor)} />
                 </div>
                 <div className="min-w-0">
-                  <p className="text-lg sm:text-xl font-bold tracking-tight leading-none">{stat.value}</p>
-                  <p className="text-[10px] sm:text-[11px] text-muted-foreground mt-0.5">{stat.label}</p>
+                  <p className="text-xl font-semibold tracking-tight leading-none tabular-nums">{stat.value}</p>
+                  <p className="text-xs text-muted-foreground mt-1">{stat.label}</p>
                 </div>
               </div>
             </div>
@@ -220,7 +203,7 @@ export function TaskList({ initialFilter = 'pending' }: { initialFilter?: Filter
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.15 }}
-        className="space-y-3"
+        className="workspace-panel space-y-4 p-4 sm:p-5"
       >
         {/* Search + Toggle */}
         <div className="flex items-center gap-2">
@@ -228,15 +211,17 @@ export function TaskList({ initialFilter = 'pending' }: { initialFilter?: Filter
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <Input
               placeholder="Search tasks..."
+              aria-label="Search tasks"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-9 h-9 bg-muted/30 border-border/50"
+              className="pl-9 h-10 bg-background"
             />
             {searchQuery && (
               <motion.button
                 initial={{ scale: 0 }}
                 animate={{ scale: 1 }}
                 onClick={() => setSearchQuery('')}
+                aria-label="Clear task search"
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground text-xs"
               >
                 ✕
@@ -247,7 +232,9 @@ export function TaskList({ initialFilter = 'pending' }: { initialFilter?: Filter
             <Button
               variant={showFilters ? 'secondary' : 'outline'}
               size="icon"
-              className="h-9 w-9 shrink-0"
+              className="h-10 w-10 shrink-0"
+              aria-label="Toggle task filters"
+              aria-expanded={showFilters}
               onClick={() => setShowFilters(!showFilters)}
             >
               <SlidersHorizontal className="w-4 h-4" />
@@ -257,22 +244,23 @@ export function TaskList({ initialFilter = 'pending' }: { initialFilter?: Filter
 
         {/* Filter Tabs — horizontally scrollable on mobile */}
         <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-1 bg-muted/40 rounded-xl p-1 border border-border/30 overflow-x-auto hide-scrollbar">
+          <div className="workspace-tabs flex max-w-full items-center gap-1 overflow-x-auto">
             {filterOptions.map((filter) => (
               <button
                 key={filter.key}
                 onClick={() => setFilterBy(filter.key)}
+                aria-pressed={filterBy === filter.key}
                 className={cn(
-                  'relative flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors',
+                  'relative flex shrink-0 items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-lg transition-colors',
                   filterBy === filter.key
-                    ? 'text-primary-foreground'
+                    ? 'text-foreground'
                     : 'text-muted-foreground hover:text-foreground'
                 )}
               >
                 {filterBy === filter.key && (
                   <motion.div
                     layoutId="activeTaskFilter"
-                    className="absolute inset-0 bg-primary rounded-lg shadow-sm shadow-primary/25"
+                    className="absolute inset-0 rounded-lg border border-border bg-card shadow-sm"
                     transition={{ type: 'spring' as const, stiffness: 400, damping: 25 }}
                   />
                 )}
@@ -282,8 +270,8 @@ export function TaskList({ initialFilter = 'pending' }: { initialFilter?: Filter
                   <span className={cn(
                     'text-[10px] px-1.5 py-0.5 rounded-full min-w-[18px] text-center',
                     filterBy === filter.key
-                      ? 'bg-white/20'
-                      : 'bg-muted-foreground/15'
+                      ? 'bg-primary/10 text-primary'
+                      : 'bg-muted-foreground/10'
                   )}>
                     {filter.count}
                   </span>
@@ -348,7 +336,7 @@ export function TaskList({ initialFilter = 'pending' }: { initialFilter?: Filter
       </motion.div>
 
       {/* Task List */}
-      <div className="space-y-2.5">
+      <div className="space-y-3">
         <AnimatePresence mode="popLayout">
           {filteredAndSortedTasks.length === 0 ? (
             <motion.div
@@ -360,11 +348,9 @@ export function TaskList({ initialFilter = 'pending' }: { initialFilter?: Filter
             >
               <div className="text-center py-16 px-6 rounded-2xl border border-dashed border-border/60 bg-muted/20">
                 <motion.div
-                  className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-indigo-500/20 to-purple-500/20 flex items-center justify-center border border-indigo-500/20"
-                  animate={{ y: [0, -6, 0], rotate: [0, 3, 0] }}
-                  transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
+                  className="w-12 h-12 mx-auto mb-4 rounded-xl bg-primary/10 flex items-center justify-center"
                 >
-                  <Sparkles className="w-7 h-7 text-indigo-400" />
+                  <Sparkles className="w-5 h-5 text-primary" />
                 </motion.div>
                 <p className="text-foreground font-semibold text-base">
                   {searchQuery ? 'No matching tasks' : 'No tasks yet'}

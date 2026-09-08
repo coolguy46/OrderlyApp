@@ -193,17 +193,17 @@ export function PlannedCalendar() {
 
   if (!selectedPlan) {
     return (
-      <Card className="overflow-hidden border-indigo-500/15 bg-gradient-to-br from-card/80 via-card/60 to-indigo-500/[0.06]">
+      <Card className="workspace-panel overflow-hidden">
         <CardContent className="flex min-h-[calc(100dvh-15rem)] flex-col items-center justify-center px-6 py-14 text-center">
-          <div className="mb-5 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 p-4 shadow-lg shadow-indigo-500/20">
-            <CalendarClock className="h-7 w-7 text-white" />
+          <div className="mb-5 rounded-2xl border border-primary/15 bg-primary/10 p-4 text-primary">
+            <CalendarClock className="h-7 w-7" />
           </div>
           <h2 className="font-display text-xl font-semibold">No planned week yet</h2>
           <p className="mt-2 max-w-md text-sm leading-relaxed text-muted-foreground">
             Ask Orderly to plan your week first. Your active week will appear
             here automatically.
           </p>
-          <Button asChild className="mt-6 bg-gradient-to-r from-indigo-500 to-purple-600 text-white">
+          <Button asChild className="mt-6">
             <Link href="/planner">
               <Sparkles className="h-4 w-4" />
               Plan my week
@@ -215,8 +215,8 @@ export function PlannedCalendar() {
   }
 
   return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border/45 bg-card/55 px-2.5 py-2 shadow-sm backdrop-blur-sm sm:px-3">
+    <div className="space-y-4">
+      <div className="workspace-toolbar flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-1.5">
           <Button
             type="button"
@@ -308,7 +308,7 @@ export function PlannedCalendar() {
           />
         </div>
 
-        <Card className="h-[650px] min-w-0 overflow-hidden border-indigo-500/15 xl:h-full">
+        <Card className="workspace-panel h-[650px] min-w-0 overflow-hidden xl:h-full">
           <CardContent className="h-full p-2 sm:p-3">
             <WeekTimeGrid
               weekStart={planStartDate || selectedDate}

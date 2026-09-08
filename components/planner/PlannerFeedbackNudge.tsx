@@ -108,10 +108,10 @@ export function PlannerFeedbackNudge() {
         exit={{ opacity: 0, y: 12, scale: 0.98 }}
         role="status"
         aria-live="polite"
-        className="fixed bottom-16 right-3 z-50 w-[min(360px,calc(100vw-1.5rem))] rounded-2xl border border-indigo-500/25 bg-card/95 p-3.5 shadow-2xl shadow-black/20 backdrop-blur-xl lg:bottom-5 lg:right-5"
+        className="fixed bottom-16 right-3 z-50 w-[min(360px,calc(100vw-1.5rem))] rounded-2xl border border-border bg-card p-4 shadow-xl shadow-black/10 lg:bottom-5 lg:right-5"
       >
         <div className="flex items-start gap-3">
-          <div className="rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 p-2 text-white shadow-sm">
+          <div className="rounded-xl border border-primary/15 bg-primary/10 p-2 text-primary">
             <Sparkles className="h-4 w-4" />
           </div>
           <div className="min-w-0 flex-1">

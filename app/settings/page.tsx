@@ -350,28 +350,46 @@ export default function SettingsPage() {
         initial="hidden"
         animate="show"
         transition={{ staggerChildren: 0.08 }}
-        className="max-w-4xl mx-auto space-y-6"
+        className="workspace-page mx-auto max-w-5xl"
       >
-        <motion.div variants={sectionVariants}>
-          <h1 className="text-2xl font-bold">Settings</h1>
-          <p className="text-muted-foreground">Manage your app preferences</p>
+        <motion.div variants={sectionVariants} className="workspace-header">
+          <div>
+            <p className="workspace-eyebrow">Make yourself at home</p>
+            <h1 className="workspace-title">Settings</h1>
+            <p className="workspace-description">Your account, preferences, and planning routine.</p>
+          </div>
         </motion.div>
+
+        <nav aria-label="Settings sections" className="workspace-toolbar flex flex-wrap gap-1 p-2">
+          {[
+            ['appearance', 'Appearance'],
+            ['integrations', 'Integrations'],
+            ['account', 'Account'],
+            ['availability', 'Availability'],
+            ['notifications', 'Notifications'],
+            ['privacy', 'Privacy & security'],
+          ].map(([id, label]) => (
+            <a key={id} href={`#${id}`} className="rounded-lg px-3 py-2 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+              {label}
+            </a>
+          ))}
+        </nav>
             
         {/* Appearance Section */}
-        <motion.div variants={sectionVariants}>
-          <Card>
+        <motion.div variants={sectionVariants} id="appearance" className="scroll-mt-24">
+          <Card className="sm:grid sm:grid-cols-[210px_minmax(0,1fr)]">
             <CardHeader>
               <div className="flex items-center gap-3">
                 <div className="p-2 rounded-lg bg-primary/10">
                   <Palette className="w-5 h-5 text-primary" />
                 </div>
                 <div>
-                  <CardTitle className="text-lg">Appearance</CardTitle>
+                  <CardTitle role="heading" aria-level={2} className="text-lg">Appearance</CardTitle>
                   <CardDescription>Customize how Orderly looks</CardDescription>
                 </div>
               </div>
             </CardHeader>
-            <CardContent>
+            <CardContent className="pt-0 sm:pt-6">
               <div className="space-y-4">
                 <label className="text-sm font-medium">Theme</label>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -380,7 +398,7 @@ export default function SettingsPage() {
                       key={option.value}
                       onClick={() => setTheme(option.value)}
                       className={`
-                        flex flex-col items-center gap-3 p-4 rounded-lg border-2 transition-all
+                        flex flex-col items-center gap-3 p-4 rounded-xl border transition-colors
                         ${theme === option.value 
                           ? 'border-primary bg-primary/5' 
                           : 'border-border hover:border-primary/50 hover:bg-muted/50'
@@ -388,8 +406,8 @@ export default function SettingsPage() {
                       `}
                     >
                       <div className={`
-                        p-3 rounded-full 
-                        ${theme === option.value ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}
+                        p-2.5 rounded-lg
+                        ${theme === option.value ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'}
                       `}>
                         {option.icon}
                       </div>
@@ -406,10 +424,10 @@ export default function SettingsPage() {
         </motion.div>
 
         {/* Integrations Link */}
-        <motion.div variants={sectionVariants}>
+        <motion.div variants={sectionVariants} id="integrations" className="scroll-mt-24">
           <Link href="/settings/integrations">
             <Card className="hover:bg-muted/30 transition-colors cursor-pointer group">
-              <CardContent className="p-4">
+              <CardContent className="p-5 sm:p-6">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     <div className="p-2 rounded-lg bg-purple-500/10">
@@ -428,20 +446,20 @@ export default function SettingsPage() {
         </motion.div>
 
         {/* Account Section */}
-        <motion.div variants={sectionVariants}>
-          <Card>
+        <motion.div variants={sectionVariants} id="account" className="scroll-mt-24">
+          <Card className="sm:grid sm:grid-cols-[210px_minmax(0,1fr)]">
             <CardHeader>
               <div className="flex items-center gap-3">
                 <div className="p-2 rounded-lg bg-blue-500/10">
                   <User className="w-5 h-5 text-blue-500" />
                 </div>
                 <div>
-                  <CardTitle className="text-lg">Account</CardTitle>
+                  <CardTitle role="heading" aria-level={2} className="text-lg">Account</CardTitle>
                   <CardDescription>Manage your profile and account details</CardDescription>
                 </div>
               </div>
             </CardHeader>
-            <CardContent className="space-y-6">
+            <CardContent className="space-y-6 sm:pt-6">
               {/* Profile info */}
               <div className="space-y-4">
                 <div className="space-y-2">
@@ -460,13 +478,13 @@ export default function SettingsPage() {
                     <User className="w-4 h-4 text-muted-foreground" />
                     Full Name
                   </label>
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap gap-2">
                     <input
                       type="text"
                       value={fullName}
                       onChange={(e) => setFullName(e.target.value)}
                       placeholder="Enter your full name"
-                      className="flex-1 px-3 py-2 rounded-lg border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                      className="min-w-0 flex-1 px-3 py-2 rounded-lg border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
                     />
                     <Button 
                       size="sm" 
@@ -497,7 +515,7 @@ export default function SettingsPage() {
                     { label: 'Active Tasks', value: tasks.filter((task) => task.status !== 'completed').length, icon: Target },
                     { label: 'Member Since', value: user?.created_at ? new Date(user.created_at).toLocaleDateString('en-US', { month: 'short', year: 'numeric' }) : '—', icon: User },
                   ].map((stat) => (
-                    <div key={stat.label} className="p-3 rounded-lg bg-muted/30 border text-center">
+                    <div key={stat.label} className="p-3 rounded-lg bg-muted/30 text-center">
                       <stat.icon className="w-4 h-4 mx-auto mb-1 text-muted-foreground" />
                       <p className="text-lg font-bold">{stat.value}</p>
                       <p className="text-[11px] text-muted-foreground">{stat.label}</p>
@@ -510,7 +528,7 @@ export default function SettingsPage() {
         </motion.div>
 
         {/* Schedule Availability Section */}
-        <motion.div variants={sectionVariants}>
+        <motion.div variants={sectionVariants} id="availability" className="scroll-mt-24">
           <Card>
             <CardHeader>
               <div className="flex items-center gap-3">
@@ -518,7 +536,7 @@ export default function SettingsPage() {
                   <CalendarClock className="w-5 h-5 text-indigo-500" />
                 </div>
                 <div>
-                  <CardTitle className="text-lg">Schedule Availability</CardTitle>
+                  <CardTitle role="heading" aria-level={2} className="text-lg">Schedule Availability</CardTitle>
                   <CardDescription>Tell Orderly when school and sleep make you unavailable</CardDescription>
                 </div>
               </div>
@@ -610,20 +628,20 @@ export default function SettingsPage() {
         </motion.div>
 
         {/* Notifications Section */}
-        <motion.div variants={sectionVariants}>
-          <Card>
+        <motion.div variants={sectionVariants} id="notifications" className="scroll-mt-24">
+          <Card className="sm:grid sm:grid-cols-[210px_minmax(0,1fr)]">
             <CardHeader>
               <div className="flex items-center gap-3">
                 <div className="p-2 rounded-lg bg-amber-500/10">
                   <Bell className="w-5 h-5 text-amber-500" />
                 </div>
                 <div>
-                  <CardTitle className="text-lg">Notifications</CardTitle>
+                  <CardTitle role="heading" aria-level={2} className="text-lg">Notifications</CardTitle>
                   <CardDescription>Configure alerts and reminders</CardDescription>
                 </div>
               </div>
             </CardHeader>
-            <CardContent>
+            <CardContent className="sm:pt-6">
               <div className="mb-4 space-y-2 rounded-lg border border-border p-3">
                 <p className="text-xs text-muted-foreground">Reminders appear while Orderly is open on this browser. Tasks notify within 30 minutes of their deadline; exam and goal alerts appear today and the day before. Study reminders and the daily summary appear once a day when you open Orderly. These preferences stay on this device.</p>
                 <Button type="button" size="sm" variant="outline" onClick={handleEnableDesktopAlerts}>Enable desktop alerts</Button>
@@ -637,7 +655,7 @@ export default function SettingsPage() {
                   { key: 'dailyDigest' as const, label: 'Daily Digest', description: 'Summary of your daily tasks and schedule', icon: Mail },
                   { key: 'soundEnabled' as const, label: 'Sound Effects', description: 'Play sounds for timer and notifications', icon: BellRing },
                 ].map((item) => (
-                  <div key={item.key} className="flex items-center justify-between py-3 px-1">
+                  <div key={item.key} className="flex items-center justify-between gap-4 border-b border-border/60 py-4 last:border-b-0">
                     <div className="flex items-center gap-3">
                       <item.icon className="w-4 h-4 text-muted-foreground shrink-0" />
                       <div>
@@ -659,27 +677,27 @@ export default function SettingsPage() {
         </motion.div>
 
         {/* Privacy & Security Section */}
-        <motion.div variants={sectionVariants}>
-          <Card>
+        <motion.div variants={sectionVariants} id="privacy" className="scroll-mt-24">
+          <Card className="sm:grid sm:grid-cols-[210px_minmax(0,1fr)]">
             <CardHeader>
               <div className="flex items-center gap-3">
                 <div className="p-2 rounded-lg bg-green-500/10">
                   <Lock className="w-5 h-5 text-green-500" />
                 </div>
                 <div>
-                  <CardTitle className="text-lg">Privacy & Security</CardTitle>
+                  <CardTitle role="heading" aria-level={2} className="text-lg">Privacy & Security</CardTitle>
                   <CardDescription>Control your data and privacy settings</CardDescription>
                 </div>
               </div>
             </CardHeader>
-            <CardContent className="space-y-6">
+            <CardContent className="space-y-6 sm:pt-6">
               {/* Change Password */}
               <div className="space-y-4">
                 <div className="flex items-center gap-2">
                   <Key className="w-4 h-4 text-muted-foreground" />
                   <p className="text-sm font-medium">Change Password</p>
                 </div>
-                <div className="space-y-3 pl-6">
+                <div className="space-y-3">
                   <div className="relative">
                     <input
                       type={showPasswords ? 'text' : 'password'}
@@ -731,10 +749,10 @@ export default function SettingsPage() {
                   <Download className="w-4 h-4 text-muted-foreground" />
                   <p className="text-sm font-medium">Export Your Data</p>
                 </div>
-                <p className="text-xs text-muted-foreground pl-6">
+                <p className="text-xs text-muted-foreground leading-relaxed">
                   Download your saved tasks, events, plans and chats, goals, exams, study sessions, subjects, and profile as JSON. Private feed links, login credentials, browser-only preferences, and unsaved changes are excluded. This is a data download, not a restorable backup.
                 </p>
-                <div className="pl-6">
+                <div>
                   <Button 
                     variant="outline" 
                     size="sm" 
@@ -754,8 +772,8 @@ export default function SettingsPage() {
                   <AlertTriangle className="w-4 h-4" />
                   <p className="text-sm font-medium">Danger Zone</p>
                 </div>
-                <div className="p-4 rounded-lg border border-red-500/20 bg-red-500/5 space-y-3 ml-6">
-                  <div className="flex items-center justify-between gap-4">
+                <div className="p-4 rounded-lg border border-red-500/20 bg-red-500/5 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-4">
                     <div>
                       <p className="text-sm font-medium">Delete Account</p>
                       <p className="text-xs text-muted-foreground">Permanently delete your account and all associated data. This cannot be undone.</p>
@@ -770,7 +788,7 @@ export default function SettingsPage() {
                       Delete
                     </Button>
                   </div>
-                  <div className="flex items-center justify-between gap-4 pt-3 border-t border-red-500/10">
+                  <div className="flex flex-wrap items-center justify-between gap-4 pt-3 border-t border-red-500/10">
                     <div>
                       <p className="text-sm font-medium">Sign Out</p>
                       <p className="text-xs text-muted-foreground">Sign out of your account on this device.</p>

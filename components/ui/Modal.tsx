@@ -38,21 +38,21 @@ export function Modal({ isOpen, onClose, title, children, size = 'md' }: ModalPr
         showCloseButton={false}
         aria-describedby={undefined}
         className={cn(
-          'left-1/2 right-auto flex w-[calc(100%-2rem)] -translate-x-1/2 flex-col gap-0 overflow-hidden border-white/10 bg-gray-900/95 p-0 text-white shadow-2xl shadow-black/50 backdrop-blur-xl',
+          'left-1/2 right-auto flex w-[calc(100%-2rem)] -translate-x-1/2 flex-col gap-0 overflow-hidden border-border bg-card p-0 text-foreground shadow-2xl',
           'sm:max-h-[90dvh] sm:overflow-hidden sm:rounded-2xl',
           sizeClasses[size]
         )}
         style={{ maxHeight: 'min(calc(100dvh - 2rem), 900px)' }}
       >
         <DialogHeader className="shrink-0 flex-row items-center justify-between space-y-0 px-6 pb-4 pt-6 text-left">
-          <DialogTitle className={cn('text-xl text-white', !title && 'sr-only')}>
+          <DialogTitle className={cn('text-xl text-foreground', !title && 'sr-only')}>
             {title || 'Dialog'}
           </DialogTitle>
           <DialogClose asChild>
             <button
               type="button"
               aria-label="Close dialog"
-              className="rounded-xl p-2 text-gray-400 transition-colors hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
+              className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               <X size={20} />
             </button>

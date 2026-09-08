@@ -6,7 +6,7 @@ import { getDefaultPlannerSettings } from '../../lib/planner/types';
 export const owner = 'feature-test-alex';
 const key = 'feature-fixture-data';
 const initial = {
-  user: { id: owner, full_name: 'Alex Morgan', email: 'alex@example.invalid', created_at: '2026-09-01T12:00:00Z' },
+  user: { id: owner, full_name: 'Alex Morgan', email: 'alex@example.invalid', created_at: '2026-09-01T12:00:00Z', tasks_completed: 0, total_study_time: 0 },
   tasks: [], subjects: [], studySessions: [],
   goals: [{ id: 'goal', user_id: owner, title: 'Essay outline', current_value: 1, target_value: 3, unit: 'steps', status: 'active', goal_type: 'short_term', deadline: null }],
   exams: [{ id: 'exam', user_id: owner, title: 'Biology Quiz', exam_date: '2027-01-05', source: 'manual', preparation_progress: 20, description: '<p>Cells &amp; tissues</p>' }],

@@ -176,11 +176,11 @@ export function AssistantChat({
   endRef,
 }: AssistantChatProps) {
   return (
-    <Card className="flex h-[clamp(360px,52dvh,560px)] flex-col overflow-hidden bg-card/75 shadow-none" aria-label="Chat with Orderly">
-      <CardHeader className="flex flex-wrap items-center justify-between gap-2 border-b border-border/40 px-4 py-3 [.border-b]:pb-3 sm:px-5">
+    <Card className="workspace-panel flex h-[clamp(420px,58dvh,650px)] flex-col overflow-hidden" aria-label="Chat with Orderly">
+      <CardHeader className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-muted/20 px-4 py-3 [.border-b]:pb-3 sm:px-6">
         <div className="flex min-w-0 items-center gap-3">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/15 text-primary">
-            <Bot className="h-5 w-5" />
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-primary/15 bg-primary/10 text-primary">
+            <Bot className="h-4 w-4" />
           </span>
           <div className="min-w-0">
             <CardTitle>Chat with Orderly</CardTitle>
@@ -196,20 +196,21 @@ export function AssistantChat({
         </div>
       </CardHeader>
 
-      <CardContent className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 sm:px-5">
+      <CardContent className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-6 sm:px-6">
         {messages.length === 0 ? (
-          <div className="flex min-h-full flex-col items-center justify-center py-4 text-center">
-            <h2 className="text-lg font-semibold tracking-tight">What can I help you plan?</h2>
+          <div className="mx-auto flex min-h-full max-w-2xl flex-col items-center justify-center py-4 text-center">
+            <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl border border-border bg-muted/40 text-primary"><Sparkles className="h-5 w-5" /></div>
+            <h2 className="text-xl font-semibold tracking-tight sm:text-2xl">What can I help you plan?</h2>
             <p className="mt-2 max-w-md text-sm leading-relaxed text-muted-foreground">
               Ask about your workload or tell me what to change.
             </p>
-            <div className="mt-4 flex max-w-2xl flex-wrap justify-center gap-2">
+            <div className="mt-5 grid w-full max-w-xl grid-cols-1 gap-2 sm:grid-cols-2">
               {examples.map(example => (
                 <button
                   key={example}
                   type="button"
                   onClick={() => onExampleClick(example)}
-                  className="min-h-9 rounded-lg border border-border/50 px-3 py-2 text-xs text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                  className="min-h-11 rounded-xl border border-border bg-background/40 px-4 py-3 text-left text-xs leading-relaxed text-muted-foreground transition-colors hover:border-primary/30 hover:bg-primary/5 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                 >
                   {example}
                 </button>
@@ -217,7 +218,7 @@ export function AssistantChat({
             </div>
           </div>
         ) : (
-          <div className="mx-auto max-w-3xl space-y-5">
+          <div className="mx-auto max-w-3xl space-y-6">
             {messages.map(message => (
               <div key={message.id} className={cn('flex', message.role === 'user' ? 'justify-end' : 'justify-start')}>
                 <div className={cn('min-w-0', message.role === 'user' ? 'max-w-[88%] sm:max-w-[82%]' : 'max-w-full sm:max-w-[94%]')}>
@@ -227,10 +228,10 @@ export function AssistantChat({
                     </p>
                   )}
                   <div className={cn(
-                    'break-words [overflow-wrap:anywhere] rounded-2xl px-4 py-3 text-sm leading-6',
+                    'break-words [overflow-wrap:anywhere] rounded-2xl border px-4 py-3 text-sm leading-7',
                     message.role === 'user'
-                      ? 'rounded-br-md bg-primary text-primary-foreground'
-                      : 'rounded-bl-md bg-muted/35 text-foreground',
+                      ? 'rounded-br-md border-primary/15 bg-primary/10 text-foreground'
+                      : 'rounded-bl-md border-border/60 bg-background/40 text-foreground',
                   )}>
                     {message.role === 'assistant'
                       ? <AssistantMessageContent content={message.content} />
@@ -259,9 +260,9 @@ export function AssistantChat({
         <div ref={endRef} />
       </CardContent>
 
-      <div className="shrink-0 border-t border-border/40 bg-card px-3 py-3 sm:px-5">
+      <div className="shrink-0 border-t border-border bg-muted/15 px-3 py-3 sm:px-6 sm:py-4">
         <div className="mx-auto max-w-3xl">
-          <div className="flex items-end gap-2 rounded-xl border border-border/60 bg-background/50 px-3 py-2 focus-within:border-primary/50 focus-within:ring-2 focus-within:ring-primary/10">
+          <div className="flex items-end gap-2 rounded-2xl border border-border bg-card px-3 py-2 shadow-sm focus-within:border-primary/50 focus-within:ring-2 focus-within:ring-primary/10">
             <Textarea
               ref={inputRef}
               value={command}

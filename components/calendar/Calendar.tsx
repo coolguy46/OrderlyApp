@@ -19,11 +19,12 @@ export function Calendar() {
   }, []);
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-col gap-5">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-5">
+    <div className="workspace-page flex min-h-0 min-w-0 flex-col">
+      <div className="workspace-header">
         <div className="min-w-0">
-          <h1 className="font-display text-xl font-semibold tracking-tight">Calendar</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
+          <p className="workspace-eyebrow">Plan your time</p>
+          <h1 className="workspace-title">Calendar</h1>
+          <p className="workspace-description">
             {section === 'tasks'
               ? 'Your deadlines, tasks, and events.'
               : 'Make time for your tasks and events.'}

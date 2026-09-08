@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from '@/components/ui/Button';
@@ -40,6 +41,7 @@ const SUBJECT_COLORS = [
 ];
 
 const STEPS = ['profile', 'subjects', 'integrations', 'preferences', 'complete'] as const;
+const STEP_LABELS = ['Your profile', 'Your classes', 'Connect Canvas', 'Your preferences', 'Ready to go'];
 type Step = typeof STEPS[number];
 
 class CanvasSetupValidationError extends Error {
@@ -244,16 +246,21 @@ export default function SetupPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-background via-background to-indigo-500/10">
-      {/* Background decoration */}
-      <div className="fixed inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute -top-40 -right-40 w-80 h-80 bg-indigo-500/20 rounded-full blur-3xl" />
-        <div className="absolute -bottom-40 -left-40 w-80 h-80 bg-purple-500/20 rounded-full blur-3xl" />
-      </div>
+    <div className="flex min-h-screen items-center justify-center bg-background px-4 py-8 text-foreground sm:px-8 sm:py-14">
+      <div className="mx-auto grid w-full max-w-5xl items-start gap-8 lg:grid-cols-[250px_minmax(0,1fr)] lg:gap-16">
+        <aside className="lg:pt-12">
+          <div className="mb-7 flex items-center gap-2.5"><Image src="/logo.svg" alt="" width={36} height={36} className="h-9 w-9 rounded-lg" priority /><span className="text-lg font-semibold tracking-tight">Orderly<span className="text-primary">.</span></span></div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">Make it yours</p>
+          <h1 className="mt-3 font-display text-3xl font-semibold leading-tight tracking-tight">A workspace<br className="hidden lg:block" /> for your day.</h1>
+          <p className="mt-3 max-w-sm text-sm leading-6 text-muted-foreground">A few details to get started. You can adjust your classes, connections, and look later.</p>
+          <ol aria-label="Setup steps" className="mt-8 hidden space-y-5 lg:block">
+            {STEP_LABELS.map((label, index) => <li key={label} aria-current={index === stepIndex ? 'step' : undefined} className={`flex items-center gap-3 text-sm ${index === stepIndex ? 'font-medium text-foreground' : 'text-muted-foreground'}`}><span className={`flex h-7 w-7 items-center justify-center rounded-full border text-xs tabular-nums ${index === stepIndex ? 'border-primary bg-primary text-primary-foreground' : index < stepIndex ? 'border-primary/20 bg-primary/10 text-primary' : 'border-border'}`}>{index < stepIndex ? <Check className="h-3.5 w-3.5" /> : index + 1}</span>{label}</li>)}
+          </ol>
+        </aside>
 
-      <div className="w-full max-w-2xl relative">
+        <div className="min-w-0">
         {/* Progress bar */}
-        <div className="mb-8">
+        <div className="mb-5">
           <div className="flex items-center justify-between mb-2">
             <span className="text-sm text-muted-foreground">
               Step {stepIndex + 1} of {STEPS.length}
@@ -262,17 +269,17 @@ export default function SetupPage() {
               {Math.round(progress)}%
             </span>
           </div>
-          <div className="h-2 bg-muted rounded-full overflow-hidden">
+          <div className="h-1 bg-muted rounded-full overflow-hidden">
             <motion.div
-              className="h-full bg-gradient-to-r from-indigo-500 to-purple-600 rounded-full"
+              className="h-full rounded-full bg-primary"
               animate={{ width: `${progress}%` }}
               transition={{ duration: 0.4, ease: 'easeInOut' }}
             />
           </div>
         </div>
 
-        <Card className="border-border/50 bg-card/80 backdrop-blur-xl overflow-hidden">
-          <CardContent className="p-8">
+        <Card className="overflow-hidden rounded-2xl border-border bg-card shadow-sm">
+          <CardContent className="p-5 sm:p-8">
             <AnimatePresence mode="wait" custom={direction}>
               <motion.div
                 key={currentStep}
@@ -505,7 +512,7 @@ export default function SetupPage() {
                       </p>
                     </div>
 
-                    <div className="grid grid-cols-3 gap-4 max-w-md mx-auto">
+                    <div className="mx-auto grid max-w-md grid-cols-3 gap-2 sm:gap-4">
                       {([
                         { value: 'light' as Theme, icon: Sun, label: 'Light' },
                         { value: 'dark' as Theme, icon: Moon, label: 'Dark' },
@@ -516,7 +523,7 @@ export default function SetupPage() {
                           type="button"
                           onClick={() => setSelectedTheme(option.value)}
                           aria-pressed={selectedTheme === option.value}
-                          className={`p-4 rounded-xl border-2 transition-all flex flex-col items-center gap-2 ${
+                          className={`rounded-xl border p-3 transition-colors flex flex-col items-center gap-2 sm:p-4 ${
                             selectedTheme === option.value
                               ? 'border-indigo-500 bg-indigo-500/10'
                               : 'border-border hover:border-indigo-500/50'
@@ -547,9 +554,9 @@ export default function SetupPage() {
                       initial={{ scale: 0 }}
                       animate={{ scale: 1 }}
                       transition={{ type: 'spring', stiffness: 200, damping: 15, delay: 0.1 }}
-                      className="mx-auto w-20 h-20 rounded-2xl bg-gradient-to-br from-green-500 to-emerald-600 flex items-center justify-center"
+                      className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl border border-primary/20 bg-primary/10"
                     >
-                      <Rocket className="w-10 h-10 text-white" />
+                      <Rocket className="h-7 w-7 text-primary" />
                     </motion.div>
                     <div>
                       <h2 className="text-3xl font-bold mb-2">Ready to finish?</h2>
@@ -572,7 +579,7 @@ export default function SetupPage() {
                       <div
                         role="alert"
                         aria-live="assertive"
-                        className="mx-auto flex max-w-lg items-start gap-2 rounded-lg border border-red-500/25 bg-red-500/10 p-3 text-left text-sm text-red-300"
+                        className="mx-auto flex max-w-lg items-start gap-2 rounded-lg border border-red-500/25 bg-red-500/10 p-3 text-left text-sm text-red-700 dark:text-red-300"
                       >
                         <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
                         <span>{setupError} Your setup details are still here.</span>
@@ -597,7 +604,7 @@ export default function SetupPage() {
                 {currentStep === 'profile' && (
                   <Button
                     onClick={goNext}
-                    className="bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700"
+                    className="bg-primary text-primary-foreground hover:bg-primary/90"
                     disabled={!displayName.trim()}
                   >
                     Continue
@@ -607,7 +614,7 @@ export default function SetupPage() {
                 {currentStep === 'subjects' && (
                   <Button
                     onClick={goNext}
-                    className="bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700"
+                    className="bg-primary text-primary-foreground hover:bg-primary/90"
                   >
                     {addedSubjects.length === 0 ? 'Skip' : 'Continue'}
                     <ArrowRight className="w-4 h-4" />
@@ -616,7 +623,7 @@ export default function SetupPage() {
                 {currentStep === 'integrations' && (
                   <Button
                     onClick={handleIntegrationContinue}
-                    className="bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700"
+                    className="bg-primary text-primary-foreground hover:bg-primary/90"
                   >
                     {canvasUrl.trim() ? 'Continue' : 'Skip'}
                     <ArrowRight className="w-4 h-4" />
@@ -625,7 +632,7 @@ export default function SetupPage() {
                 {currentStep === 'preferences' && (
                   <Button
                     onClick={goNext}
-                    className="bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700"
+                    className="bg-primary text-primary-foreground hover:bg-primary/90"
                   >
                     Continue
                     <ArrowRight className="w-4 h-4" />
@@ -635,7 +642,7 @@ export default function SetupPage() {
                   <Button
                     onClick={handleFinish}
                     disabled={isSubmitting}
-                    className="bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700"
+                    className="bg-primary text-primary-foreground hover:bg-primary/90"
                   >
                     {isSubmitting ? (
                       <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
@@ -651,6 +658,7 @@ export default function SetupPage() {
             </div>
           </CardContent>
         </Card>
+        </div>
       </div>
     </div>
   );

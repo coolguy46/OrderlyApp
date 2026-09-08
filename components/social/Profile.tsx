@@ -164,40 +164,41 @@ export function Profile() {
 
   return (
     <motion.div 
-      className="space-y-6"
+      className="workspace-page mx-auto max-w-5xl"
       initial="hidden"
       animate="show"
       variants={containerVariants}
     >
+      <div className="workspace-header">
+        <div>
+          <p className="workspace-eyebrow">Your journey</p>
+          <h1 className="workspace-title">Profile</h1>
+          <p className="workspace-description">A clear view of your progress, one day at a time.</p>
+        </div>
+      </div>
       {/* Profile Header */}
       <motion.div variants={itemVariants}>
       <Card className="relative overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-br from-primary/20 via-purple-500/10 to-pink-500/20" />
-        {/* Animated shimmer overlay */}
-        <div className="absolute inset-0 shimmer pointer-events-none" />
-
-        <CardContent className="relative p-6">
+        <CardContent className="relative p-6 sm:p-7">
           <div className="flex flex-col sm:flex-row items-center gap-6">
             {/* Avatar */}
             <div className="relative">
               <motion.div
-                whileHover={{ scale: 1.08, rotate: 3 }}
+                whileHover={{ scale: 1.03 }}
                 whileTap={{ scale: 0.95 }}
-                className="w-20 h-20 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-lg shadow-indigo-500/30 ring-2 ring-indigo-500/20 ring-offset-2 ring-offset-background"
+                className="w-20 h-20 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center"
               >
-                <span className="text-3xl font-bold text-white">{user?.full_name?.[0] || 'U'}</span>
+                <span className="text-3xl font-semibold text-primary">{user?.full_name?.[0] || 'U'}</span>
               </motion.div>
               <motion.div 
-                className="absolute -bottom-2 -right-2 w-7 h-7 rounded-full bg-yellow-500 flex items-center justify-center text-xs font-bold text-yellow-900 border-2 border-background"
-                animate={{ scale: [1, 1.1, 1] }}
-                transition={{ duration: 2, repeat: Infinity }}
+                className="absolute -bottom-2 -right-2 w-7 h-7 rounded-full bg-card flex items-center justify-center text-xs font-semibold text-foreground border border-border"
               >
                 {levelInfo.level}
               </motion.div>
             </div>
 
             {/* User Info */}
-            <div className="flex-1 text-center sm:text-left">
+            <div className="min-w-0 flex-1 text-center sm:text-left">
               <div className="flex items-center gap-2 justify-center sm:justify-start">
                 <h2 className="text-xl font-bold text-foreground">{user?.full_name || 'Student'}</h2>
                 <Button
@@ -217,7 +218,7 @@ export function Profile() {
                   <Edit3 className="w-3.5 h-3.5" />
                 </Button>
               </div>
-              <p className="text-muted-foreground text-sm">{user?.email}</p>
+              <p className="text-muted-foreground text-sm break-all">{user?.email}</p>
               <div className="flex items-center gap-4 mt-2 justify-center sm:justify-start">
                 <div className="flex items-center gap-1.5 text-sm">
                   <Target className="w-4 h-4 text-green-500" />
@@ -228,13 +229,13 @@ export function Profile() {
             </div>
 
             {/* XP Progress */}
-            <div className="text-center sm:text-right">
+            <div className="rounded-xl bg-muted/40 p-4 text-center sm:text-right">
               <p className="text-sm text-muted-foreground">Level {levelInfo.level}</p>
               <p className="text-base font-bold text-foreground">
                 {levelInfo.currentXP.toLocaleString()} / {levelInfo.nextLevelXP.toLocaleString()} XP
               </p>
               <div className="w-40 mt-2">
-                <ProgressBar value={levelInfo.currentXP} max={levelInfo.nextLevelXP} showLabel={false} color="indigo" shimmer />
+                <ProgressBar value={levelInfo.currentXP} max={levelInfo.nextLevelXP} showLabel={false} color="indigo" />
               </div>
               <p className="text-xs text-muted-foreground mt-1">{xp.toLocaleString()} total XP</p>
             </div>
@@ -243,13 +244,12 @@ export function Profile() {
       </Card>
       </motion.div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="space-y-5">
         {/* Stats Grid */}
-        <div className="lg:col-span-2 space-y-6">
-          <motion.div variants={containerVariants} className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div>
+          <motion.div variants={containerVariants} className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <motion.div
-              whileHover={{ scale: 1.03, y: -2 }}
-              className="bg-gradient-to-br from-indigo-500/10 to-purple-500/10 border border-indigo-500/20 rounded-xl p-4"
+              className="workspace-stat"
             >
               <div className="flex items-center gap-3">
                 <div className="p-2 bg-indigo-500/20 rounded-lg">
@@ -263,8 +263,7 @@ export function Profile() {
             </motion.div>
 
             <motion.div
-              whileHover={{ scale: 1.03, y: -2 }}
-              className="bg-gradient-to-br from-green-500/10 to-emerald-500/10 border border-green-500/20 rounded-xl p-4"
+              className="workspace-stat"
             >
               <div className="flex items-center gap-3">
                 <div className="p-2 bg-green-500/20 rounded-lg">
@@ -278,8 +277,7 @@ export function Profile() {
             </motion.div>
 
             <motion.div
-              whileHover={{ scale: 1.03, y: -2 }}
-              className="bg-gradient-to-br from-purple-500/10 to-pink-500/10 border border-purple-500/20 rounded-xl p-4"
+              className="workspace-stat"
             >
               <div className="flex items-center gap-3">
                 <div className="p-2 bg-purple-500/20 rounded-lg">
@@ -296,7 +294,7 @@ export function Profile() {
         </div>
 
         {/* Right Column */}
-        <div className="space-y-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
           {/* Quick Stats */}
           <Card>
             <CardHeader className="pb-2">

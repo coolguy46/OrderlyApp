@@ -168,8 +168,8 @@ export function PlanBlockEditor({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="overflow-hidden p-0 sm:max-w-[460px]">
-        <div className="border-b border-border/40 bg-gradient-to-b from-indigo-500/8 to-transparent px-5 pb-4 pt-5 sm:px-6 sm:pt-6">
+      <DialogContent className="overflow-hidden rounded-2xl border-border bg-card p-0 sm:max-w-[500px]">
+        <div className="border-b border-border bg-muted/20 px-5 py-5 sm:px-6">
           <DialogHeader className="pr-7">
             <div className="flex items-start gap-3">
               <div
@@ -179,7 +179,7 @@ export function PlanBlockEditor({
                 {fixed ? <LockKeyhole className="h-4 w-4" /> : <Clock3 className="h-4 w-4" />}
               </div>
               <div className="min-w-0">
-                <DialogTitle className="line-clamp-2 text-base leading-snug">{block.title}</DialogTitle>
+                <DialogTitle className="line-clamp-2 text-lg font-semibold leading-snug tracking-tight">{block.title}</DialogTitle>
                 <DialogDescription className="mt-1 text-xs">
                   {fixed ? 'This commitment is fixed and the planner works around it.' : 'Adjust when and how long you want to work.'}
                 </DialogDescription>
@@ -188,7 +188,7 @@ export function PlanBlockEditor({
           </DialogHeader>
         </div>
 
-        <form onSubmit={(event) => void submit(event)} className="space-y-4 px-5 pb-5 sm:px-6 sm:pb-6">
+        <form onSubmit={(event) => void submit(event)} className="space-y-5 px-5 pb-5 sm:px-6 sm:pb-6">
           <div className="flex flex-wrap items-center gap-1.5 pt-4">
             {block.subjectName && (
               <span

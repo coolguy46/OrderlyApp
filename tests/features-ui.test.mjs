@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createServer } from 'node:http';
@@ -150,6 +150,34 @@ test('real settings/goals/exams/reminder UI works with isolated saved-data bound
       await page.evaluate(view => window.featuresFixture.show(view), view);
       await page.waitForTimeout(200);
       assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `${view} fits a phone`);
+    }
+
+    // Every workflow page retains its main heading and stays usable across
+    // light/dark themes and narrow screens after presentation-only changes.
+    const screenshotDirectory = process.env.ORDERLY_UI_SCREENSHOT_DIR;
+    if (screenshotDirectory) await mkdir(screenshotDirectory, { recursive: true });
+    for (const theme of ['light', 'dark']) {
+      for (const width of [320, 1280]) {
+        await page.setViewportSize({ width, height: 900 });
+        for (const view of ['settings', 'goals', 'exams', 'profile']) {
+          await page.evaluate(({ view, theme }) => {
+            window.featuresFixture.show(view);
+            window.featuresFixture.state().setTheme(theme);
+            document.documentElement.classList.toggle('dark', theme === 'dark');
+          }, { view, theme });
+          await page.getByRole('heading', { level: 1, name: new RegExp(`^${view}$`, 'i') }).waitFor();
+          await page.waitForTimeout(1200);
+          assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `${view} fits ${width}px in ${theme} mode`);
+          if (view === 'settings') {
+            const sections = page.getByRole('navigation', { name: 'Settings sections' });
+            assert.equal(await sections.getByRole('link').count(), 6, 'all settings sections remain reachable');
+            await sections.getByRole('link', { name: 'Privacy & security' }).click();
+            await page.getByRole('heading', { name: 'Privacy & Security', exact: true }).waitFor();
+          }
+          await page.evaluate(() => scrollTo(0, 0));
+          if (screenshotDirectory) await page.screenshot({ path: join(screenshotDirectory, `workflow-${view}-${theme}-${width}.png`) });
+        }
+      }
     }
 
     await page.reload();

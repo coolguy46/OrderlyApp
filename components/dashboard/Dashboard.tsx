@@ -179,25 +179,17 @@ export function Dashboard() {
 
   return (
     <motion.div 
-      className="space-y-6"
+      className="workspace-page"
       initial="hidden"
       animate="show"
       variants={containerVariants}
     >
       {/* Welcome Header */}
-      <motion.div variants={itemVariants} className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-        <div className="space-y-0.5 sm:space-y-1">
-          <h1 className="text-lg sm:text-xl font-bold tracking-tight flex items-center gap-2">
-            Welcome back, {user?.full_name?.split(' ')[0] || 'Student'}! 
-            <motion.span
-              animate={{ rotate: [0, 14, -8, 14, -4, 10, 0] }}
-              transition={{ duration: 1.5, delay: 0.5, ease: 'easeInOut' }}
-              className="inline-block origin-[70%_80%]"
-            >
-              👋
-            </motion.span>
-          </h1>
-          <p className="text-xs sm:text-sm text-muted-foreground">
+      <motion.div variants={itemVariants} className="workspace-header">
+        <div>
+          <p className="workspace-eyebrow">Your overview</p>
+          <h1 className="workspace-title">Welcome back, {user?.full_name?.split(' ')[0] || 'Student'}.</h1>
+          <p className="workspace-description">
             {mounted && todayKey
               ? formatCivilDate(todayKey, taskDisplayOptions.timeZone, {
                   weekday: 'long',
@@ -209,7 +201,7 @@ export function Dashboard() {
           </p>
         </div>
         <Link href="/study" className="self-start sm:self-auto">
-          <Button size="sm" className="gap-2 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 shadow-lg shadow-indigo-500/20 rounded-xl text-white h-9 sm:h-10 sm:px-5">
+          <Button className="gap-2 rounded-xl">
             <Play className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
             <span className="text-xs sm:text-sm">Start Study</span>
           </Button>
@@ -217,29 +209,28 @@ export function Dashboard() {
       </motion.div>
 
       {/* Stats Grid - Animated */}
-      <motion.div variants={containerVariants} className="grid grid-cols-1 gap-2.5 sm:grid-cols-3 sm:gap-3">
+      <motion.div variants={containerVariants} className="grid grid-cols-3 gap-2 sm:gap-4">
         {[
-          { label: 'Completed', value: String(todayStats.tasksCompleted), sub: `${todayStats.tasksDue} due today`, icon: CheckCircle2, color: 'green', gradient: 'from-green-500/10 to-emerald-500/10', borderColor: 'border-green-500/20', href: null },
-          { label: 'Goals', value: String(activeGoals.length), sub: `${goals.filter(isGoalComplete).length} done`, icon: Target, color: 'purple', gradient: 'from-purple-500/10 to-pink-500/10', borderColor: 'border-purple-500/20', href: null },
-          { label: 'Missing', value: String(missingTasks.length), sub: missingTasks.length === 1 ? '1 overdue task' : `${missingTasks.length} overdue tasks`, icon: AlertTriangle, color: 'red', gradient: 'from-red-500/10 to-rose-500/10', borderColor: 'border-red-500/20', href: '/tasks?view=missing' },
+          { label: 'Completed', value: String(todayStats.tasksCompleted), sub: `${todayStats.tasksDue} due today`, icon: CheckCircle2, iconClass: 'text-emerald-600 dark:text-emerald-400 bg-emerald-500/10', href: null },
+          { label: 'Goals', value: String(activeGoals.length), sub: `${goals.filter(isGoalComplete).length} done`, icon: Target, iconClass: 'text-primary bg-primary/10', href: null },
+          { label: 'Missing', value: String(missingTasks.length), sub: missingTasks.length === 1 ? '1 overdue task' : `${missingTasks.length} overdue tasks`, icon: AlertTriangle, iconClass: 'text-red-600 dark:text-red-400 bg-red-500/10', href: '/tasks?view=missing' },
         ].map((stat) => (
           <motion.div key={stat.label} variants={itemVariants}>
             {(() => {
               const card = (
                 <Card className={cn(
-                  'overflow-hidden border bg-gradient-to-br backdrop-blur-sm transition-all active:scale-[0.98]',
-                  stat.href && 'hover:-translate-y-0.5 hover:shadow-md',
-                  stat.gradient, stat.borderColor
+                  'overflow-hidden transition-colors',
+                  stat.href && 'hover:border-red-500/40'
                 )}>
-                  <CardContent className="p-3 sm:p-4">
+                  <CardContent className="p-3 sm:p-5">
                     <div className="flex items-center justify-between gap-2">
                       <div className="space-y-0.5 sm:space-y-1 min-w-0">
-                        <p className="text-[10px] sm:text-xs font-medium text-muted-foreground truncate">{stat.label}</p>
-                        <p className="text-lg sm:text-xl font-bold tracking-tight">{stat.value}</p>
-                        <p className="text-[10px] sm:text-xs text-muted-foreground truncate">{stat.sub}</p>
+                        <p className="text-xs font-medium text-muted-foreground">{stat.label}</p>
+                        <p className="py-1 text-2xl sm:text-3xl font-semibold tracking-tight tabular-nums">{stat.value}</p>
+                        <p className="text-[10px] sm:text-xs text-muted-foreground">{stat.sub}</p>
                       </div>
-                      <div className={`p-2 sm:p-2.5 rounded-xl bg-${stat.color}-500/10 shrink-0`}>
-                        <stat.icon className={`w-4 h-4 sm:w-5 sm:h-5 text-${stat.color}-500`} />
+                      <div className={cn('hidden rounded-xl p-2.5 shrink-0 sm:block', stat.iconClass)}>
+                        <stat.icon className="h-5 w-5" />
                       </div>
                     </div>
                   </CardContent>
@@ -257,10 +248,10 @@ export function Dashboard() {
 
       <motion.div variants={itemVariants} className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h2 className="text-sm font-semibold font-display">Your day</h2>
-          <p className="text-[11px] text-muted-foreground">Switch between what is due and when you plan to do it.</p>
+          <h2 className="text-base font-semibold font-display">Your day</h2>
+          <p className="mt-1 text-xs text-muted-foreground">What is due, and when you plan to do it.</p>
         </div>
-        <div className="grid grid-cols-2 rounded-lg border border-border/50 bg-muted/35 p-0.5" role="tablist" aria-label="Dashboard task or schedule view">
+        <div className="workspace-tabs grid grid-cols-2" role="tablist" aria-label="Dashboard task or schedule view">
           {([
             { id: 'tasks' as const, label: 'Tasks', icon: ListTodo },
             { id: 'schedule' as const, label: 'Schedule', icon: CalendarClock },
@@ -294,16 +285,16 @@ export function Dashboard() {
         initial={{ opacity: 0, y: 6 }}
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, y: -6 }}
-        className="grid gap-4 lg:grid-cols-3"
+        className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_320px]"
       >
         {/* Upcoming Tasks - shown first on mobile for priority */}
-        <div className="lg:col-span-2 order-2 lg:order-1">
-          <Card className="border-border/50 interactive-card">
-            <CardHeader className="pb-2">
-              <div className="flex items-center justify-between">
+        <div className="min-w-0">
+          <Card>
+            <CardHeader className="border-b border-border/60 !pb-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
-                  <div className="p-1.5 rounded-lg bg-gradient-to-br from-indigo-500 to-blue-500 shadow-sm">
-                    <CheckCircle2 className="w-4 h-4 text-white" />
+                  <div className="p-2 rounded-lg bg-primary/10">
+                    <CheckCircle2 className="w-4 h-4 text-primary" />
                   </div>
                   <div>
                     <CardTitle className="text-base font-display">
@@ -314,7 +305,7 @@ export function Dashboard() {
                     </CardDescription>
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-1">
                   {!isViewingToday && (
                     <Button 
                       variant="ghost" 
@@ -344,7 +335,7 @@ export function Dashboard() {
                 </div>
               </div>
             </CardHeader>
-            <CardContent className="pt-2">
+            <CardContent className="pt-4">
               <AnimatePresence mode="wait">
                 {upcomingTasks.length === 0 ? (
                   <motion.div
@@ -399,8 +390,8 @@ export function Dashboard() {
         </div>
 
         {/* Mini Calendar - shown first on mobile for context */}
-        <div className="order-1 lg:order-2">
-          <Card className="border-border/50">
+        <div className="min-w-0">
+          <Card>
             <CardHeader className="pb-2">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -414,6 +405,7 @@ export function Dashboard() {
                     variant="ghost"
                     size="icon"
                     className="h-6 w-6"
+                    aria-label="Previous month"
                     onClick={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1))}
                   >
                     <ChevronLeft className="w-3 h-3" />
@@ -422,6 +414,7 @@ export function Dashboard() {
                     variant="ghost"
                     size="icon"
                     className="h-6 w-6"
+                    aria-label="Next month"
                     onClick={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1))}
                   >
                     <ChevronRight className="w-3 h-3" />
@@ -458,11 +451,11 @@ export function Dashboard() {
                       className={cn(
                         'aspect-square text-xs rounded-lg flex flex-col items-center justify-center transition-all relative group/day min-h-[36px] sm:min-h-0',
                         !isCurrentMonth && 'opacity-30',
-                        dayKey === todayKey && 'bg-primary/20 border border-primary font-bold dot-pulse',
+                        dayKey === todayKey && 'bg-primary/15 border border-primary font-bold',
                         viewingDateKey === dayKey && 'bg-primary/10 ring-1 ring-primary/50',
-                        hasMissingTasks && 'border border-red-500/70 bg-red-500/15 text-red-300',
+                        hasMissingTasks && 'border border-red-500/70 bg-red-500/10 text-red-700 dark:text-red-300',
                         hasMissingTasks && viewingDateKey === dayKey && 'ring-1 ring-red-500/70',
-                        dayKey !== todayKey && 'hover:bg-muted hover:scale-110'
+                        dayKey !== todayKey && 'hover:bg-muted'
                       )}
                     >
                       {format(day, 'd')}
@@ -512,17 +505,17 @@ export function Dashboard() {
       {/* Bottom Section - Goals and Exams side by side */}
       <motion.div variants={itemVariants} className="grid gap-4 lg:grid-cols-2">
         {/* Goals Progress */}
-        <Card className="border-border/50 interactive-card">
+        <Card>
           <CardHeader className="pb-2">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <div className="p-1.5 rounded-lg bg-gradient-to-br from-purple-500 to-pink-500 shadow-sm">
-                  <Target className="w-4 h-4 text-white" />
+                <div className="p-2 rounded-lg bg-primary/10">
+                  <Target className="w-4 h-4 text-primary" />
                 </div>
                 <CardTitle className="text-base font-display">Goals</CardTitle>
               </div>
               <Link href="/goals">
-                <Button variant="ghost" size="icon" className="h-6 w-6">
+                <Button variant="ghost" size="icon" className="h-8 w-8" aria-label="View all goals">
                   <ChevronRight className="w-3 h-3" />
                 </Button>
               </Link>
@@ -577,17 +570,17 @@ export function Dashboard() {
         </Card>
 
         {/* Upcoming Exams */}
-        <Card className="border-border/50 interactive-card">
+        <Card>
           <CardHeader className="pb-2">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <div className="p-1.5 rounded-lg bg-gradient-to-br from-red-500 to-orange-500 shadow-sm">
-                  <GraduationCap className="w-4 h-4 text-white" />
+                <div className="p-2 rounded-lg bg-muted">
+                  <GraduationCap className="w-4 h-4 text-muted-foreground" />
                 </div>
                 <CardTitle className="text-base font-display">Upcoming Exams</CardTitle>
               </div>
               <Link href="/exams">
-                <Button variant="ghost" size="icon" className="h-6 w-6">
+                <Button variant="ghost" size="icon" className="h-8 w-8" aria-label="View all exams">
                   <ChevronRight className="w-3 h-3" />
                 </Button>
               </Link>
@@ -625,7 +618,7 @@ export function Dashboard() {
                           <SubjectBadge name={subject.name} color={subject.color} />
                         )}
                       </div>
-                      <Badge variant={isUrgent ? "destructive" : "secondary"} className={cn("shrink-0 text-xs", isUrgent && "animate-breathe")}>
+                      <Badge variant={isUrgent ? "destructive" : "secondary"} className="shrink-0 text-xs">
                         {daysUntil === null ? 'Date unavailable' : daysUntil === 0 ? 'Today' : daysUntil === 1 ? 'Tomorrow' : `${daysUntil}d`}
                       </Badge>
                     </div>
@@ -642,9 +635,9 @@ export function Dashboard() {
 
       {/* Quick Actions - Animated */}
       <motion.div variants={itemVariants}>
-        <Card className="border-border/50 accent-line-top">
+        <Card>
           <CardContent className="p-2.5 sm:p-3">
-            <div className="grid grid-cols-4 gap-1.5 sm:gap-2">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               {[
                 { href: null, icon: Plus, label: 'Add Task', gradient: 'from-emerald-500 to-teal-500' },
                 { href: '/study', icon: Clock, label: 'Study', gradient: 'from-indigo-500 to-blue-500' },
@@ -654,11 +647,11 @@ export function Dashboard() {
                 const actionButton = (
                   <Button
                     variant="outline"
-                    className="w-full h-auto py-3 sm:py-3.5 flex-col gap-1.5 sm:gap-2 hover:bg-muted/50 hover:border-border transition-all group active:scale-[0.97]"
+                    className="w-full justify-start gap-2.5 border-transparent bg-transparent py-3 hover:bg-muted shadow-none"
                     onClick={action.href ? undefined : () => setShowTaskForm(true)}
                   >
-                    <div className={cn('p-1.5 rounded-lg bg-gradient-to-br opacity-80 group-hover:opacity-100 transition-opacity', action.gradient)}>
-                      <action.icon className="w-3.5 h-3.5 text-white" />
+                    <div className="rounded-md bg-muted p-1.5">
+                      <action.icon className="w-3.5 h-3.5 text-muted-foreground" />
                     </div>
                     <span className="text-[10px] sm:text-xs font-medium">{action.label}</span>
                   </Button>

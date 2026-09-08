@@ -12,10 +12,10 @@ interface PriorityBadgeProps {
 
 export function PriorityBadge({ priority, className }: PriorityBadgeProps) {
   const variants = {
-    low: 'bg-slate-500/20 text-slate-300 border-slate-500/30',
-    medium: 'bg-blue-500/20 text-blue-300 border-blue-500/30',
-    high: 'bg-orange-500/20 text-orange-300 border-orange-500/30',
-    urgent: 'bg-red-500/20 text-red-300 border-red-500/30',
+    low: 'bg-slate-500/10 text-slate-600 dark:text-slate-300 border-slate-500/20',
+    medium: 'bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-500/20',
+    high: 'bg-orange-500/10 text-orange-700 dark:text-orange-300 border-orange-500/20',
+    urgent: 'bg-red-500/10 text-red-700 dark:text-red-300 border-red-500/20',
   };
 
   return (
@@ -116,17 +116,16 @@ export function StatCard({
   className,
 }: StatCardProps) {
   const colorClasses = {
-    indigo: 'from-indigo-500/10 to-indigo-500/5',
-    green: 'from-green-500/10 to-green-500/5',
-    yellow: 'from-yellow-500/10 to-yellow-500/5',
-    red: 'from-red-500/10 to-red-500/5',
-    purple: 'from-purple-500/10 to-purple-500/5',
+    indigo: 'bg-primary/10 text-primary',
+    green: 'bg-green-500/10 text-green-700 dark:text-green-400',
+    yellow: 'bg-yellow-500/10 text-yellow-700 dark:text-yellow-400',
+    red: 'bg-red-500/10 text-red-700 dark:text-red-400',
+    purple: 'bg-purple-500/10 text-purple-700 dark:text-purple-400',
   };
 
   return (
     <Card className={cn('overflow-hidden', className)}>
       <CardContent className="p-4">
-        <div className={cn('absolute inset-0 bg-gradient-to-br opacity-50', colorClasses[color])} />
         <div className="relative flex items-start justify-between">
           <div className="space-y-1">
             <p className="text-sm font-medium text-muted-foreground">{title}</p>
@@ -143,7 +142,7 @@ export function StatCard({
             )}
           </div>
           {icon && (
-            <div className="p-2 rounded-lg bg-background/50">
+            <div className={cn('rounded-lg p-2', colorClasses[color])}>
               {icon}
             </div>
           )}

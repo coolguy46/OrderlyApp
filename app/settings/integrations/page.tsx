@@ -7,6 +7,7 @@ import { useCanvasSyncSupabase, formatTimeUntilSync, formatLastSync } from '@/li
 import { useAppStore } from '@/lib/store';
 import { useCurrentTime } from '@/lib/use-current-time';
 import CanvasGuide from '@/components/tutorial/CanvasGuide';
+import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Link2,
@@ -233,38 +234,36 @@ export default function IntegrationsPage() {
 
   return (
     <MainLayout>
-      <div className="mx-auto max-w-6xl space-y-6 pb-10">
-        <div className="space-y-1">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#ef553d]">Connections</p>
-          <h1 className="text-3xl font-bold tracking-tight">Canvas integration</h1>
-          <p className="max-w-2xl text-sm text-muted-foreground">
-            Keep assignments, due dates, and course details up to date across Orderly.
-          </p>
+      <div className="workspace-page mx-auto max-w-5xl pb-10">
+        <div className="workspace-header">
+          <div>
+            <p className="workspace-eyebrow">Connected tools</p>
+            <h1 className="workspace-title">Canvas integration</h1>
+            <p className="workspace-description">Your assignments and course details, kept in sync.</p>
+          </div>
+          <Button asChild variant="outline" size="sm"><Link href="/settings">Back to Settings</Link></Button>
         </div>
 
-        <Card className="overflow-hidden border-white/[0.08] bg-card/70 shadow-2xl shadow-black/10 backdrop-blur-xl">
-          <div className="relative overflow-hidden border-b border-white/[0.08] px-6 py-7 md:px-8">
-            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(234,68,47,0.2),transparent_42%)]" />
-            <div className="relative flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
+        <Card className="overflow-hidden">
+          <div className="border-b border-border px-5 py-6 sm:px-6">
+            <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-center gap-4">
-                <div className="relative flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-white shadow-lg shadow-[#e13f2a]/10">
-                  <CanvasIcon className="h-11 w-11 text-[#e13f2a]" />
+                <div className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-border bg-white">
+                  <CanvasIcon className="h-8 w-8 text-[#e13f2a]" />
                   {canvasSettings.syncEnabled && canvasSettings.icalUrl && (
                     <motion.span
-                      className="absolute -right-1 -top-1 h-4 w-4 rounded-full border-[3px] border-card bg-emerald-400"
-                      animate={{ scale: [1, 1.12, 1] }}
-                      transition={{ duration: 2, repeat: Infinity }}
+                      className="absolute -right-1 -top-1 h-3 w-3 rounded-full border-2 border-card bg-emerald-500"
                     />
                   )}
                 </div>
                 <div>
                   <div className="mb-1.5 flex flex-wrap items-center gap-2">
                     <h2 className="text-xl font-semibold">Canvas Sync</h2>
-                    <span className={`rounded-full border px-2.5 py-1 text-[11px] font-medium ${canvasSettings.icalUrl ? 'border-emerald-400/25 bg-emerald-400/10 text-emerald-300' : 'border-white/10 bg-white/5 text-muted-foreground'}`}>
+                    <span className={`rounded-md border px-2 py-0.5 text-[11px] font-medium ${canvasSettings.icalUrl ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400' : 'border-border bg-muted/40 text-muted-foreground'}`}>
                       {canvasSettings.icalUrl ? 'Connected' : 'Not connected'}
                     </span>
                     {canvasSettings.icalUrl && (
-                      <span className={`rounded-full border px-2.5 py-1 text-[11px] font-medium ${canvasSettings.syncEnabled ? 'border-sky-400/25 bg-sky-400/10 text-sky-300' : 'border-white/10 bg-white/5 text-muted-foreground'}`}>
+                      <span className={`rounded-md border px-2 py-0.5 text-[11px] font-medium ${canvasSettings.syncEnabled ? 'border-primary/20 bg-primary/10 text-primary' : 'border-border bg-muted/40 text-muted-foreground'}`}>
                         {canvasSettings.syncEnabled ? 'Background sync on' : 'Sync paused'}
                       </span>
                     )}
@@ -281,7 +280,7 @@ export default function IntegrationsPage() {
                 <Button
                   onClick={handleCanvasSync}
                   disabled={isCanvasConnecting || isCanvasSyncing}
-                  className="shrink-0 bg-[#e13f2a] text-white shadow-lg shadow-[#e13f2a]/20 hover:bg-[#c93624]"
+                  className="shrink-0"
                 >
                   {isCanvasConnecting || isCanvasSyncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
                   {isCanvasSyncing ? 'Syncing…' : isCanvasConnecting ? 'Connecting…' : 'Sync now'}
@@ -290,14 +289,14 @@ export default function IntegrationsPage() {
             </div>
           </div>
 
-          <CardContent className="space-y-6 p-6 md:p-8">
+          <CardContent className="space-y-6 p-5 sm:p-6">
             <AnimatePresence>
               {canvasError && (
                 <motion.div
                   initial={{ opacity: 0, y: -8 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -8 }}
-                  className="flex items-start gap-3 rounded-xl border border-red-400/25 bg-red-400/10 p-4 text-sm text-red-300"
+                  className="flex items-start gap-3 rounded-xl border border-red-500/25 bg-red-500/10 p-4 text-sm text-red-700 dark:text-red-300"
                 >
                   <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
                   <span>{canvasError}</span>
@@ -312,8 +311,8 @@ export default function IntegrationsPage() {
             ) : canvasSettings.icalUrl ? (
               <div className="space-y-6">
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                  <div className="rounded-2xl border border-white/[0.08] bg-white/[0.025] p-4">
-                    <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-400/10 text-emerald-300">
+                  <div className="rounded-xl border border-border bg-muted/20 p-4">
+                    <div className="mb-3 flex h-8 w-8 items-center justify-center rounded-lg bg-muted text-muted-foreground">
                       {canvasSettings.syncEnabled ? <Clock className="h-4 w-4" /> : <ZapOff className="h-4 w-4" />}
                     </div>
                     <p className="text-xs text-muted-foreground">Next update</p>
@@ -321,22 +320,22 @@ export default function IntegrationsPage() {
                       {isCanvasSyncing ? 'Syncing now…' : canvasSettings.syncEnabled ? (lastSyncAt ? countdown : 'Scheduled') : 'Paused'}
                     </p>
                   </div>
-                  <div className="rounded-2xl border border-white/[0.08] bg-white/[0.025] p-4">
-                    <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-xl bg-sky-400/10 text-sky-300">
+                  <div className="rounded-xl border border-border bg-muted/20 p-4">
+                    <div className="mb-3 flex h-8 w-8 items-center justify-center rounded-lg bg-muted text-muted-foreground">
                       <CheckCircle2 className="h-4 w-4" />
                     </div>
                     <p className="text-xs text-muted-foreground">Last synced</p>
                     <p className="mt-1 truncate text-sm font-semibold">{lastSyncDisplay}</p>
                   </div>
-                  <div className="rounded-2xl border border-white/[0.08] bg-white/[0.025] p-4">
-                    <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-xl bg-violet-400/10 text-violet-300">
+                  <div className="rounded-xl border border-border bg-muted/20 p-4">
+                    <div className="mb-3 flex h-8 w-8 items-center justify-center rounded-lg bg-muted text-muted-foreground">
                       <Timer className="h-4 w-4" />
                     </div>
                     <p className="text-xs text-muted-foreground">Sync interval</p>
                     <p className="mt-1 text-sm font-semibold">Every {canvasSettings.autoSyncInterval} minutes</p>
                   </div>
-                  <div className="rounded-2xl border border-white/[0.08] bg-white/[0.025] p-4">
-                    <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-xl bg-amber-400/10 text-amber-300">
+                  <div className="rounded-xl border border-border bg-muted/20 p-4">
+                    <div className="mb-3 flex h-8 w-8 items-center justify-center rounded-lg bg-muted text-muted-foreground">
                       <BookOpen className="h-4 w-4" />
                     </div>
                     <p className="text-xs text-muted-foreground">Imported</p>
@@ -345,10 +344,10 @@ export default function IntegrationsPage() {
                 </div>
 
                 <div className="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
-                  <section className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-5">
+                  <section className="rounded-xl border border-border p-5">
                     <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                       <div className="flex gap-3">
-                        <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${canvasSettings.syncEnabled ? 'bg-emerald-400/10 text-emerald-300' : 'bg-white/5 text-muted-foreground'}`}>
+                        <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${canvasSettings.syncEnabled ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'}`}>
                           {canvasSettings.syncEnabled ? <Zap className="h-5 w-5" /> : <ZapOff className="h-5 w-5" />}
                         </div>
                         <div>
@@ -362,13 +361,13 @@ export default function IntegrationsPage() {
                         variant="outline"
                         size="sm"
                         onClick={toggleAutoSync}
-                        className={canvasSettings.syncEnabled ? 'border-emerald-400/25 bg-emerald-400/5 text-emerald-300 hover:bg-emerald-400/10 hover:text-emerald-200' : ''}
+                        className={canvasSettings.syncEnabled ? 'border-primary/25 bg-primary/5 text-primary hover:bg-primary/10' : ''}
                       >
                         {canvasSettings.syncEnabled ? 'On' : 'Turn on'}
                       </Button>
                     </div>
 
-                    <div className="mt-6 border-t border-white/[0.07] pt-5">
+                    <div className="mt-6 border-t border-border pt-5">
                       <p className="mb-3 text-xs font-medium text-muted-foreground">Check Canvas every</p>
                       <div className="grid grid-cols-4 gap-2">
                         {[5, 15, 30, 60].map((minutes) => (
@@ -376,7 +375,8 @@ export default function IntegrationsPage() {
                             key={minutes}
                             type="button"
                             onClick={() => setSyncInterval(minutes)}
-                            className={`rounded-xl border px-2 py-2.5 text-sm font-medium transition-colors ${canvasSettings.autoSyncInterval === minutes ? 'border-[#e13f2a]/40 bg-[#e13f2a]/12 text-[#ff806d]' : 'border-white/[0.08] bg-black/10 text-muted-foreground hover:border-white/15 hover:text-foreground'}`}
+                            aria-pressed={canvasSettings.autoSyncInterval === minutes}
+                            className={`rounded-lg border px-2 py-2.5 text-sm font-medium transition-colors ${canvasSettings.autoSyncInterval === minutes ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border bg-background text-muted-foreground hover:border-primary/25 hover:text-foreground'}`}
                           >
                             {minutes}m
                           </button>
@@ -385,9 +385,9 @@ export default function IntegrationsPage() {
                     </div>
                   </section>
 
-                  <section className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-5">
+                  <section className="rounded-xl border border-border p-5">
                     <div className="flex items-center gap-3">
-                      <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-sky-400/10 text-sky-300">
+                      <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 text-primary">
                         <BookOpen className="h-5 w-5" />
                       </div>
                       <div>
@@ -397,8 +397,8 @@ export default function IntegrationsPage() {
                     </div>
                     <div className="mt-5 grid grid-cols-2 gap-x-6 gap-y-4">
                       {assignmentSummary.map((item) => (
-                        <div key={item.label} className="border-t border-white/[0.07] pt-3">
-                          <p className={`text-2xl font-semibold ${item.tone}`}>{item.value}</p>
+                        <div key={item.label} className="border-t border-border pt-3">
+                          <p className="text-xl font-semibold tabular-nums">{item.value}</p>
                           <p className="mt-0.5 text-xs text-muted-foreground">{item.label}</p>
                         </div>
                       ))}
@@ -406,15 +406,15 @@ export default function IntegrationsPage() {
                   </section>
                 </div>
 
-                <div className="flex flex-col gap-4 rounded-2xl border border-white/[0.08] bg-black/10 p-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex flex-col gap-4 rounded-xl border border-border bg-muted/20 p-4 sm:flex-row sm:items-center sm:justify-between">
                   <div className="flex min-w-0 items-center gap-3">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/5 text-muted-foreground">
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
                       <Link2 className="h-4 w-4" />
                     </div>
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
                         <p className="text-sm font-medium">Canvas calendar feed</p>
-                        <ShieldCheck className="h-3.5 w-3.5 text-emerald-300" />
+                        <ShieldCheck className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
                       </div>
                       <p className="truncate text-xs text-muted-foreground">Connected securely through {feedHost}</p>
                     </div>
@@ -433,8 +433,8 @@ export default function IntegrationsPage() {
             ) : (
               <div className="space-y-6">
                 <div className="grid gap-4">
-                  <section className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-5 md:p-6">
-                    <div className="mb-5 flex h-11 w-11 items-center justify-center rounded-xl bg-[#e13f2a]/10 text-[#ff735e]">
+                  <section className="rounded-xl border border-border bg-muted/20 p-5 md:p-6">
+                    <div className="mb-5 flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
                       <Link2 className="h-5 w-5" />
                     </div>
                     <h3 className="text-lg font-semibold">Connect your calendar feed</h3>
@@ -451,12 +451,12 @@ export default function IntegrationsPage() {
                         placeholder="https://canvas.instructure.com/feeds/calendars/…"
                         value={canvasUrlInput}
                         onChange={(event) => setCanvasUrlInput(event.target.value)}
-                        className="h-11 flex-1 bg-black/10"
+                        className="h-11 flex-1 bg-background"
                       />
                       <Button
                         onClick={handleCanvasConnect}
                         disabled={!canvasUrlInput.trim() || isCanvasConnecting || isCanvasSyncing}
-                        className="h-11 bg-[#e13f2a] px-5 text-white hover:bg-[#c93624]"
+                        className="h-11 px-5"
                       >
                         {isCanvasConnecting || isCanvasSyncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
                         {isCanvasSyncing ? 'Importing…' : isCanvasConnecting ? 'Connecting…' : 'Connect Canvas'}
@@ -466,14 +466,14 @@ export default function IntegrationsPage() {
 
                 </div>
 
-                <div className="grid gap-3 border-t border-white/[0.07] pt-6 sm:grid-cols-3">
+                <div className="grid gap-3 border-t border-border pt-6 sm:grid-cols-3">
                   {[
                     { icon: ShieldCheck, title: 'Read-only connection', description: 'Orderly never changes Canvas.' },
                     { icon: RefreshCw, title: 'Background updates', description: 'Syncs even when the app is closed.' },
                     { icon: CheckCircle2, title: 'Automatic tasks', description: 'Assignments appear ready to organize.' },
                   ].map((feature) => (
                     <div key={feature.title} className="flex items-start gap-3 rounded-xl p-3">
-                      <feature.icon className="mt-0.5 h-4 w-4 shrink-0 text-[#ff735e]" />
+                      <feature.icon className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
                       <div>
                         <p className="text-sm font-medium">{feature.title}</p>
                         <p className="mt-0.5 text-xs leading-5 text-muted-foreground">{feature.description}</p>
@@ -486,7 +486,7 @@ export default function IntegrationsPage() {
           </CardContent>
         </Card>
 
-        <details open={!canvasSettings.icalUrl} className="rounded-2xl border border-border bg-card/70">
+        <details open={!canvasSettings.icalUrl} className="rounded-xl border border-border bg-card">
           <summary className="cursor-pointer rounded-2xl px-5 py-4 text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background sm:px-6">
             Canvas connection guide
           </summary>

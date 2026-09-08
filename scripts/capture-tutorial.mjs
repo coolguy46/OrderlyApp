@@ -52,7 +52,10 @@ try {
     console.log(`Capturing ${view}`);
     // A fresh browser context keeps storage and animation clocks isolated per
     // image; every view begins with the same dataset, not the last view's state.
-    const page = await browser.newPage({ viewport: { width: 1160, height: view === 'assistant' ? 1000 : 850 }, timezoneId: 'America/Los_Angeles', reducedMotion: 'reduce' });
+    // The dashboard's desktop calendar sits beside the task list at the xl
+    // breakpoint. Keep the capture area at 1160px, but select the desktop
+    // layout so the guide includes the actual calendar rather than its top edge.
+    const page = await browser.newPage({ viewport: { width: view === 'dashboard' ? 1440 : 1160, height: view === 'assistant' ? 1000 : 850 }, timezoneId: 'America/Los_Angeles', reducedMotion: 'reduce' });
     page.on('pageerror', error => { errors.push(error.message); console.error(error.message); });
     await page.route('**/*', route => {
       const url = route.request().url();

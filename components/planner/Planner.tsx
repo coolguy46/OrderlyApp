@@ -1851,17 +1851,18 @@ export function Planner() {
   }
 
   return (
-    <div className="mx-auto w-full min-w-0 max-w-[1800px] space-y-5">
-      <header className="flex flex-wrap items-start justify-between gap-4">
+    <div className="workspace-page mx-auto w-full min-w-0 max-w-[1800px]">
+      <header className="workspace-header">
         <div className="flex items-center gap-3">
-          <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/15 text-primary">
-            <Sparkles className="h-5 w-5" />
-          </span>
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">Assistant</h1>
-            <p className="text-sm text-muted-foreground">Talk through your plans, or ask me to update your calendar.</p>
+            <p className="workspace-eyebrow">A little help with your day</p>
+            <h1 className="workspace-title">Assistant</h1>
+            <p className="workspace-description">Talk through your plans, or ask me to update your calendar.</p>
           </div>
         </div>
+        <span className="hidden items-center gap-2 rounded-full border border-border bg-card px-3 py-1.5 text-xs text-muted-foreground sm:inline-flex">
+          <CalendarDays className="h-3.5 w-3.5 text-primary" /> Your planning workspace
+        </span>
       </header>
 
       <AssistantChat
@@ -1893,8 +1894,8 @@ export function Planner() {
         endRef={chatEndRef}
       />
 
-      <section className="min-w-0 space-y-3" aria-label="Assistant calendar">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/50 pb-3">
+      <section className="workspace-panel min-w-0 space-y-4 p-3 sm:p-5" aria-label="Assistant calendar">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-4">
           <button
             type="button"
             onClick={() => setCalendarOpen(open => !open)}
@@ -1903,7 +1904,7 @@ export function Planner() {
             aria-controls="assistant-calendar-content"
           >
             <CalendarDays className="h-4 w-4 shrink-0 text-primary" />
-            <span className="text-sm font-semibold">Your calendar</span>
+            <span className="text-base font-semibold tracking-tight">Your calendar</span>
             {calendarOpen ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
           </button>
           <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
@@ -1955,7 +1956,7 @@ export function Planner() {
         )} role="tabpanel" aria-label="Schedule">
         <div className="min-w-0">
           <div>
-            <div className="flex flex-wrap items-center justify-between gap-3 pb-3">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-muted/30 px-3 py-2">
               <div className="flex min-w-0 items-center gap-2">
                 <div className="min-w-0">
                   <CardTitle>{format(weekStart, 'MMM d')}–{format(addDays(weekStart, 6), 'MMM d, yyyy')}</CardTitle>
@@ -2033,8 +2034,8 @@ export function Planner() {
 
         {taskDetailsOpen && (
         <aside id="assistant-day-details" aria-label="Day details" className="min-w-0 self-start xl:sticky xl:top-5">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between px-4 pb-3 pt-4">
+          <Card className="border-border bg-muted/20 shadow-none">
+            <CardHeader className="flex flex-row items-center justify-between border-b border-border px-4 pb-3 pt-4">
               <div>
                 <CardTitle>{format(selectedDate, 'EEEE, MMM d')}</CardTitle>
                 <p className="mt-1 text-xs text-muted-foreground">{selectedDayOccurrences.length} item{selectedDayOccurrences.length === 1 ? '' : 's'} on this day</p>
@@ -2048,7 +2049,7 @@ export function Planner() {
                 </Button>
               </div>
             </CardHeader>
-            <CardContent className="px-4 pb-4">
+            <CardContent className="px-4 pb-4 pt-4">
               <div className="max-h-64 space-y-2 overflow-y-auto">
                 {selectedDayOccurrences.length === 0 ? (
                   <p className="rounded-lg border border-dashed p-4 text-center text-xs text-muted-foreground">Nothing scheduled for this day.</p>

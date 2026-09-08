@@ -178,14 +178,14 @@ export function TaskDetailViewer({ task, open, onOpenChange, onEdit, scheduleOcc
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="overflow-hidden p-0 sm:max-w-2xl sm:overflow-hidden flex flex-col"
+        className="flex flex-col overflow-hidden rounded-2xl border-border bg-card p-0 sm:max-w-2xl sm:overflow-hidden"
         // The shared dialog adds `sm:max-h-none`, whose generated CSS can win
         // over an arbitrary Tailwind max-height class. An inline cap guarantees
         // that long Canvas descriptions stay inside the viewport and scroll.
         style={{ maxHeight: 'min(90dvh, 900px)' }}
       >
         {/* Header */}
-        <div className="relative shrink-0 px-5 pb-4 pt-5 sm:px-6">
+        <div className="relative shrink-0 border-b border-border bg-muted/20 px-5 py-5 sm:px-6">
           <DialogHeader className="space-y-3 text-left">
             <div className="flex items-start gap-3 pr-8">
               {/* Status icon */}
@@ -207,7 +207,7 @@ export function TaskDetailViewer({ task, open, onOpenChange, onEdit, scheduleOcc
                 )}
               </div>
               <div className="flex-1 min-w-0">
-                <DialogTitle className="text-lg font-bold leading-snug break-words">
+                <DialogTitle className="break-words text-xl font-semibold leading-snug tracking-tight">
                   {task.title}
                 </DialogTitle>
                 {task.course_name && (
@@ -272,12 +272,12 @@ export function TaskDetailViewer({ task, open, onOpenChange, onEdit, scheduleOcc
           tabIndex={0}
           className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 touch-pan-y [-webkit-overflow-scrolling:touch] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:px-6"
         >
-          <div className="space-y-5 pb-5">
+          <div className="space-y-5 py-5">
             {/* Info cards */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               {dueDisplay && (
                 <div className={cn(
-                  'flex items-start gap-3 rounded-lg p-3',
+                  'flex items-start gap-3 rounded-xl border border-border/70 p-3.5',
                   dueDisplay.urgent
                     ? 'bg-red-500/5'
                     : dueDisplay.warning
@@ -306,7 +306,7 @@ export function TaskDetailViewer({ task, open, onOpenChange, onEdit, scheduleOcc
               )}
 
               {(scheduleOccurrence || scheduleEntry) && (
-                <div className="flex items-start gap-3 rounded-lg bg-primary/5 p-3">
+                <div className="flex items-start gap-3 rounded-xl border border-primary/20 bg-primary/5 p-3.5">
                   <div className="mt-0.5 shrink-0">
                     <Clock className="h-4 w-4 text-primary" />
                   </div>
@@ -326,7 +326,7 @@ export function TaskDetailViewer({ task, open, onOpenChange, onEdit, scheduleOcc
               )}
 
               {task.assignment_type && (
-                <div className="flex items-start gap-3 rounded-lg bg-muted/25 p-3">
+                <div className="flex items-start gap-3 rounded-xl border border-border/70 bg-muted/25 p-3.5">
                   <div className="mt-0.5 shrink-0">
                     <Tag className="w-4 h-4 text-muted-foreground" />
                   </div>
@@ -338,7 +338,7 @@ export function TaskDetailViewer({ task, open, onOpenChange, onEdit, scheduleOcc
               )}
 
               {task.completed_at && (
-                <div className="flex items-start gap-3 rounded-lg bg-emerald-500/5 p-3">
+                <div className="flex items-start gap-3 rounded-xl border border-border/70 bg-emerald-500/5 p-3.5">
                   <div className="mt-0.5 shrink-0">
                     <CheckCircle2 className="w-4 h-4 text-emerald-400" />
                   </div>
@@ -352,7 +352,7 @@ export function TaskDetailViewer({ task, open, onOpenChange, onEdit, scheduleOcc
 
             {/* Description */}
             {task.description && (
-              <div className="space-y-2">
+              <div className="space-y-3 rounded-xl border border-border/70 bg-background/40 p-4">
                 <h4 className="text-sm font-medium">
                   Description
                 </h4>
@@ -368,7 +368,7 @@ export function TaskDetailViewer({ task, open, onOpenChange, onEdit, scheduleOcc
                 href={externalUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="group flex items-center justify-between gap-2 rounded-lg bg-primary/5 p-3 text-primary transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="group flex items-center justify-between gap-2 rounded-xl border border-primary/20 bg-primary/5 p-3.5 text-primary transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <div className="flex items-center gap-2.5">
                   <ExternalLink className="w-4 h-4" />
@@ -383,7 +383,7 @@ export function TaskDetailViewer({ task, open, onOpenChange, onEdit, scheduleOcc
         </div>
 
         {/* Footer */}
-        <DialogFooter className="shrink-0 border-t border-border/50 bg-background px-5 py-4 sm:px-6">
+        <DialogFooter className="shrink-0 border-t border-border bg-card px-5 py-4 sm:px-6">
           <div className="flex w-full flex-wrap items-center gap-2">
             {task.status === 'pending' && !isOverdue && (
               <Button variant="ghost" size="sm" onClick={handleStartProgress} className="h-9 gap-1.5">

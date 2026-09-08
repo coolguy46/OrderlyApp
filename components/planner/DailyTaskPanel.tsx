@@ -124,16 +124,16 @@ export function DailyTaskPanel({
   return (
     <Card
       className={cn(
-        'flex flex-col overflow-hidden border-border/50',
+        'workspace-panel flex flex-col overflow-hidden',
         fillHeight ? 'h-full min-h-0' : 'min-h-[638px]',
         className,
       )}
     >
-      <CardHeader className="border-b border-border/40 px-4 pb-3 pt-4 sm:px-5">
+      <CardHeader className="border-b border-border bg-muted/20 px-4 pb-3 pt-4 sm:px-5">
         <div className="flex items-center justify-between gap-2">
           <div className="flex min-w-0 items-center gap-2.5">
-            <div className="rounded-lg bg-gradient-to-br from-indigo-500 to-blue-500 p-1.5 shadow-sm">
-              <CalendarDays className="h-4 w-4 text-white" />
+            <div className="rounded-lg border border-primary/15 bg-primary/10 p-2 text-primary">
+              <CalendarDays className="h-4 w-4" />
             </div>
             <div className="min-w-0">
               <CardTitle className="truncate font-display text-base">
@@ -181,7 +181,7 @@ export function DailyTaskPanel({
                 type="button"
                 onClick={() => onSelectedDateChange(day)}
                 className={cn(
-                  'flex min-h-9 flex-col items-center justify-center rounded-lg text-[9px] font-medium text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground',
+                  'flex min-h-10 flex-col items-center justify-center rounded-lg text-[10px] font-medium text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground',
                   selected && 'bg-primary text-primary-foreground shadow-sm hover:bg-primary hover:text-primary-foreground',
                 )}
                 aria-pressed={selected}
@@ -207,8 +207,8 @@ export function DailyTaskPanel({
             ))
           ) : sortedTasks.length === 0 ? (
             <div className="flex min-h-72 flex-col items-center justify-center px-5 text-center">
-              <div className="mb-3 rounded-2xl border border-indigo-500/15 bg-indigo-500/10 p-3">
-                <Sparkles className="h-6 w-6 text-indigo-400" />
+              <div className="mb-3 rounded-2xl border border-primary/15 bg-primary/10 p-3">
+                <Sparkles className="h-6 w-6 text-primary" />
               </div>
               <p className="text-sm font-semibold">No work planned for this day</p>
               <p className="mt-1 max-w-56 text-xs leading-relaxed text-muted-foreground">
@@ -235,7 +235,7 @@ export function DailyTaskPanel({
                   key={task.id}
                   onClick={clickable ? () => onTaskClick?.(task) : undefined}
                   className={cn(
-                    'group rounded-xl border border-border/50 bg-card/55 p-3 text-left transition-all',
+                    'group rounded-xl border border-border bg-card p-3.5 text-left transition-colors',
                     clickable && 'cursor-pointer hover:border-primary/20 hover:bg-accent/35 hover:shadow-sm',
                     task.completed && 'opacity-60',
                   )}

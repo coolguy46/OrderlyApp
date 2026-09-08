@@ -35,10 +35,13 @@ test('DialogBody is a touch-friendly scroll region that can receive keyboard foc
 
 test('TaskForm keeps its header and actions visible while the fields scroll', () => {
   assert.match(taskFormSource, /import \{[\s\S]*DialogBody,[\s\S]*\} from '@\/components\/ui\/dialog'/);
-  assert.match(
-    taskFormSource,
-    /className="flex max-h-none flex-col gap-0 overflow-hidden p-0 sm:max-w-\[620px\] sm:overflow-hidden"/,
-  );
+  // The surface/radius/desktop width can change in a redesign. The actual
+  // flex containment and scroll boundary must not: fields alone should scroll.
+  const contentClasses = taskFormSource.match(/<DialogContent[^>]*className="([^"]+)"/)?.[1].split(/\s+/) || [];
+  for (const className of ['flex', 'max-h-none', 'flex-col', 'gap-0', 'overflow-hidden', 'p-0', 'sm:overflow-hidden']) {
+    assert.ok(contentClasses.includes(className), `TaskForm retains ${className}`);
+  }
+  assert.ok(contentClasses.some(className => /^sm:max-w-\[\d+px\]$/.test(className)), 'desktop dialog remains width bounded');
   assert.match(
     taskFormSource,
     /style=\{\{ maxHeight: 'min\(calc\(100dvh - 1rem\), 900px\)' \}\}/,
@@ -49,7 +52,7 @@ test('TaskForm keeps its header and actions visible while the fields scroll', ()
     /<DialogBody[\s\S]*aria-label=\{isEventMode \? 'Event details' : 'Task details'\}[\s\S]*tabIndex=\{0\}[\s\S]*<\/DialogBody>/,
   );
   assert.match(taskFormSource, /h-24 min-h-20 max-h-40 resize-y overflow-y-auto[^"\n]*field-sizing-fixed/);
-  assert.match(taskFormSource, /grid shrink-0 grid-cols-2 gap-2 border-t[^"\n]*bg-background\/95/);
+  assert.match(taskFormSource, /grid shrink-0 grid-cols-2 gap-2 border-t[^"\n]*bg-(?:card|background\/95)/);
 
   const bodyEnd = taskFormSource.indexOf('</DialogBody>');
   const actionsStart = taskFormSource.indexOf('{/* Actions */}');

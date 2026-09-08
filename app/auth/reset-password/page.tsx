@@ -9,6 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/Input';
 import { Label } from '@/components/ui/label';
 import { RESET_PASSWORD_MIN_LENGTH, validateResetPassword } from '@/lib/auth/password-reset';
+import { AuthFrame } from '@/components/auth/AuthFrame';
 
 export default function ResetPasswordPage() {
   const router = useRouter();
@@ -89,27 +90,22 @@ export default function ResetPasswordPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-background via-background to-indigo-500/10">
-      <div className="fixed inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute -top-40 -right-40 w-80 h-80 bg-indigo-500/20 rounded-full blur-3xl" />
-        <div className="absolute -bottom-40 -left-40 w-80 h-80 bg-purple-500/20 rounded-full blur-3xl" />
-      </div>
-
+    <AuthFrame>
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5 }}
-        className="relative w-full max-w-md"
+        className="relative w-full"
       >
-        <Card className="border-border/50 bg-card/80 backdrop-blur-xl">
-          <CardHeader className="space-y-4 text-center">
-            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600">
+        <Card className="rounded-2xl border-border bg-card shadow-sm sm:p-2">
+          <CardHeader className="space-y-5 pb-7 text-left">
+            <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-border bg-background text-primary">
               {isComplete
-                ? <CheckCircle2 className="h-6 w-6 text-white" />
-                : <Sparkles className="h-6 w-6 text-white" />}
+                ? <CheckCircle2 className="h-5 w-5" />
+                : <Sparkles className="h-5 w-5" />}
             </div>
             <div>
-              <CardTitle className="text-2xl font-bold">
+              <CardTitle className="font-display text-3xl font-semibold tracking-tight">
                 {isComplete ? 'Password updated' : 'Choose a new password'}
               </CardTitle>
               <CardDescription className="mt-2 text-muted-foreground">
@@ -124,7 +120,7 @@ export default function ResetPasswordPage() {
             {isComplete ? (
               <Button
                 type="button"
-                className="w-full bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700"
+                className="h-11 w-full"
                 onClick={() => router.replace('/auth/login')}
               >
                 Sign in with your new password
@@ -140,7 +136,7 @@ export default function ResetPasswordPage() {
                   <div
                     role="alert"
                     aria-live="assertive"
-                    className="flex items-start gap-2 rounded-lg border border-red-500/25 bg-red-500/10 p-3 text-sm text-red-300"
+                    className="flex items-start gap-2 rounded-lg border border-red-500/25 bg-red-500/10 p-3 text-sm text-red-700 dark:text-red-300"
                   >
                     <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
                     <span>{error}</span>
@@ -199,7 +195,7 @@ export default function ResetPasswordPage() {
                     <Button
                       type="submit"
                       disabled={isSubmitting}
-                      className="w-full bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700"
+                      className="h-11 w-full"
                     >
                       {isSubmitting
                         ? <div className="h-5 w-5 animate-spin rounded-full border-2 border-white/30 border-t-white" />
@@ -221,6 +217,6 @@ export default function ResetPasswordPage() {
           </CardContent>
         </Card>
       </motion.div>
-    </div>
+    </AuthFrame>
   );
 }

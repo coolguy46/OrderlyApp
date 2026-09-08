@@ -1,35 +1,11 @@
 'use client';
 
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
-import {
-  ArrowRight,
-  CalendarClock,
-  CheckCircle2,
-  ListChecks,
-  RefreshCw,
-} from 'lucide-react';
+import { ArrowRight, CalendarDays, Check, ChevronLeft, ChevronRight, Circle, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { supabase } from '@/lib/supabase/client';
-
-const FEATURES = [
-  {
-    icon: RefreshCw,
-    title: 'Canvas stays current',
-    description: 'Assignments, classes, descriptions, and exact due times stay synced in the background.',
-  },
-  {
-    icon: ListChecks,
-    title: 'One clear task list',
-    description: 'See what is active, completed, or missing without digging through different school pages.',
-  },
-  {
-    icon: CalendarClock,
-    title: 'Plan time your way',
-    description: 'Keep work untimed or drag it into an hour-by-hour week that works around your commitments.',
-  },
-] as const;
 
 export default function LandingPage() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -44,158 +20,69 @@ export default function LandingPage() {
   const primaryLabel = isLoggedIn ? 'Open dashboard' : 'Get started';
 
   return (
-    <div className="min-h-screen overflow-hidden bg-[#070812] text-white">
-      <div className="pointer-events-none fixed inset-0" aria-hidden="true">
-        <div className="absolute left-1/2 top-[-22rem] h-[38rem] w-[38rem] -translate-x-1/2 rounded-full bg-indigo-600/20 blur-3xl" />
-        <div className="absolute bottom-[-18rem] right-[-12rem] h-[32rem] w-[32rem] rounded-full bg-purple-600/10 blur-3xl" />
-      </div>
-
-      <header className="relative z-10 border-b border-white/10 bg-[#070812]/80 backdrop-blur-xl">
-        <nav className="mx-auto flex h-16 max-w-6xl items-center justify-between px-5 sm:px-8" aria-label="Main navigation">
-          <Link href="/landing" className="flex items-center gap-3 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400">
-            <Image src="/logo.svg" alt="" width={43} height={38} className="h-[38px] w-auto rounded-xl" priority />
-            <span className="hidden text-lg font-semibold tracking-tight sm:inline">Orderly</span>
+    <div className="flex min-h-screen flex-col bg-background text-foreground">
+      <header className="border-b border-border">
+        <nav className="mx-auto flex h-20 max-w-7xl items-center justify-between gap-3 px-5 sm:px-10" aria-label="Main navigation">
+          <Link href="/landing" aria-label="Orderly home" className="flex items-center gap-2.5 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+            <Image src="/logo.svg" alt="" width={36} height={36} className="h-9 w-9 rounded-lg" priority />
+            <span className="hidden text-xl font-semibold tracking-tight min-[380px]:inline">Orderly<span className="text-primary">.</span></span>
           </Link>
-
-          <div className="flex items-center gap-2">
-            {!isLoggedIn && (
-              <Button asChild variant="ghost" className="text-white/75 hover:bg-white/5 hover:text-white">
-                <Link href="/auth/login">Sign in</Link>
-              </Button>
-            )}
-            <Button asChild className="bg-indigo-500 text-white shadow-lg shadow-indigo-500/20 hover:bg-indigo-400">
-              <Link href={primaryHref}>
-                {primaryLabel}
-                <ArrowRight className="h-4 w-4" />
-              </Link>
-            </Button>
+          <div className="flex items-center gap-1 sm:gap-3">
+            {!isLoggedIn && <Button asChild variant="ghost" className="px-3 text-muted-foreground"><Link href="/auth/login">Sign in</Link></Button>}
+            <Button asChild className="px-3 sm:px-5"><Link href={primaryHref}>{primaryLabel}<ArrowRight className="h-4 w-4" /></Link></Button>
           </div>
         </nav>
       </header>
 
-      <main className="relative z-10">
-        <section className="mx-auto grid min-h-[calc(100vh-4rem)] max-w-6xl items-center gap-14 px-5 py-20 sm:px-8 lg:grid-cols-[1.05fr_0.95fr] lg:py-24">
-          <div className="max-w-2xl">
-            <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-indigo-400/20 bg-indigo-400/10 px-3 py-1.5 text-sm text-indigo-200">
-              <CheckCircle2 className="h-4 w-4" />
-              Tasks, Canvas, and your schedule in one place
+      <main className="mx-auto flex w-full max-w-7xl flex-1 items-center px-5 py-14 sm:px-10 sm:py-20">
+        <section className="grid w-full items-center gap-12 lg:grid-cols-[1.03fr_1fr] lg:gap-20" aria-labelledby="landing-title">
+          <div className="max-w-xl">
+            <p className="mb-6 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-muted-foreground"><span className="h-1.5 w-1.5 rounded-full bg-primary" />Your student workspace</p>
+            <h1 id="landing-title" className="font-display text-5xl font-semibold leading-[1.05] tracking-[-0.05em] sm:text-6xl xl:text-7xl">Less in your head.<br /><span className="text-muted-foreground">More in your day.</span></h1>
+            <p className="mt-6 max-w-[420px] text-base leading-7 text-muted-foreground sm:text-lg sm:leading-8">Bring your assignments, calendar, and plans together. A little clarity for school—and everything around it.</p>
+            <div className="mt-8 flex flex-wrap items-center gap-4">
+              <Button asChild size="lg" className="h-12 px-6"><Link href={primaryHref}>{primaryLabel}<ArrowRight className="h-4 w-4" /></Link></Button>
+              {!isLoggedIn && <span className="text-sm text-muted-foreground">Make yourself at home.</span>}
             </div>
-            <h1 className="font-display text-5xl font-bold leading-[1.03] tracking-[-0.045em] sm:text-6xl lg:text-7xl">
-              Know what&apos;s due.
-              <span className="block bg-gradient-to-r from-indigo-300 via-violet-300 to-purple-400 bg-clip-text text-transparent">
-                Plan when you&apos;ll do it.
-              </span>
-            </h1>
-            <p className="mt-6 max-w-xl text-lg leading-8 text-white/60 sm:text-xl">
-              Orderly keeps schoolwork organized, preserves exact deadlines, and gives you a flexible week you can adjust yourself.
-            </p>
-            <div className="mt-8 flex flex-wrap items-center gap-3">
-              <Button asChild size="lg" className="bg-indigo-500 px-7 text-white shadow-xl shadow-indigo-500/25 hover:bg-indigo-400">
-                <Link href={primaryHref}>
-                  {primaryLabel}
-                  <ArrowRight className="h-4 w-4" />
-                </Link>
-              </Button>
-              {!isLoggedIn && (
-                <span className="text-sm text-white/60">Free to use.</span>
-              )}
+            <div className="mt-10 flex flex-wrap gap-x-5 gap-y-3 border-t border-border pt-5 text-xs text-muted-foreground">
+              <span className="inline-flex items-center gap-1.5"><RefreshCw className="h-3.5 w-3.5" />Canvas stays current</span>
+              <span className="inline-flex items-center gap-1.5"><CalendarDays className="h-3.5 w-3.5" />Plan time your way</span>
             </div>
           </div>
 
-          <div className="relative mx-auto w-full max-w-lg" role="img" aria-label="Orderly schedule preview">
-            <div className="absolute -inset-8 rounded-[2.5rem] bg-indigo-500/10 blur-3xl" aria-hidden="true" />
-            <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-[#0d101c]/90 p-4 shadow-2xl shadow-black/40 sm:p-5">
-              <div className="flex items-center justify-between border-b border-white/10 pb-4">
-                <div>
-                  <p className="text-sm font-semibold">Today</p>
-                  <p className="mt-0.5 text-xs text-white/55">Tasks and planned time</p>
+          <figure className="mx-auto w-full max-w-[520px]" aria-label="Illustrative Orderly day plan with fictional tasks and events">
+            <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-[0_16px_60px_-30px_rgba(0,0,0,0.25)]">
+              <div className="flex items-center justify-between border-b border-border px-5 py-4 sm:px-6">
+                <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground"><CalendarDays className="h-4 w-4" />Your day, organized</div>
+                <span className="rounded border border-border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Example</span>
+              </div>
+              <div className="p-5 sm:p-6">
+                <div className="flex items-center justify-between">
+                  <div><p className="text-xs text-muted-foreground">Wednesday</p><h2 className="mt-1 text-xl font-semibold tracking-tight">A little room to focus.</h2></div>
+                  <div className="flex gap-3 text-muted-foreground" aria-hidden="true"><ChevronLeft className="h-4 w-4" /><ChevronRight className="h-4 w-4" /></div>
                 </div>
-                <span className="rounded-lg bg-white/5 px-2.5 py-1 text-xs text-white/50">Wednesday</span>
-              </div>
-
-              <div className="space-y-2 py-4">
-                <PreviewTask title="English essay" detail="Due today · 3:00 PM" tone="red" />
-                <PreviewTask title="Statistics practice" detail="Due tomorrow · 11:59 PM" tone="amber" />
-              </div>
-
-              <div className="grid grid-cols-[3.5rem_1fr] gap-x-3 border-t border-white/10 pt-4 text-xs">
-                <TimeLabel>6 PM</TimeLabel>
-                <ScheduleBlock title="Workout" time="6:00–7:00 PM" className="border-cyan-400/25 bg-cyan-400/10 text-cyan-100" />
-                <TimeLabel>7 PM</TimeLabel>
-                <ScheduleBlock title="English essay" time="7:15–8:15 PM" className="border-indigo-400/30 bg-indigo-400/15 text-indigo-100" />
-                <TimeLabel>8 PM</TimeLabel>
-                <div className="h-10 border-t border-white/5" />
+                <div className="mt-5 space-y-0 divide-y divide-border rounded-xl border border-border px-4">
+                  <div className="flex items-center gap-3 py-3.5"><span className="flex h-4 w-4 items-center justify-center rounded-full bg-primary/15 text-primary"><Check className="h-3 w-3" /></span><span className="flex-1 text-sm text-muted-foreground line-through">Read chapter 4</span><span className="text-[10px] text-muted-foreground">Done</span></div>
+                  <div className="flex items-center gap-3 py-3.5"><Circle className="h-4 w-4 shrink-0 text-muted-foreground" /><span className="flex-1 text-sm">English essay</span><span className="text-[10px] text-muted-foreground">Due tonight</span></div>
+                </div>
+                <div className="mt-6 grid grid-cols-[42px_1fr] gap-x-3 text-xs">
+                  <span className="pt-3 text-muted-foreground">4 PM</span>
+                  <div className="mb-3 rounded-lg border-l-2 border-primary bg-primary/10 px-4 py-3"><p className="font-medium">English essay</p><p className="mt-1 text-muted-foreground">4:00–5:00 PM · Focus time</p></div>
+                  <span className="pt-3 text-muted-foreground">5 PM</span>
+                  <div className="mb-3 rounded-lg border-l-2 border-emerald-600/50 bg-emerald-500/[0.07] px-4 py-3"><p className="font-medium">Basketball practice</p><p className="mt-1 text-muted-foreground">5:00–6:00 PM · Event</p></div>
+                  <span className="pt-3 text-muted-foreground">6 PM</span>
+                  <div className="flex h-11 items-center border-t border-dashed border-border px-4 text-muted-foreground">A little breathing room.</div>
+                </div>
               </div>
             </div>
-          </div>
-        </section>
-
-        <section className="border-y border-white/10 bg-white/[0.015] px-5 py-20 sm:px-8" aria-labelledby="features-title">
-          <div className="mx-auto max-w-6xl">
-            <div className="max-w-xl">
-              <p className="text-sm font-semibold uppercase tracking-[0.18em] text-indigo-300">Built for real school weeks</p>
-              <h2 id="features-title" className="mt-3 font-display text-3xl font-bold tracking-tight sm:text-4xl">
-                The essentials, without the clutter.
-              </h2>
-            </div>
-
-            <div className="mt-10 grid gap-4 md:grid-cols-3">
-              {FEATURES.map(({ icon: Icon, title, description }) => (
-                <article key={title} className="rounded-2xl border border-white/10 bg-white/[0.025] p-6">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-400/10 text-indigo-300">
-                    <Icon className="h-5 w-5" />
-                  </div>
-                  <h3 className="mt-5 text-lg font-semibold">{title}</h3>
-                  <p className="mt-2 text-sm leading-6 text-white/60">{description}</p>
-                </article>
-              ))}
-            </div>
-
-            <p className="mt-8 text-sm text-white/60">
-              Goals, exams, and a focus timer are available when you need them.
-            </p>
-          </div>
+            <figcaption className="mt-4 text-center text-[11px] text-muted-foreground">One place for what’s due and when you’ll do it.</figcaption>
+          </figure>
         </section>
       </main>
 
-      <footer className="relative z-10 px-5 py-8 sm:px-8">
-        <div className="mx-auto flex max-w-6xl flex-col gap-4 text-sm text-white/60 sm:flex-row sm:items-center sm:justify-between">
-          <p>© {new Date().getFullYear()} Orderly</p>
-          <div className="flex gap-5">
-            <Link href="/privacy" className="text-white/70 transition-colors hover:text-white">Privacy</Link>
-            <Link href="/terms" className="text-white/70 transition-colors hover:text-white">Terms</Link>
-          </div>
-        </div>
+      <footer className="border-t border-border px-5 py-6 sm:px-10">
+        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-4 text-xs text-muted-foreground"><p>© {new Date().getFullYear()} Orderly</p><div className="flex gap-5"><Link href="/privacy" className="transition-colors hover:text-foreground">Privacy</Link><Link href="/terms" className="transition-colors hover:text-foreground">Terms</Link></div></div>
       </footer>
-    </div>
-  );
-}
-
-function PreviewTask({ title, detail, tone }: { title: string; detail: string; tone: 'red' | 'amber' }) {
-  const toneClass = tone === 'red'
-    ? 'border-red-400/20 bg-red-400/5 text-red-300'
-    : 'border-amber-400/20 bg-amber-400/5 text-amber-300';
-
-  return (
-    <div className={`flex items-center justify-between gap-4 rounded-xl border px-3.5 py-3 ${toneClass}`}>
-      <div className="flex min-w-0 items-center gap-3">
-        <span className="h-4 w-4 shrink-0 rounded-full border border-current/60" />
-        <p className="truncate text-sm font-medium text-white/85">{title}</p>
-      </div>
-      <p className="shrink-0 text-[11px]">{detail}</p>
-    </div>
-  );
-}
-
-function TimeLabel({ children }: { children: ReactNode }) {
-  return <div className="border-t border-white/5 py-2 text-right text-white/30">{children}</div>;
-}
-
-function ScheduleBlock({ title, time, className }: { title: string; time: string; className: string }) {
-  return (
-    <div className={`mb-2 rounded-lg border px-3 py-2 ${className}`}>
-      <p className="font-medium">{title}</p>
-      <p className="mt-0.5 opacity-60">{time}</p>
     </div>
   );
 }

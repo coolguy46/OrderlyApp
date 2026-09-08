@@ -98,25 +98,15 @@ function ExamCard({ exam, onEdit, now, timeZone }: ExamCardProps) {
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, x: -30 }}
-      whileHover={{ y: -3 }}
       transition={{ type: 'spring', stiffness: 300, damping: 24 }}
     >
       <Card
         className={cn(
-          'group relative overflow-hidden glow-border',
-          isUrgent && !isPast && 'border-yellow-500/30',
-          isPast && 'opacity-60'
+          'group relative overflow-hidden transition-colors hover:border-primary/30',
+          isUrgent && !isPast && 'border-l-[3px] border-l-amber-500/60',
+          isPast && 'opacity-70'
         )}
       >
-        {/* Urgency indicator */}
-        {isUrgent && !isPast && (
-          <motion.div
-            animate={{ opacity: [0.7, 1, 0.7] }}
-            transition={{ duration: 2, repeat: Infinity }}
-            className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-yellow-500 to-orange-500"
-          />
-        )}
-
         <div className="p-5 space-y-4">
           <div className="flex items-start justify-between gap-4">
             <div className="flex items-center gap-3">
@@ -150,7 +140,7 @@ function ExamCard({ exam, onEdit, now, timeZone }: ExamCardProps) {
             </div>
 
             {/* Actions */}
-            <div className="flex shrink-0 items-center gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
+            <div className="flex shrink-0 items-center gap-1">
               <button
                 onClick={() => onEdit(exam)}
                 aria-label={`Edit ${exam.title}`}
@@ -175,7 +165,7 @@ function ExamCard({ exam, onEdit, now, timeZone }: ExamCardProps) {
           )}
 
           {/* Meta info */}
-          <div className="flex items-center gap-4 text-sm text-muted-foreground">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-muted-foreground">
             <span className="flex items-center gap-1.5">
               <Calendar className="w-4 h-4" />
               {formatCivilDate(exam.exam_date, timeZone) || 'Date unavailable'}
@@ -190,12 +180,12 @@ function ExamCard({ exam, onEdit, now, timeZone }: ExamCardProps) {
               className={cn(
                 'flex items-center gap-1.5',
                 isPast
-                  ? 'text-gray-400'
+                  ? 'text-muted-foreground'
                   : isUrgent
-                  ? 'text-yellow-400'
+                  ? 'text-amber-700 dark:text-amber-400'
                   : daysUntil !== null && daysUntil <= 14
-                  ? 'text-orange-400'
-                  : 'text-green-400'
+                  ? 'text-orange-700 dark:text-orange-400'
+                  : 'text-muted-foreground'
               )}
             >
               <Clock className="w-4 h-4" />
@@ -243,7 +233,6 @@ function ExamCard({ exam, onEdit, now, timeZone }: ExamCardProps) {
               value={exam.preparation_progress}
               max={100}
               showLabel={false}
-              shimmer
               color={
                 exam.preparation_progress >= 80
                   ? 'green'
@@ -478,13 +467,10 @@ function ExamTaskCard({
   return (
     <motion.div layout initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }}>
       <Card className={cn(
-        'group relative overflow-hidden',
-        isUrgent && !isPast && 'border-yellow-500/30',
-        isPast && 'opacity-60'
+        'group relative overflow-hidden transition-colors hover:border-primary/30',
+        isUrgent && !isPast && 'border-l-[3px] border-l-amber-500/60',
+        isPast && 'opacity-70'
       )}>
-        {isUrgent && !isPast && (
-          <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-yellow-500 to-orange-500" />
-        )}
         <div className="p-5 space-y-3">
           <div className="flex items-start justify-between gap-4">
             <div className="flex items-center gap-3">
@@ -504,7 +490,7 @@ function ExamTaskCard({
             </div>
 
             {/* Actions */}
-            <div className="flex shrink-0 items-center gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
+            <div className="flex shrink-0 items-center gap-1">
               <Link href="/tasks">
                 <Button variant="ghost" size="sm" className="text-xs h-8">
                   View in Tasks
@@ -521,7 +507,7 @@ function ExamTaskCard({
             </div>
           </div>
 
-          <div className="flex items-center gap-4 text-sm text-muted-foreground">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-muted-foreground">
             {task.due_date && (
               <span className="flex items-center gap-1.5">
                 <Calendar className="w-4 h-4" />
@@ -530,7 +516,7 @@ function ExamTaskCard({
             )}
             <span className={cn(
               'flex items-center gap-1.5',
-              isPast ? 'text-gray-400' : isUrgent ? 'text-yellow-400' : daysUntil !== null && daysUntil <= 14 ? 'text-orange-400' : 'text-green-400'
+              isPast ? 'text-muted-foreground' : isUrgent ? 'text-amber-700 dark:text-amber-400' : daysUntil !== null && daysUntil <= 14 ? 'text-orange-700 dark:text-orange-400' : 'text-muted-foreground'
             )}>
               <Clock className="w-4 h-4" />
               {isPast ? 'Past' : daysUntil === 0 ? 'Today!' : daysUntil === 1 ? 'Tomorrow' : `${daysUntil} days left`}
@@ -714,26 +700,35 @@ export function ExamList() {
       variants={containerVariants}
       initial="hidden"
       animate="show"
-      className="space-y-6"
+      className="workspace-page"
     >
+      <div className="workspace-header">
+        <div>
+          <p className="workspace-eyebrow">Prepare with confidence</p>
+          <h1 className="workspace-title">Exams</h1>
+          <p className="workspace-description">Keep upcoming exams and your preparation in one place.</p>
+        </div>
+        <Button onClick={() => setShowForm(true)} size="sm">
+          <Plus className="w-4 h-4" /> Add Exam
+        </Button>
+      </div>
       {/* Stats */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         {statCards.map((stat) => {
           const Icon = stat.icon;
           return (
             <motion.div
               key={stat.label}
               variants={itemVariants}
-              whileHover={{ scale: 1.03, y: -2 }}
               transition={{ type: 'spring', stiffness: 400, damping: 17 }}
-              className={`bg-gradient-to-br ${stat.gradient} backdrop-blur-xl border border-border rounded-xl p-4 glow-border`}
+              className="workspace-stat"
             >
               <div className="flex items-center gap-3">
                 <div className={cn('rounded-lg p-2', stat.iconClass)}>
                   <Icon className="w-5 h-5" />
                 </div>
                 <div>
-                  <p className="text-2xl font-bold text-foreground font-display">{stat.value}</p>
+                  <p className="text-xl font-semibold text-foreground tabular-nums">{stat.value}</p>
                   <p className="text-xs text-muted-foreground">{stat.label}</p>
                 </div>
               </div>
@@ -743,33 +738,22 @@ export function ExamList() {
       </div>
 
       <div>
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold font-display">Exams</h1>
-            <p className="text-sm text-muted-foreground">Track upcoming exams and preparation progress</p>
-          </div>
-          <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
-            <Button onClick={() => setShowForm(true)} size="sm">
-              <Plus className="w-4 h-4" /> Add Exam
-            </Button>
-          </motion.div>
-        </div>
-
-        <div className="mt-5">
-          <div className="flex items-center gap-2 bg-muted/50 rounded-xl p-1.5 w-fit mb-5">
+        <div>
+          <div className="workspace-tabs flex w-fit max-w-full items-center gap-1 mb-5 overflow-x-auto">
             {(['upcoming', 'all', 'past'] as const).map((f) => (
               <button
                 key={f}
                 onClick={() => setFilter(f)}
+                aria-pressed={filter === f}
                 className={cn(
-                  'relative px-4 py-2 text-[clamp(0.65rem,1.5vw,0.75rem)] font-medium rounded-lg transition-all capitalize',
-                  filter === f ? 'text-white' : 'text-muted-foreground hover:text-foreground'
+                  'relative px-4 py-2 text-xs font-medium rounded-lg transition-colors capitalize',
+                  filter === f ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
                 )}
               >
                 {filter === f && (
                   <motion.div
                     layoutId="examFilterIndicator"
-                    className="absolute inset-0 bg-indigo-500 rounded-lg"
+                    className="absolute inset-0 bg-card border border-border rounded-lg shadow-sm"
                     transition={{ type: 'spring', stiffness: 400, damping: 30 }}
                   />
                 )}
@@ -781,10 +765,9 @@ export function ExamList() {
           <div className="space-y-4">
             <AnimatePresence mode="popLayout">
               {filteredExams.length === 0 && filteredExamTasks.length === 0 ? (
-                <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="text-center py-12">
-                  <motion.div animate={{ y: [0, -8, 0] }} transition={{ duration: 3, repeat: Infinity }}
-                    className="w-16 h-16 mx-auto mb-4 rounded-full bg-muted/50 flex items-center justify-center">
-                    <GraduationCap className="w-8 h-8 text-muted-foreground" />
+                <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="rounded-xl border border-dashed border-border bg-card text-center py-16 px-5">
+                  <motion.div className="w-12 h-12 mx-auto mb-4 rounded-xl bg-primary/10 flex items-center justify-center">
+                    <GraduationCap className="w-5 h-5 text-primary" />
                   </motion.div>
                   <p className="text-muted-foreground">No exams found</p>
                   <p className="text-sm text-muted-foreground/70 mt-1">Add an exam to start tracking your preparation</p>

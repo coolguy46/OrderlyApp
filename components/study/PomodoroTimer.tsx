@@ -927,10 +927,10 @@ export function PomodoroTimer({ selectedSubjectId, selectedTaskId }: PomodoroTim
   const CurrentIcon = modeConfig[mode].icon;
 
   return (
-    <Card className="max-w-md mx-auto glow-border">
-      <CardContent className="p-4">
+    <Card className="w-full mx-auto">
+      <CardContent className="p-5 sm:p-7">
         {/* Timer Type Toggle */}
-        <div className="flex items-center justify-center gap-2 mb-4 relative">
+        <div className="flex flex-wrap items-center justify-center gap-2 mb-4 relative">
           <button
             type="button"
             onClick={() => handleTimerTypeChange('pomodoro')}
@@ -939,14 +939,14 @@ export function PomodoroTimer({ selectedSubjectId, selectedTaskId }: PomodoroTim
             className={cn(
               'relative flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all',
               timerType === 'pomodoro'
-                ? 'text-indigo-400'
+                ? 'text-primary'
                 : 'text-muted-foreground hover:text-foreground hover:bg-muted'
             )}
           >
             {timerType === 'pomodoro' && (
               <motion.div
                 layoutId="timerTypeIndicator"
-                className="absolute inset-0 bg-indigo-500/20 border border-indigo-500/30 rounded-xl"
+                className="absolute inset-0 bg-primary/10 border border-primary/20 rounded-xl"
                 transition={{ type: 'spring', stiffness: 400, damping: 30 }}
               />
             )}
@@ -961,14 +961,14 @@ export function PomodoroTimer({ selectedSubjectId, selectedTaskId }: PomodoroTim
             className={cn(
               'relative flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all',
               timerType === 'stopwatch'
-                ? 'text-green-400'
+                ? 'text-primary'
                 : 'text-muted-foreground hover:text-foreground hover:bg-muted'
             )}
           >
             {timerType === 'stopwatch' && (
               <motion.div
                 layoutId="timerTypeIndicator"
-                className="absolute inset-0 bg-green-500/20 border border-green-500/30 rounded-xl"
+                className="absolute inset-0 bg-primary/10 border border-primary/20 rounded-xl"
                 transition={{ type: 'spring', stiffness: 400, damping: 30 }}
               />
             )}
@@ -979,7 +979,7 @@ export function PomodoroTimer({ selectedSubjectId, selectedTaskId }: PomodoroTim
 
         {/* Mode Selector (Pomodoro only) */}
         {timerType === 'pomodoro' && (
-          <div className="flex items-center justify-center gap-1 mb-6">
+          <div className="flex flex-wrap items-center justify-center gap-1 mb-6">
             {(Object.keys(modeConfig) as TimerMode[]).map((m) => (
               <button
                 type="button"
@@ -990,14 +990,14 @@ export function PomodoroTimer({ selectedSubjectId, selectedTaskId }: PomodoroTim
                 className={cn(
                   'relative px-3 py-1.5 rounded-lg text-xs font-medium transition-all',
                   mode === m
-                    ? 'text-white'
+                    ? 'text-primary-foreground'
                     : 'text-muted-foreground hover:text-foreground hover:bg-muted'
                 )}
               >
                 {mode === m && (
                   <motion.div
                     layoutId="pomodoroModeIndicator"
-                    className="absolute inset-0 bg-gradient-to-r from-indigo-500 to-purple-600 rounded-lg"
+                    className="absolute inset-0 bg-primary rounded-lg"
                     transition={{ type: 'spring', stiffness: 400, damping: 30 }}
                   />
                 )}
@@ -1025,7 +1025,7 @@ export function PomodoroTimer({ selectedSubjectId, selectedTaskId }: PomodoroTim
                   key={timerType === 'pomodoro' ? timeLeft : stopwatchTime}
                   initial={{ scale: 1.05 }}
                   animate={{ scale: 1 }}
-                  className="text-4xl font-bold text-foreground font-mono"
+                  className="text-4xl font-semibold tracking-tight text-foreground font-mono tabular-nums"
                 >
                   {timerType === 'pomodoro' ? formatTime(timeLeft) : formatTime(stopwatchTime)}
                 </motion.span>
@@ -1070,11 +1070,11 @@ export function PomodoroTimer({ selectedSubjectId, selectedTaskId }: PomodoroTim
             className={cn(
               'w-14 h-14 rounded-2xl flex items-center justify-center shadow-lg transition-all disabled:cursor-not-allowed disabled:opacity-50',
               isRunning
-                ? 'bg-gradient-to-r from-orange-500 to-red-600 shadow-orange-500/25'
-                : 'bg-gradient-to-r from-indigo-500 to-purple-600 shadow-indigo-500/25'
+                ? 'bg-amber-600 shadow-none'
+                : 'bg-primary shadow-none'
             )}
           >
-            {isRunning ? <Pause className="w-5 h-5 text-white" /> : <Play className="w-5 h-5 text-white ml-0.5" />}
+            {isRunning ? <Pause className="w-5 h-5 text-white" /> : <Play className="w-5 h-5 text-primary-foreground ml-0.5" />}
           </motion.button>
 
           <button
@@ -1091,10 +1091,10 @@ export function PomodoroTimer({ selectedSubjectId, selectedTaskId }: PomodoroTim
         {sessionSaveFailed && (
           <div
             role="alert"
-            className="mb-4 rounded-xl border border-red-500/40 bg-red-500/10 p-3 text-sm text-red-100"
+            className="mb-4 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-800 dark:text-red-200"
           >
             <p className="font-medium">This session has not been saved yet.</p>
-            <p className="mt-1 text-xs text-red-200/80">
+            <p className="mt-1 text-xs text-red-700 dark:text-red-200/80">
               The timer is being kept in place so the time is not silently lost. Retry before starting another session.
             </p>
             <Button type="button" variant="outline" size="sm" className="mt-3" onClick={handleReset}>
@@ -1106,10 +1106,10 @@ export function PomodoroTimer({ selectedSubjectId, selectedTaskId }: PomodoroTim
         {timerStateClearFailed && (
           <div
             role="alert"
-            className="mb-4 rounded-xl border border-red-500/40 bg-red-500/10 p-3 text-sm text-red-100"
+            className="mb-4 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-800 dark:text-red-200"
           >
             <p className="font-medium">The synced recovery copy could not be cleared.</p>
-            <p className="mt-1 text-xs text-red-200/80">
+            <p className="mt-1 text-xs text-red-700 dark:text-red-200/80">
               Orderly recorded the reset on this device so the old timer cannot silently return. Retry when the connection is available.
             </p>
             <Button
@@ -1127,10 +1127,10 @@ export function PomodoroTimer({ selectedSubjectId, selectedTaskId }: PomodoroTim
         {timerStateRestoreFailed && (
           <div
             role="alert"
-            className="mb-4 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-100"
+            className="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-800 dark:text-amber-200"
           >
             <p className="font-medium">Orderly could not check your synced timer.</p>
-            <p className="mt-1 text-xs text-amber-200/80">
+            <p className="mt-1 text-xs text-amber-700 dark:text-amber-200/80">
               Starting is paused so an existing recovery copy cannot be overwritten during the connection problem.
             </p>
             <Button

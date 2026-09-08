@@ -8,13 +8,13 @@ export default function PrivacyPolicyPage() {
   return (
     <div className="min-h-screen bg-background">
       {/* Navigation */}
-      <nav className="fixed top-0 left-0 right-0 z-50 bg-background/80 backdrop-blur-md border-b border-border/40">
-        <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
+      <nav className="sticky top-0 z-50 border-b border-border bg-background/95 backdrop-blur-sm">
+        <div className="mx-auto flex h-20 max-w-6xl items-center justify-between gap-3 px-5 sm:px-8">
           <Link href="/landing" className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center">
-              <Sparkles className="w-5 h-5 text-white" />
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-card">
+              <Sparkles className="h-4 w-4 text-primary" />
             </div>
-            <span className="text-xl font-bold">Orderly</span>
+            <span className="text-lg font-semibold tracking-tight">Orderly</span>
           </Link>
           <Link href="/landing">
             <Button variant="ghost" size="sm">
@@ -25,14 +25,14 @@ export default function PrivacyPolicyPage() {
         </div>
       </nav>
 
-      <main className="pt-28 pb-20 px-6">
-        <div className="max-w-3xl mx-auto prose prose-invert">
-          <h1 className="text-4xl font-bold mb-2">Privacy Policy</h1>
-          <p className="text-muted-foreground text-lg mb-10">Last updated: September 6, 2026</p>
+      <main className="px-5 py-12 sm:px-8 sm:py-20">
+        <div className="mx-auto max-w-[760px] [overflow-wrap:anywhere]">
+          <h1 className="mb-4 font-display text-4xl font-semibold tracking-[-0.035em] sm:text-5xl">Privacy Policy</h1>
+          <p className="mb-10 border-b border-border pb-8 text-sm text-muted-foreground">Last updated: September 6, 2026</p>
 
-          <section className="space-y-6">
+          <section className="space-y-9 [&>div:not(:last-child)]:border-b [&>div:not(:last-child)]:border-border/60 [&>div:not(:last-child)]:pb-9">
             <div>
-              <h2 className="text-2xl font-semibold mb-3">1. Introduction</h2>
+              <h2 className="mb-3 text-lg font-semibold tracking-tight">1. Introduction</h2>
               <p className="text-muted-foreground leading-relaxed">
                 Welcome to Orderly (&quot;we,&quot; &quot;our,&quot; or &quot;us&quot;). We are committed to protecting your personal 
                 information and your right to privacy. This Privacy Policy explains how we collect, use, disclose, 
@@ -41,11 +41,11 @@ export default function PrivacyPolicyPage() {
             </div>
 
             <div>
-              <h2 className="text-2xl font-semibold mb-3">2. Information We Collect</h2>
+              <h2 className="mb-3 text-lg font-semibold tracking-tight">2. Information We Collect</h2>
               <p className="text-muted-foreground leading-relaxed mb-3">
                 We collect information that you provide directly to us when you:
               </p>
-              <ul className="list-disc list-inside space-y-2 text-muted-foreground">
+              <ul className="list-disc pl-5 space-y-2 text-muted-foreground">
                 <li>Create an account (email address, name, profile information)</li>
                 <li>Use our planning features (tasks, schedules, goals, study sessions, and exams)</li>
                 <li>Connect supported school services or calendar feeds</li>
@@ -53,7 +53,7 @@ export default function PrivacyPolicyPage() {
             </div>
 
             <div>
-              <h2 className="text-2xl font-semibold mb-3">3. School Service Integrations</h2>
+              <h2 className="mb-3 text-lg font-semibold tracking-tight">3. School Service Integrations</h2>
               <p className="text-muted-foreground leading-relaxed">
                 When you connect a supported school service or calendar feed, we process the course names,
                 assignments, due dates, and calendar events needed to import and sync your academic data.
@@ -63,8 +63,8 @@ export default function PrivacyPolicyPage() {
             </div>
 
             <div>
-              <h2 className="text-2xl font-semibold mb-3">4. How We Use Your Information</h2>
-              <ul className="list-disc list-inside space-y-2 text-muted-foreground">
+              <h2 className="mb-3 text-lg font-semibold tracking-tight">4. How We Use Your Information</h2>
+              <ul className="list-disc pl-5 space-y-2 text-muted-foreground">
                 <li>To provide, maintain, and improve our services</li>
                 <li>To manage your account and provide customer support</li>
                 <li>To organize your tasks, schedules, goals, study sessions, and exams</li>
@@ -75,7 +75,7 @@ export default function PrivacyPolicyPage() {
             </div>
 
             <div>
-              <h2 className="text-2xl font-semibold mb-3">AI Assistant</h2>
+              <h2 className="mb-3 text-lg font-semibold tracking-tight">AI Assistant</h2>
               <p className="text-muted-foreground leading-relaxed">
                 When you use the Assistant, Orderly sends your messages, recent conversation context, and
                 account planning information to DeepSeek to interpret and answer your request. Depending
@@ -92,7 +92,7 @@ export default function PrivacyPolicyPage() {
             </div>
 
             <div>
-              <h2 className="text-2xl font-semibold mb-3">5. Data Storage and Security</h2>
+              <h2 className="mb-3 text-lg font-semibold tracking-tight">5. Data Storage and Security</h2>
               <p className="text-muted-foreground leading-relaxed">
                 Your data is stored securely using Supabase infrastructure with PostgreSQL databases. 
                 We implement row-level security (RLS) policies to ensure that users can only access 
@@ -103,12 +103,12 @@ export default function PrivacyPolicyPage() {
             </div>
 
             <div>
-              <h2 className="text-2xl font-semibold mb-3">6. Data Sharing</h2>
+              <h2 className="mb-3 text-lg font-semibold tracking-tight">6. Data Sharing</h2>
               <p className="text-muted-foreground leading-relaxed">
                 We do not sell, trade, or rent your personal information to third parties. 
                 We may share your information only in the following circumstances:
               </p>
-              <ul className="list-disc list-inside space-y-2 text-muted-foreground mt-3">
+              <ul className="list-disc pl-5 space-y-2 text-muted-foreground mt-3">
                 <li>With your explicit consent</li>
                 <li>To comply with legal obligations</li>
                 <li>To protect our rights and prevent fraud</li>
@@ -118,7 +118,7 @@ export default function PrivacyPolicyPage() {
             </div>
 
             <div>
-              <h2 className="text-2xl font-semibold mb-3">7. Data Retention and Deletion</h2>
+              <h2 className="mb-3 text-lg font-semibold tracking-tight">7. Data Retention and Deletion</h2>
               <p className="text-muted-foreground leading-relaxed">
                 We retain your personal data for as long as your account is active. You may request 
                 deletion of your account and all associated data at any time by contacting us. 
@@ -129,9 +129,9 @@ export default function PrivacyPolicyPage() {
             </div>
 
             <div>
-              <h2 className="text-2xl font-semibold mb-3">8. Your Rights</h2>
+              <h2 className="mb-3 text-lg font-semibold tracking-tight">8. Your Rights</h2>
               <p className="text-muted-foreground leading-relaxed">You have the right to:</p>
-              <ul className="list-disc list-inside space-y-2 text-muted-foreground mt-3">
+              <ul className="list-disc pl-5 space-y-2 text-muted-foreground mt-3">
                 <li>Access, update, or delete your personal information</li>
                 <li>Disconnect third-party integrations at any time</li>
                 <li>Request a copy of your data</li>
@@ -140,7 +140,7 @@ export default function PrivacyPolicyPage() {
             </div>
 
             <div>
-              <h2 className="text-2xl font-semibold mb-3">9. Children&apos;s Privacy</h2>
+              <h2 className="mb-3 text-lg font-semibold tracking-tight">9. Children&apos;s Privacy</h2>
               <p className="text-muted-foreground leading-relaxed">
                 Orderly is designed for students aged 13 and older. We do not knowingly collect 
                 personal information from children under 13. If you believe we have collected 
@@ -149,7 +149,7 @@ export default function PrivacyPolicyPage() {
             </div>
 
             <div>
-              <h2 className="text-2xl font-semibold mb-3">10. Changes to This Policy</h2>
+              <h2 className="mb-3 text-lg font-semibold tracking-tight">10. Changes to This Policy</h2>
               <p className="text-muted-foreground leading-relaxed">
                 We may update this Privacy Policy from time to time. We will notify you of any 
                 changes by updating the &quot;Last updated&quot; date and, for significant changes, 
@@ -158,10 +158,10 @@ export default function PrivacyPolicyPage() {
             </div>
 
             <div>
-              <h2 className="text-2xl font-semibold mb-3">11. Contact Us</h2>
+              <h2 className="mb-3 text-lg font-semibold tracking-tight">11. Contact Us</h2>
               <p className="text-muted-foreground leading-relaxed">
                 If you have questions about this Privacy Policy or our data practices, 
-                please contact us at <a href="mailto:support@orderly.app" className="text-indigo-400 hover:text-indigo-300">support@orderly.app</a>.
+                please contact us at <a href="mailto:support@orderly.app" className="text-primary hover:underline underline-offset-4">support@orderly.app</a>.
               </p>
             </div>
           </section>
@@ -169,11 +169,11 @@ export default function PrivacyPolicyPage() {
       </main>
 
       {/* Footer */}
-      <footer className="py-8 px-6 border-t border-border/40">
-        <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
+      <footer className="border-t border-border bg-card/40 px-5 py-7 sm:px-8">
+        <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 text-xs sm:flex-row">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center">
-              <Sparkles className="w-4 h-4 text-white" />
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-background">
+              <Sparkles className="h-4 w-4 text-primary" />
             </div>
             <span className="font-semibold">Orderly</span>
           </div>

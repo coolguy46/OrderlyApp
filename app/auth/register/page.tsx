@@ -10,17 +10,11 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Separator } from '@/components/ui/separator';
-import { Sparkles, Mail, Lock, User, ArrowRight, Chrome, Check, AlertCircle } from 'lucide-react';
+import { Mail, Lock, User, ArrowRight, Chrome, AlertCircle } from 'lucide-react';
 import { useAppStore } from '@/lib/store';
 import { signInWithGoogle } from '@/lib/supabase/services';
 import { errorMessage } from '@/lib/auth/lifecycle';
-
-const features = [
-  'Plan tasks and deadlines in one place',
-  'Sync assignments from Canvas',
-  'See tasks and schedules together',
-  'Track your goals and exams',
-];
+import { AuthFrame } from '@/components/auth/AuthFrame';
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -85,59 +79,16 @@ export default function RegisterPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-background via-background to-purple-500/10">
-      {/* Background decoration */}
-      <div className="fixed inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute -top-40 -left-40 w-80 h-80 bg-purple-500/20 rounded-full blur-3xl" />
-        <div className="absolute -bottom-40 -right-40 w-80 h-80 bg-indigo-500/20 rounded-full blur-3xl" />
-      </div>
-
+    <AuthFrame>
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5 }}
-        className="w-full max-w-4xl relative grid md:grid-cols-2 gap-8 items-center"
+        className="relative w-full"
       >
-        {/* Left side - Features */}
-        <div className="hidden md:block space-y-8">
-          <div>
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center">
-                <Sparkles className="w-5 h-5 text-white" />
-              </div>
-              <span className="text-xl font-bold">Orderly</span>
-            </div>
-            <h1 className="text-3xl font-bold mb-2">Start your learning journey</h1>
-            <p className="text-muted-foreground">
-              Build a clear view of your assignments, deadlines, and plans with Orderly.
-            </p>
-          </div>
-
-          <div className="space-y-4">
-            {features.map((feature, i) => (
-              <motion.div
-                key={feature}
-                initial={{ opacity: 0, x: -20 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: i * 0.1 + 0.3 }}
-                className="flex items-center gap-3"
-              >
-                <div className="w-6 h-6 rounded-full bg-green-500/20 flex items-center justify-center">
-                  <Check className="w-3.5 h-3.5 text-green-400" />
-                </div>
-                <span className="text-sm">{feature}</span>
-              </motion.div>
-            ))}
-          </div>
-        </div>
-
-        {/* Right side - Form */}
-        <Card className="border-border/50 bg-card/80 backdrop-blur-xl">
-          <CardHeader className="text-center space-y-2">
-            <div className="md:hidden mx-auto w-12 h-12 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center mb-2">
-              <Sparkles className="w-6 h-6 text-white" />
-            </div>
-            <CardTitle className="text-2xl font-bold">Create account</CardTitle>
+        <Card className="rounded-2xl border-border bg-card shadow-sm sm:p-2">
+          <CardHeader className="space-y-2 pb-7 text-left">
+            <CardTitle className="font-display text-3xl font-semibold tracking-tight">Create account</CardTitle>
             <CardDescription>
               Get started with your free account
             </CardDescription>
@@ -168,7 +119,7 @@ export default function RegisterPage() {
               <div
                 role="alert"
                 aria-live="assertive"
-                className="flex items-start gap-2 rounded-lg border border-red-500/25 bg-red-500/10 p-3 text-sm text-red-300"
+                className="flex items-start gap-2 rounded-lg border border-red-500/25 bg-red-500/10 p-3 text-sm text-red-700 dark:text-red-300"
               >
                 <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
                 <span>{error}</span>
@@ -180,10 +131,10 @@ export default function RegisterPage() {
               <div
                 role="status"
                 aria-live="polite"
-                className="space-y-3 rounded-lg border border-green-500/25 bg-green-500/10 p-4 text-sm text-green-200"
+                className="space-y-3 rounded-lg border border-green-500/25 bg-green-500/10 p-4 text-sm text-green-700 dark:text-green-200"
               >
                 <p>Check your email to confirm your account, then return here to sign in.</p>
-                <Link href="/auth/login" className="inline-flex font-medium text-green-100 underline underline-offset-4">
+                <Link href="/auth/login" className="inline-flex font-medium text-green-700 dark:text-green-100 underline underline-offset-4">
                   Return to sign in
                 </Link>
               </div>
@@ -221,7 +172,7 @@ export default function RegisterPage() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 gap-4 min-[420px]:grid-cols-2 min-[420px]:gap-3">
                 <div className="space-y-2">
                   <Label htmlFor="password">Password</Label>
                   <div className="relative">
@@ -260,13 +211,13 @@ export default function RegisterPage() {
                   checked={acceptTerms}
                   onCheckedChange={(checked) => setAcceptTerms(checked as boolean)}
                 />
-                <Label htmlFor="terms" className="text-sm font-normal text-muted-foreground cursor-pointer leading-relaxed">
+                <Label htmlFor="terms" className="block text-sm font-normal text-muted-foreground cursor-pointer leading-relaxed">
                   I agree to the{' '}
-                  <Link href="/terms" className="text-indigo-400 hover:underline">
+                  <Link href="/terms" className="text-primary hover:underline">
                     Terms
                   </Link>{' '}
                   and{' '}
-                  <Link href="/privacy" className="text-indigo-400 hover:underline">
+                  <Link href="/privacy" className="text-primary hover:underline">
                     Privacy Policy
                   </Link>
                 </Label>
@@ -274,7 +225,7 @@ export default function RegisterPage() {
 
               <Button
                 type="submit"
-                className="w-full bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700"
+                className="h-11 w-full"
                 disabled={isLoading}
               >
                 {isLoading ? (
@@ -290,12 +241,12 @@ export default function RegisterPage() {
             )}
           </CardContent>
 
-          <CardFooter className="justify-center">
+          <CardFooter className="justify-center border-t border-border pt-5">
             <p className="text-sm text-muted-foreground">
               Already have an account?{' '}
               <Link
                 href="/auth/login"
-                className="text-indigo-400 hover:text-indigo-300 font-medium transition-colors"
+                className="font-medium text-primary hover:underline underline-offset-4 transition-colors"
               >
                 Sign in
               </Link>
@@ -303,6 +254,6 @@ export default function RegisterPage() {
           </CardFooter>
         </Card>
       </motion.div>
-    </div>
+    </AuthFrame>
   );
 }

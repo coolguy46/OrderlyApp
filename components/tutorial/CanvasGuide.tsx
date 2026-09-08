@@ -31,10 +31,10 @@ const steps = [
 export default function CanvasGuide() {
   return (
     <div className="space-y-5 text-sm leading-6 [overflow-wrap:anywhere]" data-canvas-guide>
-      <ol className="grid gap-x-6 gap-y-4 sm:grid-cols-2">
+      <ol className="grid gap-3 sm:grid-cols-2">
         {steps.map((step, index) => (
-          <li key={step.title} className="flex min-w-0 items-start gap-3">
-            <span aria-hidden="true" className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
+          <li key={step.title} className="flex min-w-0 items-start gap-3 rounded-xl border border-border bg-card p-4">
+            <span aria-hidden="true" className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-primary/10 text-[11px] font-semibold text-primary">
               {index + 1}
             </span>
             <div className="min-w-0">
@@ -45,7 +45,7 @@ export default function CanvasGuide() {
         ))}
       </ol>
 
-      <div className="rounded-xl border border-border bg-muted/25 p-4">
+      <div className="rounded-xl border border-border bg-muted/20 p-5">
         <div className="flex items-center gap-2 font-medium text-foreground">
           <CheckCircle2 className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
           Check your first import
@@ -61,7 +61,7 @@ export default function CanvasGuide() {
         </p>
       </div>
 
-      <details className="group rounded-xl border border-border">
+      <details className="group rounded-xl border border-border bg-card">
         <summary className="cursor-pointer rounded-xl px-4 py-3 font-medium text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background">
           Having trouble connecting?
         </summary>

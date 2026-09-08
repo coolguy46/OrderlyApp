@@ -13,7 +13,7 @@ function Fixture() {
   const [view, setView] = useState('settings');
   useEffect(() => {
     (window as any).featuresFixture = { controls, state: useAppStore.getState, show: setView,
-      switchUser: () => useAppStore.setState({ user: { id: 'feature-test-jamie', full_name: 'Jamie Lee', email: 'jamie@example.invalid' } }),
+      switchUser: () => useAppStore.setState({ user: { id: 'feature-test-jamie', full_name: 'Jamie Lee', email: 'jamie@example.invalid', tasks_completed: 0, total_study_time: 0 } }),
       taskDueSoon: () => saveFixture({ tasks: [{ id: 'reminder', user_id: owner, title: 'Due soon synthetic task', status: 'pending', source: 'canvas', due_date: new Date(Date.now() + 15 * 60_000).toISOString() }] }),
     };
   }, []);

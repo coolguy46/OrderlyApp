@@ -190,19 +190,19 @@ export function DashboardSchedule() {
   }, []);
 
   return (
-    <Card className="overflow-hidden border-border/50">
-      <CardHeader className="border-b border-border/40 pb-3">
+    <Card className="overflow-hidden">
+      <CardHeader className="border-b border-border/70 !py-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex min-w-0 items-center gap-2">
-            <div className="rounded-lg bg-indigo-500/15 p-1.5">
-              <CalendarClock className="h-4 w-4 text-indigo-400" />
+            <div className="rounded-lg bg-primary/10 p-2">
+              <CalendarClock className="h-4 w-4 text-primary" />
             </div>
             <div className="min-w-0">
               <CardTitle className="truncate text-base font-display">{format(selectedDate, 'EEEE, MMM d')}</CardTitle>
               <p className="text-xs text-muted-foreground">
                 {occurrences.timed.length} timed · {occurrences.untimed.length} untimed · {fixedBlocks.length} busy
               </p>
-              <p className="mt-0.5 text-[10px] text-muted-foreground/75">
+              <p className="mt-1 text-xs text-muted-foreground">
                 Click an empty time to add a task or event.
               </p>
             </div>
@@ -235,7 +235,7 @@ export function DashboardSchedule() {
 
       <CardContent className="p-0">
         <div className="flex min-h-12 items-stretch border-b border-border/50 bg-muted/15">
-          <div className="flex w-16 shrink-0 items-center justify-center gap-1 border-r border-border/50 px-1 text-[9px] text-muted-foreground">
+          <div className="flex w-16 shrink-0 items-center justify-center gap-1 border-r border-border/60 px-1 text-[10px] text-muted-foreground">
             <ListTodo className="h-3 w-3" /> Untimed
           </div>
           <div className="flex min-w-0 flex-1 gap-1.5 overflow-x-auto p-2">
@@ -257,11 +257,11 @@ export function DashboardSchedule() {
           </div>
         </div>
 
-        <div ref={scrollerRef} className="relative h-[460px] overflow-y-auto overscroll-contain bg-card/20">
+        <div ref={scrollerRef} className="relative h-[460px] overflow-y-auto overscroll-contain bg-card">
           <div className="relative grid grid-cols-[64px_minmax(0,1fr)]" style={{ height: DAY_HEIGHT }}>
-            <div className="relative border-r border-border/50 bg-card/45">
+            <div className="relative border-r border-border/60 bg-muted/25">
               {Array.from({ length: 24 }, (_, hour) => (
-                <span key={hour} className="absolute right-2 -translate-y-1/2 text-[9px] text-muted-foreground" style={{ top: hour * HOUR_HEIGHT }}>
+                <span key={hour} className="absolute right-2 -translate-y-1/2 text-[10px] text-muted-foreground" style={{ top: hour * HOUR_HEIGHT }}>
                   {format(new Date(2000, 0, 1, hour), 'h a')}
                 </span>
               ))}

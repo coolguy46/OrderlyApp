@@ -84,12 +84,12 @@ export function PlannerPrompt({
   };
 
   return (
-    <Card className={cn('overflow-hidden border-indigo-500/15 bg-gradient-to-br from-indigo-500/7 to-purple-500/5', className)}>
-      <CardContent className="p-3.5 sm:p-4">
+    <Card className={cn('workspace-panel overflow-hidden', className)}>
+      <CardContent className="p-4 sm:p-5">
         <div className="mb-3 flex items-start justify-between gap-3">
           <div className="flex min-w-0 items-start gap-2.5">
-            <div className="rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 p-2 shadow-md shadow-indigo-500/15">
-              <Sparkles className="h-4 w-4 text-white" />
+            <div className="rounded-xl border border-primary/15 bg-primary/10 p-2 text-primary">
+              <Sparkles className="h-4 w-4" />
             </div>
             <div className="min-w-0">
               <h3 className="text-sm font-semibold font-display">Plan with Orderly</h3>
@@ -156,7 +156,7 @@ export function PlannerPrompt({
               type="button"
               disabled={disabled || isSubmitting}
               onClick={() => setPrompt(suggestion)}
-              className="rounded-full border border-border/50 bg-background/50 px-2.5 py-1 text-[10px] font-medium text-muted-foreground transition-colors hover:border-indigo-500/30 hover:bg-indigo-500/10 hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+              className="min-h-9 rounded-lg border border-border bg-background/50 px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:border-primary/30 hover:bg-primary/5 hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
             >
               {suggestion}
             </button>
@@ -180,7 +180,7 @@ export function PlannerPrompt({
               type="submit"
               size="icon-sm"
               disabled={!prompt.trim() || disabled || isSubmitting}
-              className="h-8 w-8 shrink-0 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 text-white shadow-sm"
+              className="h-8 w-8 shrink-0 rounded-lg"
               aria-label="Send planner instructions"
             >
               {isSubmitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
@@ -188,7 +188,7 @@ export function PlannerPrompt({
           </div>
         </form>
 
-        <div className="mt-2.5 grid gap-1 text-[9px] leading-relaxed text-muted-foreground/75 sm:grid-cols-2 sm:gap-3">
+        <div className="mt-3 grid gap-2 text-[11px] leading-relaxed text-muted-foreground sm:grid-cols-2 sm:gap-3">
           <p>Works best with Canvas because assignment descriptions give Orderly more context.</p>
           <p>Suggested times are estimates, not guarantees—review and adjust the plan when needed.</p>
         </div>

@@ -264,7 +264,7 @@ function PositionedBlock({
       ref={setNodeRef}
       style={style}
       className={cn(
-        'group absolute left-1 right-1 overflow-hidden rounded-md border border-l-[3px] text-left transition-[box-shadow,opacity]',
+        'group absolute left-1 right-1 overflow-hidden rounded-lg border border-l-[3px] text-left shadow-sm transition-[box-shadow,opacity]',
         draggable && 'cursor-grab active:cursor-grabbing',
         fixed && 'border-dashed bg-muted/70',
         block.draft && 'border-primary/80 bg-primary/15 shadow-lg ring-1 ring-primary/35',
@@ -854,18 +854,18 @@ export function WeekTimeGrid({
         <div
           ref={scrollRef}
           className={cn(
-            'scroll-touch relative overflow-auto overscroll-contain rounded-xl border border-border/50 bg-card/35',
+            'scroll-touch relative overflow-auto overscroll-contain rounded-2xl border border-border bg-card shadow-sm',
             !viewportClassName && (variant === 'fullscreen' ? 'h-[calc(100dvh-8.5rem)]' : 'h-[600px]'),
             viewportClassName,
           )}
         >
           <div className={cn('relative', contentMinWidth)}>
-            <div className="sticky top-0 z-40 bg-card/95 backdrop-blur-xl" data-time-grid-header>
+            <div className="sticky top-0 z-40 bg-card" data-time-grid-header>
               <div
-                className="grid h-14 border-b border-border/50 bg-card/95"
+                className="grid h-14 border-b border-border bg-muted/30"
                 style={{ gridTemplateColumns: columns }}
               >
-                <div className="sticky left-0 z-50 flex items-center justify-center border-r border-border/40 bg-card/95 px-1 text-[10px] font-medium text-muted-foreground">
+                <div className="sticky left-0 z-50 flex items-center justify-center border-r border-border/60 bg-card px-1 text-[10px] font-medium text-muted-foreground">
                   <span className="truncate" title={timeZoneLabel || resolvedTimeZone}>
                     {displayedTimeZoneLabel}
                   </span>
@@ -876,7 +876,7 @@ export function WeekTimeGrid({
                     className={cn(
                       'flex items-stretch justify-stretch border-r border-border/35 last:border-r-0',
                       isSameDay(day, displayNow) && 'bg-primary/5',
-                      selectedDay && isSameDay(day, selectedDay) && 'bg-indigo-500/10',
+                      selectedDay && isSameDay(day, selectedDay) && 'bg-primary/10',
                     )}
                   >
                     <button
@@ -886,14 +886,14 @@ export function WeekTimeGrid({
                       aria-pressed={Boolean(selectedDay && isSameDay(day, selectedDay))}
                       className="flex w-full flex-col items-center justify-center px-2 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary disabled:cursor-default"
                     >
-                      <span className="text-[11px] font-medium text-muted-foreground">
+                      <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                         {format(day, 'EEE')}
                       </span>
                       <span
                         className={cn(
                           'mt-0.5 flex h-6 min-w-6 items-center justify-center rounded-full px-1.5 text-xs font-semibold',
                           isSameDay(day, displayNow) && 'bg-primary text-primary-foreground shadow-sm',
-                          selectedDay && isSameDay(day, selectedDay) && !isSameDay(day, displayNow) && 'bg-indigo-500 text-white shadow-sm',
+                          selectedDay && isSameDay(day, selectedDay) && !isSameDay(day, displayNow) && 'bg-primary text-primary-foreground shadow-sm',
                         )}
                       >
                         {format(day, 'd')}
@@ -918,7 +918,7 @@ export function WeekTimeGrid({
 
             <div className="grid" style={{ gridTemplateColumns: columns }}>
               <div
-                className="sticky left-0 z-30 border-r border-border/40 bg-card/95"
+                className="sticky left-0 z-30 border-r border-border/60 bg-card"
                 style={{ height: GRID_HEIGHT }}
               >
                 {Array.from({ length: 24 }, (_, hour) => (

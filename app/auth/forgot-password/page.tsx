@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Sparkles, Mail, ArrowLeft, ArrowRight, CheckCircle2, AlertCircle } from 'lucide-react';
 import { resetPassword } from '@/lib/supabase/services';
+import { AuthFrame } from '@/components/auth/AuthFrame';
 
 export default function ForgotPasswordPage() {
   const [isLoading, setIsLoading] = useState(false);
@@ -34,39 +35,33 @@ export default function ForgotPasswordPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-background via-background to-indigo-500/10">
-      {/* Background decoration */}
-      <div className="fixed inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute -top-40 -right-40 w-80 h-80 bg-indigo-500/20 rounded-full blur-3xl" />
-        <div className="absolute -bottom-40 -left-40 w-80 h-80 bg-purple-500/20 rounded-full blur-3xl" />
-      </div>
-
+    <AuthFrame>
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5 }}
-        className="w-full max-w-md relative"
+        className="relative w-full"
       >
-        <Card className="border-border/50 bg-card/80 backdrop-blur-xl">
-          <CardHeader className="text-center space-y-4">
-            <div className="mx-auto w-12 h-12 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center">
-              <Sparkles className="w-6 h-6 text-white" />
+        <Card className="rounded-2xl border-border bg-card shadow-sm sm:p-2">
+          <CardHeader className="space-y-5 pb-7 text-left">
+            <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-border bg-background">
+              <Sparkles className="h-5 w-5 text-primary" />
             </div>
             
             {isSubmitted ? (
               <div className="space-y-2">
-                <div className="mx-auto w-16 h-16 rounded-full bg-green-500/20 flex items-center justify-center mb-4">
-                  <CheckCircle2 className="w-8 h-8 text-green-400" />
+                <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-500/10">
+                  <CheckCircle2 className="h-6 w-6 text-emerald-600 dark:text-emerald-400" />
                 </div>
-                <CardTitle className="text-2xl font-bold">Check your email</CardTitle>
+                <CardTitle className="font-display text-3xl font-semibold tracking-tight">Check your email</CardTitle>
                 <CardDescription className="text-muted-foreground">
                   We&apos;ve sent a password reset link to <strong className="text-foreground">{email}</strong>
                 </CardDescription>
               </div>
             ) : (
               <div>
-                <CardTitle className="text-2xl font-bold">Forgot password?</CardTitle>
-                <CardDescription className="text-muted-foreground">
+                <CardTitle className="font-display text-3xl font-semibold tracking-tight">Forgot password?</CardTitle>
+                <CardDescription className="mt-2 text-muted-foreground">
                   No worries, we&apos;ll send you reset instructions
                 </CardDescription>
               </div>
@@ -84,7 +79,7 @@ export default function ForgotPasswordPage() {
                       setError('');
                       setIsSubmitted(false);
                     }}
-                    className="text-indigo-400 hover:underline"
+                    className="text-primary hover:underline"
                   >
                     try again
                   </button>
@@ -102,7 +97,7 @@ export default function ForgotPasswordPage() {
                   <div
                     role="alert"
                     aria-live="assertive"
-                    className="flex items-start gap-2 rounded-lg border border-red-500/25 bg-red-500/10 p-3 text-sm text-red-300"
+                    className="flex items-start gap-2 rounded-lg border border-red-500/25 bg-red-500/10 p-3 text-sm text-red-700 dark:text-red-300"
                   >
                     <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
                     <span>{error}</span>
@@ -129,7 +124,7 @@ export default function ForgotPasswordPage() {
 
                 <Button
                   type="submit"
-                  className="w-full bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700"
+                  className="h-11 w-full"
                   disabled={isLoading}
                 >
                   {isLoading ? (
@@ -146,7 +141,7 @@ export default function ForgotPasswordPage() {
           </CardContent>
 
           {!isSubmitted && (
-            <CardFooter className="justify-center">
+            <CardFooter className="justify-center border-t border-border pt-5">
               <Link
                 href="/auth/login"
                 className="text-sm text-muted-foreground hover:text-foreground transition-colors flex items-center gap-2"
@@ -158,6 +153,6 @@ export default function ForgotPasswordPage() {
           )}
         </Card>
       </motion.div>
-    </div>
+    </AuthFrame>
   );
 }

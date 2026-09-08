@@ -432,8 +432,8 @@ export function TaskCalendar({ date: controlledDate, onDateChange, mode: control
     : `${format(visibleDays[0], 'MMM d')}–${format(visibleDays[6], 'MMM d, yyyy')}`;
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-col gap-3">
-      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 py-1">
+    <div className="flex min-h-0 min-w-0 flex-col gap-4">
+      <div className="workspace-toolbar flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
         <div className="flex min-w-0 max-w-full items-center gap-0.5">
           <Button type="button" variant="ghost" size="icon-sm" onClick={() => navigate(-1)} aria-label={`Previous ${mode}`}>
             <ChevronLeft className="h-4 w-4" />
@@ -454,7 +454,7 @@ export function TaskCalendar({ date: controlledDate, onDateChange, mode: control
         </div>
 
         <div className="flex items-center gap-2">
-          <div className="flex items-center rounded-lg bg-muted/35 p-0.5" role="group" aria-label="Task calendar range">
+          <div className="flex items-center rounded-lg border border-border/70 bg-muted/30 p-0.5" role="group" aria-label="Task calendar range">
             {(['week', 'month'] as const).map(value => (
               <button
                 key={value}
@@ -477,14 +477,14 @@ export function TaskCalendar({ date: controlledDate, onDateChange, mode: control
         </div>
       </div>
 
-      <Card className="min-h-0 overflow-hidden border-border/50 bg-card/40 shadow-none">
+      <Card className="workspace-panel min-h-0 overflow-hidden">
         <CardContent className="p-0">
           <div className="overflow-x-auto">
             <div className="min-w-[840px]">
-              <div className="grid grid-cols-7 border-b border-border/50 bg-card/80">
+              <div className="grid grid-cols-7 border-b border-border bg-muted/30">
                 {visibleDays.slice(0, 7).map(day => (
-                  <div key={format(day, 'EEE')} className="border-r border-border/45 px-2 py-2 text-center last:border-r-0">
-                    <p className="text-[11px] font-medium text-muted-foreground">{format(day, 'EEE')}</p>
+                  <div key={format(day, 'EEE')} className="border-r border-border/60 px-2 py-3 text-center last:border-r-0">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{format(day, 'EEE')}</p>
                   </div>
                 ))}
               </div>
@@ -505,7 +505,7 @@ export function TaskCalendar({ date: controlledDate, onDateChange, mode: control
                       <div
                         key={key}
                         className={cn(
-                          'min-h-[128px] border-b border-r border-border/35 p-2 last:border-r-0',
+                          'min-h-[140px] border-b border-r border-border/60 p-2.5 last:border-r-0',
                           !isSameMonth(day, currentDate) && 'bg-muted/[0.08] text-muted-foreground opacity-55',
                           isPlannerToday && 'bg-primary/[0.035]',
                           hasMissingTasks && 'bg-red-500/[0.07] ring-1 ring-inset ring-red-500/35',
@@ -555,7 +555,7 @@ export function TaskCalendar({ date: controlledDate, onDateChange, mode: control
                     const isPlannerToday = key === todayKey;
                     return (
                       <div key={key} className={cn(
-                        'min-h-[calc(100dvh-15.5rem)] border-r border-border/45 p-2 last:border-r-0',
+                        'min-h-[calc(100dvh-19rem)] border-r border-border/60 p-2.5 last:border-r-0',
                         isPlannerToday && 'bg-primary/[0.035]',
                         hasMissingTasks && 'bg-red-500/[0.07] ring-1 ring-inset ring-red-500/35',
                       )}>
@@ -589,7 +589,7 @@ export function TaskCalendar({ date: controlledDate, onDateChange, mode: control
         </CardContent>
       </Card>
 
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-[11px] text-muted-foreground" aria-label="Calendar legend">
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 px-1 text-xs text-muted-foreground" aria-label="Calendar legend">
         <span className="inline-flex items-center gap-1.5"><CircleDot className="h-3 w-3" /> Task deadline</span>
         <span className="inline-flex items-center gap-1.5"><GraduationCap className="h-3 w-3" /> Exam</span>
         <span className="inline-flex items-center gap-1.5"><CalendarClock className="h-3 w-3" /> Event</span>

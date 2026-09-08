@@ -49,10 +49,10 @@ export function PlannerFullscreen({
           transform: 'none',
         }}
       >
-        <DialogHeader className="flex-row items-center justify-between gap-4 border-b border-border/50 bg-card/70 px-4 py-3 text-left backdrop-blur-xl sm:px-6">
+        <DialogHeader className="flex-row items-center justify-between gap-4 border-b border-border bg-card px-4 py-4 text-left sm:px-6">
           <div className="flex min-w-0 items-center gap-3">
-            <div className="rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 p-2 shadow-md shadow-indigo-500/15">
-              <CalendarRange className="h-4 w-4 text-white" />
+            <div className="rounded-xl border border-primary/15 bg-primary/10 p-2 text-primary">
+              <CalendarRange className="h-4 w-4" />
             </div>
             <div className="min-w-0">
               <DialogTitle className="truncate text-base font-display">Planned week</DialogTitle>
@@ -86,4 +86,3 @@ export function PlannerFullscreen({
     </Dialog>
   );
 }
-
