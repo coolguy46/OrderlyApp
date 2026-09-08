@@ -6,6 +6,7 @@ import { TaskCard } from './TaskCard';
 import { TaskForm } from './TaskForm';
 import { Task } from '@/lib/supabase/types';
 import { Button } from '@/components/ui/Button';
+import { StatCard } from '@/components/ui/stat-card';
 import {
   Select,
   SelectContent,
@@ -174,26 +175,19 @@ export function TaskList({ initialFilter = 'pending' }: { initialFilter?: Filter
         initial="hidden" animate="show" variants={containerVariants}
         className="grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3"
       >
-        {[
-          { label: 'Total', value: stats.total, icon: ListTodo, iconColor: 'text-muted-foreground' },
-          { label: 'Active', value: stats.pending, icon: Clock, iconColor: 'text-amber-600 dark:text-amber-400' },
-          { label: 'Missing', value: stats.missing, icon: AlertTriangle, iconColor: 'text-red-600 dark:text-red-400' },
-          { label: 'Done', value: stats.completed, icon: CheckCircle2, iconColor: 'text-emerald-600 dark:text-emerald-400' },
-        ].map((stat) => (
+        {([
+          { label: 'Total', value: stats.total, icon: ListTodo, tone: 'blue' },
+          { label: 'Active', value: stats.pending, icon: Clock, tone: 'amber' },
+          { label: 'Missing', value: stats.missing, icon: AlertTriangle, tone: 'rose' },
+          { label: 'Done', value: stats.completed, icon: CheckCircle2, tone: 'emerald' },
+        ] as const).map((stat) => (
           <motion.div key={stat.label} variants={itemVariants}>
-            <div
-              className="workspace-stat"
-            >
-              <div className="flex items-center gap-2.5 sm:gap-3">
-                <div className="rounded-lg bg-muted/60 p-2">
-                  <stat.icon className={cn('w-3.5 h-3.5 sm:w-4 sm:h-4', stat.iconColor)} />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-xl font-semibold tracking-tight leading-none tabular-nums">{stat.value}</p>
-                  <p className="text-xs text-muted-foreground mt-1">{stat.label}</p>
-                </div>
-              </div>
-            </div>
+            <StatCard
+              title={stat.label}
+              value={stat.value}
+              icon={<stat.icon />}
+              tone={stat.tone}
+            />
           </motion.div>
         ))}
       </motion.div>

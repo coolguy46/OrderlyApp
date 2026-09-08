@@ -6,7 +6,7 @@ import { ArrowLeft, CalendarDays, Check } from 'lucide-react';
 /** Presentation only. Authentication and recovery remain owned by each page. */
 export function AuthFrame({ children }: { children: ReactNode }) {
   return (
-    <div className="min-h-screen bg-background text-foreground">
+    <div className="workspace-shell min-h-screen bg-background text-foreground">
       <header className="mx-auto flex w-full max-w-7xl items-center justify-between px-5 py-6 sm:px-10">
         <Link href="/landing" className="inline-flex items-center gap-2.5 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
           <Image src="/logo.svg" alt="" width={36} height={36} className="h-9 w-9 rounded-lg" priority />

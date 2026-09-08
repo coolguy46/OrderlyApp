@@ -49,7 +49,7 @@ export function Sidebar({ mobile, onNavigate }: SidebarProps = {}) {
       animate={{ width: mobile ? '100%' : (sidebarOpen ? 240 : 72) }}
       transition={{ duration: 0.2, ease: 'easeInOut' }}
       className={cn(
-        "h-full bg-sidebar border-r border-border/70 flex flex-col",
+        "workspace-sidebar h-full bg-sidebar border-r border-border/70 flex flex-col",
         mobile ? "w-full" : "fixed left-0 top-0 z-40"
       )}
     >
@@ -82,7 +82,7 @@ export function Sidebar({ mobile, onNavigate }: SidebarProps = {}) {
             return (
               <Link key={item.href} href={item.href} onClick={onNavigate} aria-label={item.label} aria-current={isActive ? 'page' : undefined} title={!effectiveOpen ? item.label : undefined}
                   className={cn(
-                    'relative flex min-h-10 items-center gap-3 rounded-lg px-3 py-2 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                    'workspace-nav-item relative flex min-h-10 items-center gap-3 rounded-lg px-3 py-2 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                     isActive
                       ? 'bg-primary/10 text-primary'
                       : 'text-muted-foreground hover:bg-accent/70 hover:text-foreground',

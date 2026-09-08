@@ -4,6 +4,7 @@ import { useState, useMemo, useEffect, useRef, useCallback, useSyncExternalStore
 import { Exam, Task } from '@/lib/supabase/types';
 import { useAppStore } from '@/lib/store';
 import { Card, ProgressBar, Button, Modal, Input, Textarea, SelectField, SubjectBadge, Badge, ConfirmDialog } from '@/components/ui';
+import { StatCard } from '@/components/ui/stat-card';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn, isExamType } from '@/lib/utils';
 import {
@@ -690,10 +691,10 @@ export function ExamList() {
   }, [examTypeTasks, exams, mounted, now, timeZone]);
 
   const statCards = [
-    { icon: GraduationCap, label: 'Total Exams', value: stats.total, iconClass: 'bg-indigo-500/20 text-indigo-500 dark:text-indigo-400', gradient: 'from-indigo-500/10 to-indigo-500/5' },
-    { icon: Calendar, label: 'Upcoming', value: stats.upcoming, iconClass: 'bg-blue-500/20 text-blue-500 dark:text-blue-400', gradient: 'from-blue-500/10 to-blue-500/5' },
-    { icon: AlertTriangle, label: 'This Week', value: stats.thisWeek, iconClass: 'bg-yellow-500/20 text-yellow-500 dark:text-yellow-400', gradient: 'from-yellow-500/10 to-yellow-500/5' },
-  ];
+    { icon: GraduationCap, label: 'Total Exams', value: stats.total, tone: 'violet' },
+    { icon: Calendar, label: 'Upcoming', value: stats.upcoming, tone: 'blue' },
+    { icon: AlertTriangle, label: 'This Week', value: stats.thisWeek, tone: 'amber' },
+  ] as const;
 
   return (
     <motion.div
@@ -721,17 +722,13 @@ export function ExamList() {
               key={stat.label}
               variants={itemVariants}
               transition={{ type: 'spring', stiffness: 400, damping: 17 }}
-              className="workspace-stat"
             >
-              <div className="flex items-center gap-3">
-                <div className={cn('rounded-lg p-2', stat.iconClass)}>
-                  <Icon className="w-5 h-5" />
-                </div>
-                <div>
-                  <p className="text-xl font-semibold text-foreground tabular-nums">{stat.value}</p>
-                  <p className="text-xs text-muted-foreground">{stat.label}</p>
-                </div>
-              </div>
+              <StatCard
+                title={stat.label}
+                value={stat.value}
+                icon={<Icon />}
+                tone={stat.tone}
+              />
             </motion.div>
           );
         })}

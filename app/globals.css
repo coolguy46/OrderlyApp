@@ -592,6 +592,60 @@ input[type="number"] {
   .workspace-toolbar { @apply flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border/80 bg-card p-3; }
   .workspace-tabs { @apply inline-flex items-center gap-1 rounded-xl border border-border/70 bg-muted/60 p-1; }
   .workspace-stat { @apply min-w-0 rounded-2xl border border-border/80 bg-card p-4 sm:p-5; }
+
+  /* 21st Violet Dusk-inspired accents are scoped to workspace chrome, not
+     calendar cells or timed blocks. Keep the shared surface tokens unchanged. */
+  .dark .workspace-shell {
+    background-image:
+      radial-gradient(ellipse 65% 420px at 70% 0%, rgb(124 91 225 / 11%), transparent),
+      radial-gradient(ellipse 45% 340px at 20% 0%, rgb(56 132 207 / 7%), transparent);
+    background-repeat: no-repeat;
+  }
+  .dark .workspace-sidebar {
+    background-image: linear-gradient(165deg, rgb(139 112 245 / 7%), transparent 45%);
+  }
+  .dark .workspace-eyebrow { color: #b5adf7; }
+  .dark .workspace-nav-item[aria-current="page"] {
+    color: #d4ccff;
+    background: linear-gradient(100deg, rgb(143 112 245 / 22%), rgb(108 128 240 / 8%));
+    box-shadow: inset 2px 0 0 #aa98ff, inset 0 0 0 1px rgb(160 138 246 / 16%);
+  }
+  .dark .workspace-primary-button {
+    background-image: linear-gradient(115deg, #a8a2ff, #9693ff 60%, #afa1f5);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 24%), 0 3px 12px rgb(114 95 207 / 14%);
+  }
+  .dark .workspace-primary-button:hover:not(:disabled):not([aria-disabled="true"]) {
+    background-image: linear-gradient(115deg, #b6b0ff, #a49fff 60%, #b9acf9);
+  }
+  /* Adapted 21st metric cards. Color stays at the edge/icon; the values and
+     labels retain the existing accessible foreground contrast. */
+  .workspace-metric { --metric-accent: #8b78e8; }
+  .workspace-metric[data-tone="blue"] { --metric-accent: #5899e0; }
+  .workspace-metric[data-tone="emerald"] { --metric-accent: #3cb79b; }
+  .workspace-metric[data-tone="amber"] { --metric-accent: #d9a352; }
+  .workspace-metric[data-tone="rose"] { --metric-accent: #e07e99; }
+  .workspace-metric-icon {
+    color: var(--primary);
+    background: color-mix(in srgb, var(--metric-accent) 12%, transparent);
+  }
+  .dark .workspace-metric-icon {
+    color: color-mix(in srgb, var(--metric-accent) 65%, white);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--metric-accent) 18%, transparent);
+  }
+}
+
+@layer utilities {
+  .dark .workspace-metric {
+    border-color: color-mix(in srgb, var(--metric-accent) 24%, var(--border));
+    background-image: linear-gradient(125deg, color-mix(in srgb, var(--metric-accent) 12%, transparent), transparent 65%);
+    box-shadow: inset 0 1px 0 color-mix(in srgb, var(--metric-accent) 32%, transparent);
+  }
+  .dark .workspace-tabs [aria-selected="true"],
+  .dark [data-slot="tabs-trigger"][data-state="active"] {
+    color: #ddd6ff;
+    background-color: #353047;
+    box-shadow: inset 0 0 0 1px rgb(161 142 233 / 22%), 0 1px 3px rgb(0 0 0 / 12%);
+  }
 }
 
 /* Prose styling for Canvas HTML descriptions */

@@ -20,7 +20,7 @@ export default function LandingPage() {
   const primaryLabel = isLoggedIn ? 'Open dashboard' : 'Get started';
 
   return (
-    <div className="flex min-h-screen flex-col bg-background text-foreground">
+    <div className="workspace-shell flex min-h-screen flex-col bg-background text-foreground">
       <header className="border-b border-border">
         <nav className="mx-auto flex h-20 max-w-7xl items-center justify-between gap-3 px-5 sm:px-10" aria-label="Main navigation">
           <Link href="/landing" aria-label="Orderly home" className="flex items-center gap-2.5 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">

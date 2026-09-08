@@ -14,6 +14,82 @@ const tailwind = require('@tailwindcss/postcss');
 const root = resolve('.');
 const routes = ['/', '/tasks', '/calendar', '/calendar?view=schedule', '/planner', '/goals', '/study', '/exams', '/settings', '/settings/integrations', '/profile', '/landing', '/auth/login', '/auth/register', '/auth/forgot-password', '/auth/reset-password', '/setup', '/privacy', '/terms'];
 
+async function verifyWorkspacePolish(page, theme, name) {
+  const presentation = await page.evaluate(() => {
+    const background = selector => getComputedStyle(document.querySelector(selector)).backgroundImage;
+    return {
+      shell: background('.workspace-shell'), sidebar: background('.workspace-sidebar'),
+      activeNav: background('.workspace-nav-item[aria-current="page"]'),
+      metrics: [...document.querySelectorAll('[data-slot="stat-card"]')].map(card => ({
+        background: getComputedStyle(card).backgroundImage,
+        border: getComputedStyle(card).borderTopColor,
+        tone: card.getAttribute('data-tone'),
+        content: [...card.querySelectorAll('p')].map(text => text.textContent),
+      })),
+    };
+  });
+  assert.deepEqual(presentation.metrics.map(metric => metric.content.slice(0, 2)), [
+    ['Completed', '1'], ['Goals', '1'], ['Missing', '1'],
+  ], `${name}: new metric presentation still shows actual fixture counts`);
+  if (theme === 'dark') {
+    for (const part of ['shell', 'sidebar', 'activeNav']) assert.match(presentation[part], /gradient\(/, `${name}: ${part} has a scoped accent`);
+    for (const metric of presentation.metrics) assert.match(metric.background, /linear-gradient\(/, `${name}: ${metric.tone} metric has restrained color`);
+    assert.equal(new Set(presentation.metrics.map(metric => metric.border)).size, 3, `${name}: metric tones retain distinct edge accents ${JSON.stringify(presentation.metrics)}`);
+  } else {
+    for (const part of ['shell', 'sidebar', 'activeNav']) assert.equal(presentation[part], 'none', `${name}: ${part} does not inherit dark tint`);
+    for (const metric of presentation.metrics) assert.equal(metric.background, 'none', `${name}: light metric surface stays neutral`);
+  }
+
+  // Normalize browser-resolved colors through canvas: this accepts rgb(), hex,
+  // oklch() and color() foregrounds without an assumption about CSS serialization.
+  const button = page.getByRole('button', { name: 'Start Study', exact: true });
+  for (const hovered of [false, true]) {
+    if (hovered) await button.hover();
+    const contrast = await button.evaluate(element => {
+      const style = getComputedStyle(element), canvas = document.createElement('canvas');
+      canvas.width = canvas.height = 1;
+      const context = canvas.getContext('2d', { willReadFrequently: true });
+      const rgb = color => {
+        context.clearRect(0, 0, 1, 1); context.fillStyle = color; context.fillRect(0, 0, 1, 1);
+        return [...context.getImageData(0, 0, 1, 1).data].slice(0, 3);
+      };
+      const luminance = channels => channels.map(value => value / 255).map(value => value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4)
+        .reduce((sum, value, index) => sum + value * [0.2126, 0.7152, 0.0722][index], 0);
+      const foreground = luminance(rgb(style.color));
+      const stops = style.backgroundImage === 'none' ? [style.backgroundColor]
+        : style.backgroundImage.match(/rgba?\([^)]*\)|#[\da-f]{3,8}\b/gi);
+      if (!stops?.length) throw new Error(`No readable gradient stops: ${style.backgroundImage}`);
+      const colors = stops.map(rgb);
+      // Sample both endpoints and the interior of each sRGB gradient segment.
+      const samples = colors.flatMap((color, index) => {
+        const next = colors[index + 1] || color;
+        return Array.from({ length: 11 }, (_, step) => color.map((channel, channelIndex) => channel + (next[channelIndex] - channel) * step / 10));
+      });
+      return { minimum: Math.min(...samples.map(color => {
+        const background = luminance(color);
+        return (Math.max(foreground, background) + 0.05) / (Math.min(foreground, background) + 0.05);
+      })), gradient: style.backgroundImage, foreground: style.color };
+    });
+    assert.ok(contrast.minimum >= 4.5, `${name}: primary text contrast ${hovered ? 'hovered' : 'resting'} >= 4.5: ${JSON.stringify(contrast)}`);
+  }
+  await page.mouse.move(0, 0);
+}
+
+async function verifyCalmCalendarFills(page, name) {
+  const fills = await page.evaluate(() => [...document.querySelectorAll('button[style*="background-color"], .group.absolute[style*="background-color"]')].map(element => {
+    const style = getComputedStyle(element), canvas = document.createElement('canvas');
+    canvas.width = canvas.height = 1;
+    const context = canvas.getContext('2d', { willReadFrequently: true });
+    context.fillStyle = style.backgroundColor; context.fillRect(0, 0, 1, 1);
+    return { text: element.textContent?.slice(0, 80), image: style.backgroundImage, alpha: context.getImageData(0, 0, 1, 1).data[3] / 255 };
+  }));
+  assert.ok(fills.length > 0, `${name}: real calendar task/event blocks are present`);
+  for (const fill of fills) {
+    assert.equal(fill.image, 'none', `${name}: calendar block has no decorative gradient ${fill.text}`);
+    assert.ok(fill.alpha > 0 && fill.alpha <= 0.181, `${name}: calendar fill remains <= 18 percent ${JSON.stringify(fill)}`);
+  }
+}
+
 test('redesigned real pages and shell render in desktop/mobile light/dark without overflow or external data', { timeout: 240000 }, async () => {
   const output = await mkdtemp(join(tmpdir(), 'orderly-ui-redesign-'));
   let browser, server;
@@ -87,6 +163,8 @@ test('redesigned real pages and shell render in desktop/mobile light/dark withou
         assert.deepEqual(externalRequests, [], `${name}: no external requests`);
         assert.deepEqual(mutations, [], `${name}: no network mutations`);
         assert.deepEqual(await page.evaluate(() => window.uiRedesignFixture.mutationCalls), [], `${name}: no fixture mutations`);
+        if (route === '/') await verifyWorkspacePolish(page, theme, name);
+        if (route.startsWith('/calendar')) await verifyCalmCalendarFills(page, name);
         if (process.env.ORDERLY_REDESIGN_SCREENSHOT_DIR) {
           await mkdir(process.env.ORDERLY_REDESIGN_SCREENSHOT_DIR, { recursive: true });
           // Cancelling native animations can restore Framer's initial opacity instead of its settled state.

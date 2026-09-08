@@ -13,6 +13,7 @@ import {
   Badge
 } from '@/components/ui';
 import { SubjectBadge } from '@/components/ui';
+import { StatCard, type StatTone } from '@/components/ui/stat-card';
 import { TaskCard, TaskForm } from '@/components/tasks';
 import { DashboardSchedule } from './DashboardSchedule';
 import { usePlannerStore } from '@/lib/planner/store';
@@ -211,30 +212,17 @@ export function Dashboard() {
       {/* Stats Grid - Animated */}
       <motion.div variants={containerVariants} className="grid grid-cols-3 gap-2 sm:gap-4">
         {[
-          { label: 'Completed', value: String(todayStats.tasksCompleted), sub: `${todayStats.tasksDue} due today`, icon: CheckCircle2, iconClass: 'text-emerald-600 dark:text-emerald-400 bg-emerald-500/10', href: null },
-          { label: 'Goals', value: String(activeGoals.length), sub: `${goals.filter(isGoalComplete).length} done`, icon: Target, iconClass: 'text-primary bg-primary/10', href: null },
-          { label: 'Missing', value: String(missingTasks.length), sub: missingTasks.length === 1 ? '1 overdue task' : `${missingTasks.length} overdue tasks`, icon: AlertTriangle, iconClass: 'text-red-600 dark:text-red-400 bg-red-500/10', href: '/tasks?view=missing' },
+          { label: 'Completed', value: String(todayStats.tasksCompleted), sub: `${todayStats.tasksDue} due today`, icon: CheckCircle2, tone: 'emerald', href: null },
+          { label: 'Goals', value: String(activeGoals.length), sub: `${goals.filter(isGoalComplete).length} done`, icon: Target, tone: 'violet', href: null },
+          { label: 'Missing', value: String(missingTasks.length), sub: missingTasks.length === 1 ? '1 overdue task' : `${missingTasks.length} overdue tasks`, icon: AlertTriangle, tone: 'rose', href: '/tasks?view=missing' },
         ].map((stat) => (
           <motion.div key={stat.label} variants={itemVariants}>
             {(() => {
               const card = (
-                <Card className={cn(
-                  'overflow-hidden transition-colors',
-                  stat.href && 'hover:border-red-500/40'
-                )}>
-                  <CardContent className="p-3 sm:p-5">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="space-y-0.5 sm:space-y-1 min-w-0">
-                        <p className="text-xs font-medium text-muted-foreground">{stat.label}</p>
-                        <p className="py-1 text-2xl sm:text-3xl font-semibold tracking-tight tabular-nums">{stat.value}</p>
-                        <p className="text-[10px] sm:text-xs text-muted-foreground">{stat.sub}</p>
-                      </div>
-                      <div className={cn('hidden rounded-xl p-2.5 shrink-0 sm:block', stat.iconClass)}>
-                        <stat.icon className="h-5 w-5" />
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
+                <StatCard title={stat.label} value={stat.value} description={stat.sub}
+                  icon={<stat.icon />} tone={stat.tone as StatTone}
+                  className={cn('transition-colors', stat.href && 'hover:border-red-500/40')}
+                />
               );
               return stat.href ? (
                 <Link href={stat.href} className="block rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label={`View ${stat.sub}`}>

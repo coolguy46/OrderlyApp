@@ -36,7 +36,7 @@ export function MainLayout({ children }: MainLayoutProps) {
     <TutorialProvider userId={user?.id}>
     <MotionConfig reducedMotion="user">
     <AppReminders />
-    <div className="min-h-dvh bg-background">
+    <div className="workspace-shell min-h-dvh bg-background">
       <a href="#main-content" className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-3 focus:z-[100] focus:rounded-lg focus:bg-primary focus:px-4 focus:py-2 focus:text-sm focus:text-primary-foreground">Skip to content</a>
       {/* Desktop sidebar */}
       <div className="hidden lg:block">
