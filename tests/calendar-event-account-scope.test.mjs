@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { after, test } from 'node:test';
 import { createRequire } from 'node:module';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
@@ -15,6 +15,7 @@ for (const relativePath of [
   'lib/planner/commitments.ts',
   'lib/planner/engine.ts',
   'lib/planner/adapters.ts',
+  'lib/schedule/selectors.ts',
 ]) {
   const sourcePath = join(projectRoot, relativePath);
   const outputPath = join(buildRoot, relativePath.replace(/\.ts$/, '.js'));
@@ -33,7 +34,12 @@ for (const relativePath of [
     .filter(diagnostic => diagnostic.category === ts.DiagnosticCategory.Error);
   assert.equal(errors.length, 0, errors.map(diagnostic => diagnostic.messageText).join('\n'));
   await mkdir(dirname(outputPath), { recursive: true });
-  await writeFile(outputPath, transpiled.outputText);
+  const runtimeSource = transpiled.outputText.replace(/require\("@\/([^"\n]+)"\)/g, (_match, modulePath) => {
+    const target = join(buildRoot, `${modulePath}.js`);
+    const relativePath = relative(dirname(outputPath), target).replaceAll('\\', '/');
+    return `require(${JSON.stringify(relativePath.startsWith('.') ? relativePath : `./${relativePath}`)})`;
+  });
+  await writeFile(outputPath, runtimeSource);
 }
 
 const compiledRequire = createRequire(join(buildRoot, 'runtime.cjs'));
@@ -43,6 +49,7 @@ const {
   readStoredCalendarEvents,
   recoverLegacyCalendarEvents,
   storedCalendarEventsStorageKey,
+  storedEventsToCommitments,
   writeStoredCalendarEvents,
 } = compiledRequire(join(buildRoot, 'lib/planner/adapters.js'));
 
@@ -132,6 +139,49 @@ test('browser calendar events stay isolated by signed-in account', () => {
     assert.deepEqual(readStoredCalendarEvents('user-b'), userBEvent);
   } finally {
     globalThis.window = originalWindow;
+  }
+});
+
+test('denied browser event writes report failure and preserve the original and recovery copy', () => {
+  const originalWindow = globalThis.window;
+  const localStorage = new MemoryStorage();
+  const browserWindow = new EventTarget();
+  browserWindow.localStorage = localStorage;
+  globalThis.window = browserWindow;
+  try {
+    const original = [{ id: 'legacy-game', title: 'Game', date: '2026-09-06', time: '18:00', endTime: '19:00' }];
+    const key = storedCalendarEventsStorageKey('user-a');
+    localStorage.setItem('calendarEvents', JSON.stringify(original));
+    assert.equal(writeStoredCalendarEvents('user-a', original), true);
+    let notifications = 0;
+    browserWindow.addEventListener('orderly-calendar-events-changed', () => notifications++);
+    localStorage.failNextSet(key);
+    assert.equal(writeStoredCalendarEvents('user-a', []), false);
+    assert.equal(notifications, 0);
+    assert.deepEqual(readStoredCalendarEvents('user-a'), original);
+    assert.equal(localStorage.getItem('calendarEvents'), JSON.stringify(original));
+    assert.equal(writeStoredCalendarEvents(null, []), false);
+    // The durable migration remains visible exactly once even if cleanup fails.
+    const migrated = storedEventsToCommitments(original, 'America/Los_Angeles');
+    assert.equal(migrated.length, 1);
+    assert.deepEqual(storedEventsToCommitments(original, 'America/Los_Angeles', migrated), []);
+    assert.deepEqual(readStoredCalendarEvents('user-a'), original, 'deduplication preserves the recovery backup');
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('legacy gestures, Undo, and all editor cleanup paths inspect the storage result', async () => {
+  for (const path of ['components/calendar/ScheduleCalendar.tsx', 'components/planner/Planner.tsx']) {
+    const source = await readFile(join(projectRoot, path), 'utf8');
+    assert.match(source, /if \(!writeStoredCalendarEvents\(userId, nextEvents\)\) \{\s*toast\.error[\s\S]*?return false;\s*\}\s*setStoredEvents\(nextEvents\)/);
+  }
+  const planner = await readFile(join(projectRoot, 'components/planner/Planner.tsx'), 'utf8');
+  assert.match(planner, /storedEventRestoreFailed = !writeStoredCalendarEvents\(operationUserId, restoredEvents\)/);
+  assert.match(planner, /if \(!storedEventRestoreFailed && operationIsCurrent\(\)\) setStoredEvents\(restoredEvents\)/);
+  for (const path of ['components/calendar/ScheduleCalendar.tsx', 'components/calendar/TaskCalendar.tsx', 'components/dashboard/DashboardSchedule.tsx', 'components/planner/Planner.tsx']) {
+    const source = await readFile(join(projectRoot, path), 'utf8');
+    assert.match(source, /if \(writeStoredCalendarEvents\([^\n]+\)\) setStoredEvents\([^\n]+\);\s*else toast\.warning\('The event was saved, but its old browser copy could not be removed\. The backup has been kept\.'/);
   }
 });
 
@@ -267,12 +317,15 @@ test('every calendar-event consumer uses the account-scoped hook', async () => {
   ]) {
     const source = await readFile(join(projectRoot, relativePath), 'utf8');
     assert.match(source, /useStoredCalendarEvents\(/, relativePath);
-    if (
-      relativePath === 'components/dashboard/DashboardSchedule.tsx'
-      || relativePath === 'components/planner/PlannerStalenessMonitor.tsx'
-    ) {
+    if (relativePath === 'components/planner/PlannerStalenessMonitor.tsx') {
       assert.doesNotMatch(source, /readStoredCalendarEvents\(/, relativePath);
       assert.doesNotMatch(source, /writeStoredCalendarEvents\(/, relativePath);
+    } else if (relativePath === 'components/dashboard/DashboardSchedule.tsx') {
+      // The dashboard now has an event editor. Removing its migrated legacy
+      // copy must remain owner-scoped rather than forbidding that feature.
+      assert.doesNotMatch(source, /readStoredCalendarEvents\(/, relativePath);
+      assert.match(source, /writeStoredCalendarEvents\(userId, next\)/);
+      assert.match(source, /editingEvent\.userId === userId/);
     } else if (relativePath === 'components/calendar/ScheduleCalendar.tsx') {
       // Calendar edits persist through the scoped adapter, always with the
       // current owner ID supplied explicitly.

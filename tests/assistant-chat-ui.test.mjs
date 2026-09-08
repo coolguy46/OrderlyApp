@@ -317,4 +317,7 @@ test('chat UI keeps the composer visible and calendar controls secondary', async
   assert.match(plannerSource, /aria-expanded=\{calendarOpen\}/);
   assert.match(plannerSource, /setCalendarExpanded/);
   assert.match(plannerSource, /taskDetailsOpen &&/);
+  assert.match(plannerSource, /const occurrences = useMemo\(\(\) => buildVisibleScheduleOccurrences\(/);
+  assert.match(plannerSource, /visibleCommitmentOccurrences\(commitment, startDate, endDate, timeZone\)/);
+  assert.match(plannerSource, /const commandOccurrences = useMemo\(\(\) => buildScheduleOccurrences\(/);
 });

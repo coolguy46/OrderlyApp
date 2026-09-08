@@ -14,6 +14,7 @@ import {
 } from '@/components/ui/sheet';
 import { useMediaQuery } from '@/lib/use-hydrated';
 import { TutorialProvider, TutorialInvitation } from '@/components/tutorial/Tutorial';
+import { AppReminders } from './AppReminders';
 
 interface MainLayoutProps {
   children: React.ReactNode;
@@ -33,6 +34,7 @@ export function MainLayout({ children }: MainLayoutProps) {
 
   return (
     <TutorialProvider userId={user?.id}>
+    <AppReminders />
     <div className="min-h-dvh bg-background bg-grain mesh-gradient">
       {/* Desktop sidebar */}
       <div className="hidden lg:block">

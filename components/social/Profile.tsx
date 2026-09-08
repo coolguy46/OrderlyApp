@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useRef, useEffect } from 'react';
 import { useAppStore } from '@/lib/store';
 import {
   Card,
@@ -76,6 +76,27 @@ export function Profile() {
   const mounted = useHydrated();
   const [editOpen, setEditOpen] = useState(false);
   const [editName, setEditName] = useState('');
+  const [editorOwner, setEditorOwner] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+  const editSessionRef = useRef(0);
+  const saveInFlightRef = useRef(false);
+
+  useEffect(() => {
+    if (!editorOwner || editorOwner === user?.id) return;
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      editSessionRef.current += 1;
+      saveInFlightRef.current = false;
+      setIsSaving(false);
+      setEditOpen(false);
+      setEditName('');
+      setSaveError('');
+      setEditorOwner(null);
+    });
+    return () => { cancelled = true; };
+  }, [editorOwner, user?.id]);
 
   const stats = useMemo(() => {
     if (!mounted) return { totalStudyMinutes: 0, completedTasks: 0, activeGoals: 0, upcomingExams: 0, totalSessions: 0, avgDailyMinutes: 0, weeklyMinutes: 0 };
@@ -109,10 +130,35 @@ export function Profile() {
 
   const levelInfo = useMemo(() => getLevel(xp), [xp]);
 
+  const closeEditor = () => {
+    editSessionRef.current += 1;
+    saveInFlightRef.current = false;
+    setIsSaving(false);
+    setEditOpen(false);
+  };
+
   const handleSaveProfile = async () => {
-    if (editName.trim()) {
-      await updateUserProfile({ full_name: editName.trim() });
-      setEditOpen(false);
+    if (saveInFlightRef.current || !editorOwner || editorOwner !== user?.id) return;
+    if (!editName.trim()) { setSaveError('Enter your name.'); return; }
+    const owner = user.id;
+    const session = editSessionRef.current;
+    saveInFlightRef.current = true;
+    setIsSaving(true);
+    setSaveError('');
+    try {
+      const saved = await updateUserProfile({ full_name: editName.trim() });
+      if (session !== editSessionRef.current || useAppStore.getState().user?.id !== owner) return;
+      if (saved) closeEditor();
+      else setSaveError('Your name was not saved. Your changes are still here—please try again.');
+    } catch {
+      if (session === editSessionRef.current && useAppStore.getState().user?.id === owner) {
+        setSaveError('Your name was not saved. Your changes are still here—please try again.');
+      }
+    } finally {
+      if (session === editSessionRef.current) {
+        saveInFlightRef.current = false;
+        setIsSaving(false);
+      }
     }
   };
 
@@ -157,7 +203,13 @@ export function Profile() {
                 <Button
                   variant="ghost"
                   size="icon-sm"
+                  aria-label="Edit profile name"
                   onClick={() => {
+                    editSessionRef.current += 1;
+                    saveInFlightRef.current = false;
+                    setIsSaving(false);
+                    setSaveError('');
+                    setEditorOwner(user?.id || null);
                     setEditName(user?.full_name || '');
                     setEditOpen(true);
                   }}
@@ -302,7 +354,7 @@ export function Profile() {
       </div>
 
       {/* Edit Profile Dialog */}
-      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+      <Dialog open={editOpen && editorOwner === user?.id} onOpenChange={(open) => !open && closeEditor()}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Edit Profile</DialogTitle>
@@ -318,9 +370,10 @@ export function Profile() {
                 placeholder="Your name"
               />
             </div>
+            {saveError && <p role="alert" className="text-sm text-red-400">{saveError}</p>}
             <div className="flex justify-end gap-2">
-              <Button variant="ghost" onClick={() => setEditOpen(false)}>Cancel</Button>
-              <Button onClick={handleSaveProfile}>Save</Button>
+              <Button variant="ghost" onClick={closeEditor}>Cancel</Button>
+              <Button onClick={handleSaveProfile} disabled={isSaving} aria-busy={isSaving}>{isSaving ? 'Saving…' : 'Save'}</Button>
             </div>
           </div>
         </DialogContent>

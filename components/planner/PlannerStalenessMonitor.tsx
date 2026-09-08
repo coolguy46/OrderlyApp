@@ -66,10 +66,9 @@ export function PlannerStalenessMonitor() {
     if (!plannerRecord || !plan) return [];
     const byId = new Map(
       plannerRecord.commitments
-        .filter(commitment => !commitment.id.startsWith('calendar-'))
         .map(commitment => [commitment.id, commitment]),
     );
-    storedEventsToCommitments(storedEvents, plan.settings.timeZone)
+    storedEventsToCommitments(storedEvents, plan.settings.timeZone, plannerRecord.commitments)
       .forEach(commitment => byId.set(commitment.id, commitment));
     (plan.promptCommitments || []).forEach(commitment => byId.set(commitment.id, commitment));
     return [...byId.values()].sort((left, right) => left.id.localeCompare(right.id));

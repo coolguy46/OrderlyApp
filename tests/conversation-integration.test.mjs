@@ -33,7 +33,7 @@ await compile('lib/planner/conversation.ts');
 await compile('lib/planner/conversation-calendar.ts');
 const { parseConversationIntent, conversationSystemPrompt, readConversationRequest } = require(join(temporary, 'lib/planner/conversation.cjs'));
 const { calendarFromSnapshot, compileConversation, conversationFacts, calendarIntervals, conversationValidationFeedback, RecurringScopeError, TaskDeletionIntentError } = require(join(temporary, 'lib/planner/conversation-calendar.cjs'));
-const { buildScheduleOccurrences, localTimeFromIso } = require(join(temporary, 'lib/schedule/selectors.cjs'));
+const { buildScheduleOccurrences, localTimeFromIso, localDateFromIso } = require(join(temporary, 'lib/schedule/selectors.cjs'));
 const { scheduleEntriesFromTasks } = require(join(temporary, 'lib/schedule/persistence.cjs'));
 await compile('lib/schedule/calendar-navigation.ts');
 const { shiftCalendarWeek } = require(join(temporary, 'lib/schedule/calendar-navigation.cjs'));
@@ -325,6 +325,38 @@ test('whole-series repeat-end changes preserve past anchors and explicitly clear
   await turn('remove whole series', [{ action: 'delete', entity: 'event', id, wholeSeries: true }]);
 });
 
+test('whole-series event edits preserve occurrence exceptions and untouched event details', async () => {
+  const created = await turn('add a weekly class', [{ action: 'create', entity: 'event', title: 'Weekly class', date: '2028-01-08', start: '18:00', end: '19:00', recurrence: 'weekly', days: [6], repeatUntil: '2028-01-29' }]);
+  const id = created.receipt.items[0].id;
+  await db.query("update recurring_commitments set location='Room 12',color='#12AB34' where user_id=$1 and client_commitment_id=$2", [owner, id]);
+  await turn('move one class', [{ action: 'update', entity: 'event', id, occurrenceDate: '2028-01-15', date: '2028-01-16', start: '18:00' }]);
+  await turn('skip one class', [{ action: 'remove', entity: 'event', id, occurrenceDate: '2028-01-22' }]);
+  const before = (await snapshot()).events.find(event => event.client_commitment_id === id);
+  const renamed = await turn('rename the whole class series', [{ action: 'update', entity: 'event', id, wholeSeries: true, title: 'Evening class' }]);
+  const after = renamed.state.events.find(event => event.client_commitment_id === id);
+  assert.deepEqual(after.occurrence_overrides, before.occurrence_overrides, 'a rename must not restore cancelled meetings or undo moved dates');
+  assert.equal(after.location, 'Room 12');
+  assert.equal(after.color, '#12AB34');
+  assert.equal(after.title, 'Evening class');
+  const occurrences = calendarIntervals(calendarFromSnapshot(renamed.state, owner, NOW, zone), '2028-01-01', '2028-01-31').filter(item => item.owner === `event:${id}`);
+  assert.ok(occurrences.some(item => item.sourceDate === '2028-01-15' && localDateFromIso(item.startAt, zone) === '2028-01-16'));
+  assert.ok(!occurrences.some(item => item.sourceDate === '2028-01-22'));
+  const extended = await turn('extend the series', [{ action: 'update', entity: 'event', id, wholeSeries: true, repeatUntil: '2028-02-12' }]);
+  assert.deepEqual(extended.state.events.find(event => event.client_commitment_id === id).occurrence_overrides, before.occurrence_overrides);
+  await turn('remove test series', [{ action: 'remove', entity: 'event', id, wholeSeries: true }]);
+});
+
+test('renaming an event created in another timezone does not move or enable it', async () => {
+  const created = await turn('add a distant meeting', [{ action: 'create', entity: 'event', title: 'Remote meeting', date: '2028-02-12', start: '21:00', durationMinutes: 30 }]);
+  const id = created.receipt.items[0].id;
+  await db.query("update recurring_commitments set time_zone='Asia/Tokyo',enabled=false where user_id=$1 and client_commitment_id=$2", [owner, id]);
+  const before = (await snapshot()).events.find(event => event.client_commitment_id === id);
+  const renamed = await turn('rename that meeting', [{ action: 'update', entity: 'event', id, title: 'Remote review' }]);
+  const after = renamed.state.events.find(event => event.client_commitment_id === id);
+  for (const field of ['time_zone', 'start_time', 'end_time', 'start_date', 'end_date', 'enabled']) assert.equal(after[field], before[field], field);
+  await turn('remove test event', [{ action: 'remove', entity: 'event', id }]);
+});
+
 test('multi-turn typo, type correction, time/date follow-ups persist without duplicate items', async () => {
   const initial = await snapshot();
   const created = await turn('add a task for my counsler meeting today at 7', [{ action: 'create', entity: 'task', title: 'Counselor meeting', date: '2026-09-06', start: '19:00', durationMinutes: 30 }], { assumptions: ['I assumed 7 PM because 7 AM has passed.'] });
@@ -425,6 +457,24 @@ test('school interval is real: 10–11 PM works, 10–11 AM conflicts', async ()
   assert.ok(compileConversation(night, calendar).writes.length);
   assert.throws(() => compileConversation(intent([{ ...night.operations[0], start: '10:00', end: '11:00' }]), calendar), /really overlaps School/);
   assert.throws(() => compileConversation(intent([{ ...night.operations[0], explicitStart: '10:00' }]), calendar), /explicitly requested/);
+});
+
+test('calendar facts and planning include an overnight event entering the first requested day', async () => {
+  const overnight = await turn('reserve Friday night through Saturday morning', [{ action: 'create', entity: 'event', title: 'Overnight trip', date: '2028-01-07', start: '22:00', end: '08:00' }]);
+  const calendar = calendarFromSnapshot(await snapshot(), owner, NOW, zone);
+  const facts = conversationFacts(calendar, [], { from: '2028-01-08', through: '2028-01-08' });
+  assert.ok(facts.calendar.some(item => item.title === 'Overnight trip'), 'the trip occupies Saturday even though it begins Friday');
+  const foreignZone = structuredClone(calendar);
+  foreignZone.snapshot.events = [{ ...overnight.state.events.find(event => event.client_commitment_id === overnight.receipt.items[0].id),
+    title: 'Tokyo call', time_zone: 'Asia/Tokyo', start_date: '2028-01-09', end_date: '2028-01-09', days_of_week: [0], start_time: '00:30', end_time: '01:30' }];
+  assert.ok(conversationFacts(foreignZone, [], { from: '2028-01-08', through: '2028-01-08' }).calendar.some(item => item.title === 'Tokyo call'), 'event-source Sunday is still viewer-local Saturday');
+  const planned = await turn('fit reading into Saturday morning', [], { mode: 'plan', plan: {
+    taskScope: 'task_ids', taskIds: [], startDate: '2028-01-08', horizonDays: 1, todayLoad: 'normal', includeAlreadyScheduled: false,
+    availableAfter: '07:00', availableBefore: '10:00', additionalTasks: [{ title: 'Morning reading', durationMinutes: 30 }],
+  } });
+  assert.equal(localTimeFromIso(planned.state.tasks.find(task => task.title === 'Morning reading').scheduled_start_at, zone), '08:00');
+  await undo(planned.receipt);
+  await apply({ writes: overnight.receipt.undoOperations, reply: 'Cleanup overnight trip', items: [] }, (await snapshot()).revision);
 });
 
 test('actual conflicts between new items reject the entire bundle', async () => {

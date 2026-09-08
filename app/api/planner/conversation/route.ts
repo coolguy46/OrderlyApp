@@ -60,12 +60,18 @@ export async function POST(request: NextRequest) {
   };
   if (input.undoRequestId) {
     const original = await receiptsTable.select('response').eq('user_id', user.id).eq('conversation_id', input.conversationId).eq('request_id', input.undoRequestId).maybeSingle();
+    if (original.error) return json({ reply: 'I could not check the saved change. Retry this request to check its status safely.', saved: false, retryable: true }, 503);
     const saved = (original.data as { response: ConversationResult } | null)?.response;
     if (!saved?.saved || !saved.undoOperations?.length) return json({ reply: 'There is no saved change to undo.', saved: false }, 400);
     try {
       return json(await persist(saved.undoOperations, { reply: 'Undid that calendar change.', intent: null, items: [], undoneRequestId: input.undoRequestId }, saved.revision));
-    } catch {
-      return json({ reply: 'Your calendar changed since that action. I left the newer changes alone. Tell me which item to adjust instead.', saved: false }, 409);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('CALENDAR_CHANGED')) {
+        return json({ reply: 'Your calendar changed since that action. I left the newer changes alone. Tell me which item to adjust instead.', saved: false }, 409);
+      }
+      // Undo can commit before its database response is lost, just like an
+      // ordinary action. Keep its request ID until the receipt is recovered.
+      return json({ reply: 'I could not confirm the Undo result. Retry this request to check its saved status.', saved: false, retryable: true }, 503);
     }
   }
   if (process.env.AI_ASSISTANT_ENABLED === 'false' || !process.env.DEEPSEEK_API_KEY) return json({ reply: 'Orderly Assistant is temporarily unavailable. Your calendar still works.', saved: false }, 503);
@@ -90,7 +96,7 @@ export async function POST(request: NextRequest) {
   const reservation = await reserveAssistantUsage(rpc, usageRequestId);
   if (reservation.error || !reservation.reservation?.allowed) {
     await releaseAssistantLease(abuseClient, user.id, lease.leaseId);
-    return json({ reply: reservation.error ? 'I could not start usage tracking. No changes were made.' : 'This request may still be processing. Retry the same message in a moment to check its saved result.', saved: false }, reservation.error ? 503 : 409);
+    return json({ reply: reservation.error ? 'I could not start usage tracking. No changes were made.' : 'This request may still be processing. Retry the same message in a moment to check its saved result.', saved: false, retryable: !reservation.error }, reservation.error ? 503 : 409);
   }
   const controller = new AbortController();
   const cancel = () => controller.abort();

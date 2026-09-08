@@ -638,8 +638,13 @@ export function examsToPlannerInputs(
 export function storedEventsToCommitments(
   events: readonly StoredCalendarEvent[],
   timeZone: string,
+  savedCommitments: readonly RecurringCommitmentInput[] = [],
 ): RecurringCommitmentInput[] {
+  // A server-saved migration wins over its retained browser backup. Filtering
+  // display data must not destroy that backup when local cleanup is denied.
+  const savedIds = new Set(savedCommitments.map(commitment => commitment.id));
   return events.flatMap(event => {
+    if (savedIds.has(`calendar-${event.id}`)) return [];
     if (!event.id || !event.title || !/^\d{4}-\d{2}-\d{2}$/.test(event.date)) return [];
     const startTime = validTime(event.time) ? event.time : '09:00';
     const endTime = validTime(event.endTime) && event.endTime !== startTime
@@ -700,16 +705,21 @@ export function readStoredCalendarEvents(userId: string | null | undefined): Sto
 export function writeStoredCalendarEvents(
   userId: string | null | undefined,
   events: readonly StoredCalendarEvent[],
-): void {
-  if (typeof window === 'undefined') return;
+): boolean {
+  if (typeof window === 'undefined') return false;
   const ownerUserId = normalizedStorageUserId(userId);
-  if (!ownerUserId) return;
+  if (!ownerUserId) return false;
   try {
     window.localStorage.setItem(storedCalendarEventsStorageKey(ownerUserId), JSON.stringify(events));
+  } catch {
+    return false;
+  }
+  try {
     window.dispatchEvent(new CustomEvent('orderly-calendar-events-changed', {
       detail: { userId: ownerUserId },
     }));
   } catch {
-    // Keep the in-memory calendar usable when browser storage is unavailable.
+    // A notification failure does not undo an already successful storage write.
   }
+  return true;
 }

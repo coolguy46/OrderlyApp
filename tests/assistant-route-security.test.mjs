@@ -96,8 +96,58 @@ function fixture(options = {}) {
     return new Request('https://orderly.test/api/planner/conversation', { method: 'POST',
       headers: { 'content-type': 'application/json', origin: 'https://orderly.test', ...headers }, body: JSON.stringify(body), signal });
   }
-  return { owner, calls, snapshot, input, request, load, route: name => load(`app/api/planner/${name}/route.ts`).POST };
+  return { owner, calls, snapshot, receipts, input, request, load, route: name => load(`app/api/planner/${name}/route.ts`).POST };
 }
+
+test('Undo distinguishes a definite stale-calendar refusal from an uncertain save response', async () => {
+  for (const [message, status, retryable] of [['CALENDAR_CHANGED', 409, false], ['Synthetic lost database response', 503, true]]) {
+    const f = fixture({ rpc: name => name === 'apply_assistant_calendar_changes' ? { data: null, error: { message } } : undefined });
+    const originalId = randomUUID();
+    f.receipts.set(originalId, { saved: true, revision: 'older', undoOperations: [{ entity: 'event', op: 'delete', id: randomUUID() }] });
+    const response = await f.route('conversation')(f.request({ ...f.input, undoRequestId: originalId }));
+    const body = await response.json();
+    assert.equal(response.status, status, message);
+    assert.equal(body.retryable === true, retryable, message);
+    const { isConfirmedConversationRejection } = f.load('lib/planner/conversation-response.ts');
+    assert.equal(isConfirmedConversationRejection(body), !retryable, 'only a confirmed rejection releases the pending chat lock');
+    if (retryable) assert.doesNotMatch(body.reply, /left the newer changes alone|no changes were made/i);
+    assert.equal(f.calls.provider.length, 0);
+  }
+});
+
+test('chat request recovery preserves uncertain responses but releases terminal rejections', () => {
+  const f = fixture();
+  const { isConfirmedConversationRejection } = f.load('lib/planner/conversation-response.ts');
+  for (const value of [null, {}, { error: 'Gateway failure' }, { reply: 'Still processing', saved: false, retryable: true }, { reply: 'Saved', saved: true }]) {
+    assert.equal(isConfirmedConversationRejection(value), false);
+  }
+  assert.equal(isConfirmedConversationRejection({ reply: 'Calendar changed; nothing was undone.', saved: false }), true);
+  const ui = readFileSync(resolve(root, 'components/planner/Planner.tsx'), 'utf8');
+  assert.match(ui, /if \(isConfirmedConversationRejection\(result\)\)/);
+  assert.doesNotMatch(ui, /response\.status !== 409/);
+});
+
+test('a lost Undo response recovers its committed receipt without executing Undo again', async () => {
+  let writes = 0;
+  const f = fixture({ rpc: (name, parameters) => {
+    if (name !== 'apply_assistant_calendar_changes') return;
+    writes++;
+    f.receipts.set(parameters.p_request_id, { ...parameters.p_response, requestId: parameters.p_request_id, saved: true, revision: 'after-undo', undoOperations: [] });
+    return { data: null, error: { message: 'Synthetic lost response after commit' } };
+  } });
+  const originalId = randomUUID();
+  f.receipts.set(originalId, { saved: true, revision: 'original', undoOperations: [{ entity: 'event', op: 'delete', id: randomUUID() }] });
+  const input = { ...f.input, undoRequestId: originalId };
+  const post = f.route('conversation');
+  const uncertain = await post(f.request(input));
+  assert.equal(uncertain.status, 503);
+  assert.equal((await uncertain.json()).retryable, true);
+  const recovered = await post(f.request(input));
+  assert.equal(recovered.status, 200);
+  assert.deepEqual(await recovered.json(), f.receipts.get(input.requestId));
+  assert.equal(writes, 1);
+  assert.equal(f.calls.provider.length, 0);
+});
 
 test('all paid planner routes reject anonymous/expired sessions, cross-origin requests, and oversized bodies before provider dispatch', async () => {
   for (const route of ['conversation', 'chat', 'command']) {

@@ -46,6 +46,7 @@ interface UseCanvasSyncResult {
 
 const VALID_SYNC_INTERVALS = [5, 15, 30, 60] as const;
 const UNOWNED_LEGACY_CANVAS_KEYS = ['canvas_sync_settings', 'canvas_assignments'] as const;
+const CANVAS_SETTINGS_LOAD_ERROR = 'Could not load Canvas settings. Try again shortly.';
 
 function normalizeSyncInterval(value: unknown, fallback: number): number {
   const interval = Number(value);
@@ -151,6 +152,8 @@ export function useCanvasSyncSupabase(options: UseCanvasSyncOptions): UseCanvasS
   // page aligned with background syncs that finish while it is already open.
   useEffect(() => {
     let cancelled = false;
+    let loadInFlight = false;
+    const requestGeneration = accountSession.generation;
 
     // Do not show settings or assignments from the previously signed-in user
     // while this user's database row is loading.
@@ -168,11 +171,46 @@ export function useCanvasSyncSupabase(options: UseCanvasSyncOptions): UseCanvasS
         return;
       }
 
+      if (loadInFlight) return;
+      loadInFlight = true;
+      if (initialLoad) setError(null);
       const mutationVersion = settingsMutationVersionRef.current;
+      const isCurrent = () => !cancelled && mutationVersion === settingsMutationVersionRef.current
+        && isCurrentAccountRequest(activeUserIdRef.current, accountGenerationRef.current, userId, requestGeneration);
       try {
-        let canvasSettings = await db.getCanvasSettings(userId);
-        if (cancelled || mutationVersion !== settingsMutationVersionRef.current) return;
+        const canvasSettings = await withCanvasDeadline(async signal => {
+          const assertCurrent = () => {
+            if (signal.aborted || !isCurrent()) throw new Error('Canvas settings read was superseded.');
+          };
+          let loaded = await db.getCanvasSettings(userId, { throwOnError: true, signal });
+          assertCurrent();
+          if (!loaded) return null;
+
+          const browserTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+          const legacyKey = `canvas_sync_interval_${userId}`;
+          const legacyInterval = readLegacySyncInterval(userId);
+          if (loaded.sync_interval_migrated !== true && legacyInterval !== null) {
+            const migrated = await db.migrateCanvasSyncInterval(userId, legacyInterval, browserTimeZone);
+            assertCurrent();
+            if (!migrated || migrated.sync_interval_migrated !== true) throw new Error('Could not migrate the Canvas sync interval.');
+            loaded = migrated;
+            localStorage.removeItem(legacyKey);
+          } else if (loaded.sync_interval_migrated === true) {
+            localStorage.removeItem(legacyKey);
+          }
+
+          if (loaded.time_zone !== browserTimeZone) {
+            const saved = await db.upsertCanvasSettings(userId, { time_zone: browserTimeZone });
+            assertCurrent();
+            if (!saved) throw new Error('Could not save the Canvas sync timezone.');
+            loaded = saved;
+          }
+          return loaded;
+        }, CANVAS_CONNECT_DEADLINE_MS, CANVAS_SETTINGS_LOAD_ERROR);
+        if (!isCurrent()) return;
+        setError(previous => previous === CANVAS_SETTINGS_LOAD_ERROR ? null : previous);
         if (!canvasSettings) {
+          icalUrlRef.current = '';
           setAssignments([]);
           setSettings(emptyCanvasSettings(defaultInterval));
           setNewAssignmentsCount(0);
@@ -181,36 +219,6 @@ export function useCanvasSyncSupabase(options: UseCanvasSyncOptions): UseCanvasS
           return;
         }
 
-        const browserTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
-        const legacyKey = `canvas_sync_interval_${userId}`;
-
-        const legacyInterval = readLegacySyncInterval(userId);
-        if (canvasSettings.sync_interval_migrated !== true && legacyInterval !== null) {
-          const migrated = await db.migrateCanvasSyncInterval(
-            userId,
-            legacyInterval,
-            browserTimeZone
-          );
-          if (!migrated || migrated.sync_interval_migrated !== true) {
-            throw new Error('Could not migrate the Canvas sync interval.');
-          }
-          canvasSettings = migrated;
-          // The legacy value is disposable only after the database confirms
-          // that this user has completed the one-time migration.
-          localStorage.removeItem(legacyKey);
-        } else if (canvasSettings.sync_interval_migrated === true) {
-          // A true database flag means another browser may already have
-          // migrated this account. Its value wins over this browser's cache.
-          localStorage.removeItem(legacyKey);
-        }
-
-        if (canvasSettings.time_zone !== browserTimeZone) {
-          const saved = await db.upsertCanvasSettings(userId, { time_zone: browserTimeZone });
-          if (!saved) throw new Error('Could not save the Canvas sync timezone.');
-          canvasSettings = saved;
-        }
-
-        if (cancelled || mutationVersion !== settingsMutationVersionRef.current) return;
         const autoSyncInterval = normalizeSyncInterval(
           canvasSettings.auto_sync_interval,
           defaultInterval
@@ -227,17 +235,19 @@ export function useCanvasSyncSupabase(options: UseCanvasSyncOptions): UseCanvasS
         });
         setStateOwnerId(userId);
       } catch {
+        if (!isCurrent()) return;
         console.error('Could not load Canvas settings');
-        if (initialLoad && !cancelled) {
+        setError(previous => previous && previous !== CANVAS_SETTINGS_LOAD_ERROR ? previous : CANVAS_SETTINGS_LOAD_ERROR);
+        if (initialLoad) {
           setAssignments([]);
           setSettings(emptyCanvasSettings(defaultInterval));
           setNewAssignmentsCount(0);
           setRemovedAssignmentsCount(0);
-          setError('Could not load Canvas settings. Try again shortly.');
           setStateOwnerId(userId);
         }
       } finally {
-        if (initialLoad && !cancelled) setIsLoading(false);
+        loadInFlight = false;
+        if (initialLoad && !cancelled && isCurrentAccountRequest(activeUserIdRef.current, accountGenerationRef.current, userId, requestGeneration)) setIsLoading(false);
       }
     };
 
@@ -259,7 +269,7 @@ export function useCanvasSyncSupabase(options: UseCanvasSyncOptions): UseCanvasS
       window.removeEventListener('focus', handleFocus);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [userId, defaultInterval]);
+  }, [accountSession.generation, userId, defaultInterval]);
 
   const stateBelongsToUser = stateOwnerId === userId;
   const visibleSettings = stateBelongsToUser
@@ -435,7 +445,7 @@ export function useCanvasSyncSupabase(options: UseCanvasSyncOptions): UseCanvasS
         const browserTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
         const legacyKey = `canvas_sync_interval_${userId}`;
         const legacyInterval = readLegacySyncInterval(userId);
-        let persisted = await db.getCanvasSettings(userId);
+        let persisted = await db.getCanvasSettings(userId, { throwOnError: true, signal });
         assertStillConnecting();
 
         if (

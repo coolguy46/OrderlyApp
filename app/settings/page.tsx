@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { 
   Sun, 
@@ -44,12 +44,12 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import {
-  discardUnownedLegacyStorageValue,
   removeUserScopedStorageValues,
-  userScopedStorageKey,
 } from '@/lib/user-scoped-storage';
 import { hasRecentSignIn } from '@/lib/auth/recent-auth';
 import { useHydrated } from '@/lib/use-hydrated';
+import { defaultNotificationPrefs, readNotificationPreferences, saveNotificationPreferences, type NotificationPreferences } from '@/lib/notification-preferences';
+import { requestNotificationPermission } from '@/lib/notifications';
 
 type Theme = 'light' | 'dark' | 'system';
 
@@ -73,38 +73,6 @@ const themeOptions: { value: Theme; label: string; icon: React.ReactNode; descri
     description: 'Automatically match your device settings'
   },
 ];
-
-// Notification preference keys
-interface NotificationPreferences {
-  taskReminders: boolean;
-  examReminders: boolean;
-  studyReminders: boolean;
-  goalDeadlines: boolean;
-  dailyDigest: boolean;
-  soundEnabled: boolean;
-}
-
-const defaultNotificationPrefs: NotificationPreferences = {
-  taskReminders: true,
-  examReminders: true,
-  studyReminders: false,
-  goalDeadlines: true,
-  dailyDigest: false,
-  soundEnabled: true,
-};
-
-function readNotificationPreferences(userId: string): NotificationPreferences {
-  discardUnownedLegacyStorageValue(localStorage, 'orderly-notification-prefs');
-  const storageKey = userScopedStorageKey('orderly-notification-prefs', userId);
-  const saved = storageKey ? localStorage.getItem(storageKey) : null;
-  if (!saved) return defaultNotificationPrefs;
-  try {
-    return { ...defaultNotificationPrefs, ...JSON.parse(saved) };
-  } catch {
-    if (storageKey) localStorage.removeItem(storageKey);
-    return defaultNotificationPrefs;
-  }
-}
 
 // Toggle switch component
 function ToggleSwitch({
@@ -148,7 +116,7 @@ function ToggleSwitch({
 export default function SettingsPage() {
   const router = useRouter();
   const mounted = useHydrated();
-  const { theme, setTheme, user, updateUserProfile, tasks, goals, exams, studySessions, subjects, logout } = useAppStore();
+  const { theme, setTheme, user, updateUserProfile, tasks, logout } = useAppStore();
   const plannerRecord = usePlannerStore(state => user ? state.users[user.id] : undefined);
   const setPlannerActiveUser = usePlannerStore(state => state.setActiveUser);
   const updatePlannerSettings = usePlannerStore(state => state.updateSettings);
@@ -156,7 +124,7 @@ export default function SettingsPage() {
   const clearTaskSchedules = useScheduleStore(state => state.clearTaskSchedules);
   
   // Account state
-  const [fullName, setFullName] = useState('');
+  const [fullName, setFullName] = useState(user?.full_name || '');
   const userProfileSource = user ? `${user.id}:${user.full_name || ''}` : '';
   const [fullNameSource, setFullNameSource] = useState(userProfileSource);
   if (fullNameSource !== userProfileSource) {
@@ -164,6 +132,8 @@ export default function SettingsPage() {
     setFullName(user?.full_name || '');
   }
   const [isSavingProfile, setIsSavingProfile] = useState(false);
+  const [isSavingAvailability, setIsSavingAvailability] = useState(false);
+  const availabilitySaveOwner = useRef<string | null>(null);
   
   // Password state
   const [newPassword, setNewPassword] = useState('');
@@ -198,8 +168,8 @@ export default function SettingsPage() {
     }
   }, [setPlannerActiveUser, user]);
 
-  const handleSavePlannerAvailability = () => {
-    if (!user) return;
+  const handleSavePlannerAvailability = async () => {
+    if (!user || availabilitySaveOwner.current === user.id) return;
     if (
       plannerDraft.wakeTime >= plannerDraft.schoolStartTime
       || plannerDraft.schoolStartTime >= plannerDraft.schoolHomeTime
@@ -212,12 +182,23 @@ export default function SettingsPage() {
       toast.error('Weekend end time must be later than its start time.');
       return;
     }
-    updatePlannerSettings(user.id, {
-      ...plannerDraft,
-      horizonDays: 7,
-      slotMinutes: 15,
-    });
-    toast.success('Schedule availability saved');
+    const owner = user.id;
+    availabilitySaveOwner.current = owner;
+    setIsSavingAvailability(true);
+    try {
+      updatePlannerSettings(owner, { ...plannerDraft, horizonDays: 7, slotMinutes: 15 });
+      const saved = await usePlannerStore.getState().waitForPlannerPersistence(owner);
+      if (useAppStore.getState().user?.id !== owner) return;
+      if (saved) toast.success('Schedule availability saved');
+      else toast.error('Availability is saved on this device, but has not synced to your account. Check your connection and save again.');
+    } catch {
+      if (useAppStore.getState().user?.id === owner) toast.error('Availability could not be saved. Please try again.');
+    } finally {
+      if (availabilitySaveOwner.current === owner) {
+        availabilitySaveOwner.current = null;
+        setIsSavingAvailability(false);
+      }
+    }
   };
   
   const handleSaveProfile = async () => {
@@ -265,26 +246,39 @@ export default function SettingsPage() {
   
   const handleNotifChange = (key: keyof NotificationPreferences, value: boolean) => {
     const updated = { ...notifPrefs, [key]: value };
+    if (!user?.id || !saveNotificationPreferences(user.id, updated)) {
+      toast.error('Your browser could not save this preference. Allow site storage and try again.');
+      return;
+    }
     setNotifPrefs(updated);
-    const storageKey = userScopedStorageKey('orderly-notification-prefs', user?.id);
-    if (storageKey) localStorage.setItem(storageKey, JSON.stringify(updated));
     toast.success('Notification preference updated');
+  };
+
+  const handleEnableDesktopAlerts = async () => {
+    try {
+      const permission = await requestNotificationPermission();
+      if (permission === 'granted') toast.success('Desktop alerts enabled while Orderly is open.');
+      else toast.info('In-app reminders still work. To enable desktop alerts, allow notifications in your browser’s site settings.');
+    } catch {
+      toast.info('This browser could not enable desktop alerts. In-app reminders still work.');
+    }
   };
   
   const handleExportData = async () => {
+    const owner = user?.id;
+    if (!owner || isExporting) return;
     setIsExporting(true);
     try {
-      const data = {
-        exportedAt: new Date().toISOString(),
-        profile: user,
-        tasks,
-        goals,
-        exams,
-        studySessions,
-        subjects,
-      };
-      
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const response = await fetch('/api/account/export', {
+        cache: 'no-store', signal: AbortSignal.timeout(55_000),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(data?.error || 'Your saved data could not be exported. Please try again.');
+      if (useAppStore.getState().user?.id !== owner) return;
+      if (data?.accountId !== owner || data?.version !== 2 || !Array.isArray(data?.tasks)) {
+        throw new Error('The export response was incomplete. Please try again.');
+      }
+      const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -292,10 +286,14 @@ export default function SettingsPage() {
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      toast.success('Data exported successfully');
-    } catch {
-      toast.error('Failed to export data');
+      // Keep the URL alive long enough for browsers to start the download.
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      toast.success('Your saved data download is ready');
+    } catch (error) {
+      if (useAppStore.getState().user?.id === owner) {
+        toast.error(error instanceof Error && error.name !== 'TimeoutError'
+          ? error.message : 'The export took too long. Please try again.');
+      }
     } finally {
       setIsExporting(false);
     }
@@ -603,8 +601,8 @@ export default function SettingsPage() {
 
               <div className="flex flex-col gap-2 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
                 <p className="text-xs text-muted-foreground">Timezone: {plannerDraft.timeZone}. Calendar events with start and end times are also treated as busy.</p>
-                <Button size="sm" onClick={handleSavePlannerAvailability} className="gap-1.5 self-start sm:self-auto">
-                  <Save className="w-4 h-4" /> Save availability
+                <Button size="sm" onClick={handleSavePlannerAvailability} disabled={isSavingAvailability} aria-busy={isSavingAvailability} className="gap-1.5 self-start sm:self-auto">
+                  <Save className="w-4 h-4" /> {isSavingAvailability ? 'Saving…' : 'Save availability'}
                 </Button>
               </div>
             </CardContent>
@@ -626,6 +624,10 @@ export default function SettingsPage() {
               </div>
             </CardHeader>
             <CardContent>
+              <div className="mb-4 space-y-2 rounded-lg border border-border p-3">
+                <p className="text-xs text-muted-foreground">Reminders appear while Orderly is open on this browser. Tasks notify within 30 minutes of their deadline; exam and goal alerts appear today and the day before. Study reminders and the daily summary appear once a day when you open Orderly. These preferences stay on this device.</p>
+                <Button type="button" size="sm" variant="outline" onClick={handleEnableDesktopAlerts}>Enable desktop alerts</Button>
+              </div>
               <div className="space-y-1">
                 {[
                   { key: 'taskReminders' as const, label: 'Task Reminders', description: 'Get notified when tasks are due soon', icon: AlertTriangle },
@@ -730,7 +732,7 @@ export default function SettingsPage() {
                   <p className="text-sm font-medium">Export Your Data</p>
                 </div>
                 <p className="text-xs text-muted-foreground pl-6">
-                  Download all your tasks, exams, goals, study sessions, and profile data as a JSON file.
+                  Download your saved tasks, events, plans and chats, goals, exams, study sessions, subjects, and profile as JSON. Private feed links, login credentials, browser-only preferences, and unsaved changes are excluded. This is a data download, not a restorable backup.
                 </p>
                 <div className="pl-6">
                   <Button 

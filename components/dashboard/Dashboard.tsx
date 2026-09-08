@@ -17,7 +17,7 @@ import { TaskCard, TaskForm } from '@/components/tasks';
 import { DashboardSchedule } from './DashboardSchedule';
 import { usePlannerStore } from '@/lib/planner/store';
 import { getDefaultPlannerSettings } from '@/lib/planner/types';
-import { buildCommitmentOccurrences } from '@/lib/planner/commitments';
+import { visibleCommitmentOccurrences } from '@/lib/schedule/visible-intervals';
 import { localDateFromIso } from '@/lib/schedule/selectors';
 import { selectDashboardTasksForDate } from '@/lib/dashboard-tasks';
 import { cn, isExamType } from '@/lib/utils';
@@ -172,7 +172,7 @@ export function Dashboard() {
       return civilDateFromStored(exam.exam_date, taskDisplayOptions.timeZone) === dateStr;
     });
     const dayCommitments = (plannerRecord?.commitments || []).flatMap(commitment =>
-      buildCommitmentOccurrences(commitment, dateStr, dateStr),
+      visibleCommitmentOccurrences(commitment, dateStr, dateStr, taskDisplayOptions.timeZone),
     );
     return { tasks: dayTasks, exams: dayExams, events: dayCommitments };
   }, [tasks, exams, now, plannerRecord?.commitments, taskDisplayOptions]);

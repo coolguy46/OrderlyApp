@@ -6,6 +6,8 @@ import { getDefaultPlannerSettings } from '../../lib/planner/types';
 import { localDateTimeToIso } from '../../lib/schedule/selectors';
 
 const id = 'calendar-ui-owner';
+let schedulePersistenceResult = true;
+let plannerPersistenceResult = true;
 const now = '2026-09-06T20:00:00Z';
 const stored = JSON.parse(localStorage.getItem('calendar-ui-fixture') || 'null');
 const initialEvent = { id: 'practice', title: 'Weekend practice', description: 'Bring water', location: 'Park', kind: 'sports',
@@ -13,8 +15,11 @@ const initialEvent = { id: 'practice', title: 'Weekend practice', description: '
   timeZone: 'America/Los_Angeles', color: '#6366f1', enabled: true, occurrenceOverrides: {} };
 const settings = { ...getDefaultPlannerSettings('America/Los_Angeles'), schoolDays: [1,2,3,4,5] };
 const userRecord = { settings, commitments: stored?.events || [initialEvent], estimateCache: {}, feedbackMultipliers: {}, latestPlan: null, plans: [], notifications: [] };
-const persist = () => localStorage.setItem('calendar-ui-fixture', JSON.stringify({ events: usePlannerStore.getState().users[id].commitments,
-  tasks: useAppStore.getState().tasks, entries: useScheduleStore.getState().entriesByUser[id] }));
+const persist = () => {
+  if (!schedulePersistenceResult || !plannerPersistenceResult) return;
+  localStorage.setItem('calendar-ui-fixture', JSON.stringify({ events: usePlannerStore.getState().users[id].commitments,
+    tasks: useAppStore.getState().tasks, entries: useScheduleStore.getState().entriesByUser[id] }));
+};
 export const useAppStore = create<any>((set) => ({
   dataLoaded: true, finalizeTaskCreations: () => {},
   user: { id, email: 'calendar-test@example.invalid' }, tasks: stored?.tasks || [], subjects: [], exams: [], goals: [], studySessions: [],
@@ -31,7 +36,7 @@ export const usePlannerStore = create<any>((set) => ({
   users: { [id]: userRecord }, setActiveUser: () => {},
   upsertCommitment: (_userId: string, event: any) => { set((s: any) => ({ users: { [id]: { ...s.users[id], commitments: [...s.users[id].commitments.filter((e: any) => e.id !== event.id), event] } } })); persist(); },
   removeCommitment: (_userId: string, eventId: string) => { set((s: any) => ({ users: { [id]: { ...s.users[id], commitments: s.users[id].commitments.filter((e: any) => e.id !== eventId) } } })); persist(); },
-  waitForPlannerPersistence: async () => true,
+  waitForPlannerPersistence: async () => plannerPersistenceResult,
 }));
 export const useScheduleStore = create<any>((set, get) => ({
   entriesByUser: { [id]: stored?.entries || {} },
@@ -43,13 +48,23 @@ export const useScheduleStore = create<any>((set, get) => ({
     const entry = get().entriesByUser[id][taskId];
     get().upsertTaskSchedule(id, taskId, { occurrenceOverrides: { ...entry.occurrenceOverrides, [source]: { ...entry.occurrenceOverrides[source], ...override } } });
   },
-  clearOccurrenceOverride: () => {}, removeTaskSchedule: () => {}, waitForSchedulePersistence: async () => true,
+  clearOccurrenceOverride: () => {}, removeTaskSchedule: () => {}, waitForSchedulePersistence: async () => schedulePersistenceResult,
   moveOccurrence: (_userId: string, taskId: string, source: string, date: string, startAt: string) => get().setOccurrenceOverride(id, taskId, source, { scheduledDate: date, startAt }),
   resizeOccurrence: (_userId: string, taskId: string, source: string, durationSeconds: number) => get().setOccurrenceOverride(id, taskId, source, { durationSeconds }),
 }));
 
 Object.assign(window, { calendarFixture: {
   state: () => ({ events: usePlannerStore.getState().users[id].commitments, tasks: useAppStore.getState().tasks, entries: useScheduleStore.getState().entriesByUser[id] }),
+  setPersistenceResult: (kind: 'task' | 'event', value: boolean) => { if (kind === 'task') schedulePersistenceResult = value; else plannerPersistenceResult = value; },
+  addPersistenceTask: async () => {
+    const task = await useAppStore.getState().addTask({ title: 'Save confirmation task', recurrence: 'none', priority: 'medium' });
+    useScheduleStore.getState().upsertTaskSchedule(id, task.id, { scheduledDate: '2026-09-06', startAt: localDateTimeToIso('2026-09-06', '18:00', 'America/Los_Angeles'), durationSeconds: 1800 });
+  },
+  addOvernightItems: async () => {
+    usePlannerStore.getState().upsertCommitment(id, { ...initialEvent, id: 'night-event', title: 'Overnight event', daysOfWeek: [0], startDate: '2026-09-06', endDate: '2026-09-06', startTime: '23:00', endTime: '01:00' });
+    const task = await useAppStore.getState().addTask({ title: 'Overnight task', recurrence: 'none', priority: 'medium' });
+    useScheduleStore.getState().upsertTaskSchedule(id, task.id, { scheduledDate: '2026-09-06', startAt: localDateTimeToIso('2026-09-06', '23:30', 'America/Los_Angeles'), durationSeconds: 7200 });
+  },
   saveChatEvent: () => usePlannerStore.getState().upsertCommitment(id, { ...initialEvent, id: 'chat-event', title: 'Future chat event', daysOfWeek: [5], startDate: '2027-03-12', endDate: '2027-03-12' }),
   addLayoutTask: async () => {
     const task = await useAppStore.getState().addTask({

@@ -60,16 +60,14 @@ export function AuthGuard({ children }: AuthGuardProps) {
     status: SetupResolutionStatus;
   }>({ userId: null, status: 'idle' });
   const [setupRetryNonce, setSetupRetryNonce] = useState(0);
-  const initCalledRef = useRef(false);
   const setupChecksRef = useRef(new Map<string, Promise<boolean>>());
   const isPublicRoute = PUBLIC_ROUTES.some(route => pathname.startsWith(route));
   const isSetupExempt = SETUP_EXEMPT_ROUTES.some(route => pathname.startsWith(route));
 
   useEffect(() => {
-    // Prevent double-call in React 18 Strict Mode
-    if (initCalledRef.current) return;
-    initCalledRef.current = true;
-
+    // The store deduplicates the underlying auth request. Each effect setup
+    // must still observe its completion: StrictMode cleans up the first
+    // observer before replaying setup, while the shared request is pending.
     let cancelled = false;
     void initializeAuth().finally(() => {
       if (!cancelled) setInitialized(true);
@@ -78,9 +76,7 @@ export function AuthGuard({ children }: AuthGuardProps) {
     return () => {
       cancelled = true;
     };
-    // intentionally no deps — run once on mount only
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [initializeAuth]);
 
   useEffect(() => {
     // A SIGNED_IN event is authoritative even if the initial getSession call

@@ -13,7 +13,8 @@ import { motion } from 'framer-motion';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import * as timerDb from '@/lib/supabase/services';
-import { requestNotificationPermission, sendDesktopNotification } from '@/lib/notifications';
+import { sendDesktopNotification } from '@/lib/notifications';
+import { readNotificationPreferences } from '@/lib/notification-preferences';
 import { usePathname } from 'next/navigation';
 import {
   discardUnownedLegacyStorageValue,
@@ -192,11 +193,6 @@ export function PomodoroTimer({ selectedSubjectId, selectedTaskId }: PomodoroTim
   const prevPathnameRef = useRef(pathname);
   const timerStateRestorePending = Boolean(user?.id && restoredForUserId !== user.id);
 
-  // Request desktop notification permission on mount
-  useEffect(() => {
-    requestNotificationPermission();
-  }, []);
-
   // Load presets only from the active account's browser storage.
   useEffect(() => {
     const userId = user?.id || null;
@@ -297,7 +293,8 @@ export function PomodoroTimer({ selectedSubjectId, selectedTaskId }: PomodoroTim
     setIsRunning(false);
     pomodoroDeadlineRef.current = null;
 
-    if (soundEnabled) {
+    const globalSoundEnabled = readNotificationPreferences(user?.id || '').soundEnabled;
+    if (soundEnabled && globalSoundEnabled) {
       playNotificationSound();
     }
 
@@ -308,6 +305,7 @@ export function PomodoroTimer({ selectedSubjectId, selectedTaskId }: PomodoroTim
         body: isBreak ? 'Your break is up. Start your next focus session.' : `Great work! You completed a ${getDuration('focus') / 60} minute focus session.`,
         tag: 'pomodoro-timer',
         requireInteraction: true,
+        silent: !soundEnabled || !globalSoundEnabled,
       }
     );
 

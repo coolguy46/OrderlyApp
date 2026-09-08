@@ -75,9 +75,13 @@ test('reversible task creation uses a stable ID and compensates a lost response'
   );
 
   assert.match(addTaskSection, /const taskId = crypto\.randomUUID\(\)/);
+  assert.match(addTaskSection, /const accountId = user\.id/);
   assert.match(addTaskSection, /db\.createTask\(\{[\s\S]*id: taskId/);
+  assert.match(addTaskSection, /user_id: accountId/);
   assert.match(addTaskSection, /if \(!newTask && options\?\.reversible && reversibleAccessToken\)[\s\S]*compensateInterruptedTaskCreation/);
-  assert.match(addTaskSection, /catch \(error\)[\s\S]*compensateInterruptedTaskCreation\(user\.id, taskId, reversibleAccessToken\)/);
+  const catchStart = addTaskSection.search(/\bcatch(?:\s*\([^)]*\))?\s*\{/);
+  assert.ok(catchStart >= 0, 'task creation must handle a thrown save');
+  assert.match(addTaskSection.slice(catchStart), /compensateInterruptedTaskCreation\(accountId, taskId, reversibleAccessToken\)/);
 });
 
 test('failed and thrown reversible deletes both remain queued for retry', async () => {
@@ -88,8 +92,10 @@ test('failed and thrown reversible deletes both remain queued for retry', async 
     storeSource.indexOf('completeTask:', deleteTaskStart),
   );
 
-  assert.match(deleteTaskSection, /if \(receipt\) queuePendingTaskCleanup\(receipt\.ownerUserId, id\);/);
-  const catchSection = deleteTaskSection.slice(deleteTaskSection.indexOf('catch (error)'));
+  const catchStart = deleteTaskSection.search(/\bcatch(?:\s*\([^)]*\))?\s*\{/);
+  assert.ok(catchStart >= 0, 'task deletion must handle a thrown save');
+  assert.match(deleteTaskSection.slice(0, catchStart), /if \(receipt\) queuePendingTaskCleanup\(receipt\.ownerUserId, id\);/);
+  const catchSection = deleteTaskSection.slice(catchStart);
   assert.match(catchSection, /if \(receipt\) queuePendingTaskCleanup\(receipt\.ownerUserId, id\);/);
 });
 

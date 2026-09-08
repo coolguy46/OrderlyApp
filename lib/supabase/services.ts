@@ -22,6 +22,7 @@ import type {
 import { AUTH_ACTION_TIMEOUT_MS, authCallbackUrl, withTimeout } from '@/lib/auth/lifecycle';
 import { signOutWithLocalFallback } from '@/lib/auth/logout-safety';
 import { deleteOwnedTaskWithToken } from './task-compensation';
+import { readAllOwnedRows } from './read-all';
 import { persistTaskCompletion, type TaskCompletionResult, type TaskSuccessorInput } from './task-completion';
 export type { TaskCompletionResult, TaskSuccessorInput } from './task-completion';
 import {
@@ -143,18 +144,16 @@ export async function markSetupComplete(userId: string): Promise<boolean> {
 // ============== SUBJECT SERVICES ==============
 
 export async function getSubjects(userId: string, options?: ReadOptions): Promise<Subject[]> {
-  
-  
-  const { data, error } = await db
-    .from('subjects')
-    .select('*')
-    .eq('user_id', userId)
-    .order('created_at', { ascending: true });
-  
-  if (error) {
+  try {
+    const rows = await readAllOwnedRows(userId, (cursor, signal) => {
+      let query = db.from('subjects').select('*').eq('user_id', userId).order('id').limit(250);
+      if (cursor) query = query.gt('id', cursor);
+      return query.abortSignal(signal);
+    });
+    return rows.sort((a, b) => a.created_at.localeCompare(b.created_at));
+  } catch (error) {
     return readFailure('Error fetching subjects:', error, [], options);
   }
-  return (data || []) as Subject[];
 }
 
 export async function createSubject(subject: SubjectInsert): Promise<Subject | null> {
@@ -208,18 +207,16 @@ export async function deleteSubject(id: string): Promise<boolean> {
 // ============== TASK SERVICES ==============
 
 export async function getTasks(userId: string, options?: ReadOptions): Promise<Task[]> {
-  
-  
-  const { data, error } = await db
-    .from('tasks')
-    .select('*')
-    .eq('user_id', userId)
-    .order('created_at', { ascending: false });
-  
-  if (error) {
+  try {
+    const rows = await readAllOwnedRows(userId, (cursor, signal) => {
+      let query = db.from('tasks').select('*').eq('user_id', userId).order('id').limit(250);
+      if (cursor) query = query.gt('id', cursor);
+      return query.abortSignal(signal);
+    });
+    return rows.sort((a, b) => b.created_at.localeCompare(a.created_at));
+  } catch (error) {
     return readFailure('Error fetching tasks:', error, [], options);
   }
-  return (data || []) as Task[];
 }
 
 export async function createTask(task: TaskInsert): Promise<Task | null> {
@@ -413,18 +410,16 @@ export async function upsertCanvasTask(task: Omit<Task, 'id' | 'created_at' | 'u
 // ============== GOAL SERVICES ==============
 
 export async function getGoals(userId: string, options?: ReadOptions): Promise<Goal[]> {
-  
-  
-  const { data, error } = await db
-    .from('goals')
-    .select('*')
-    .eq('user_id', userId)
-    .order('created_at', { ascending: false });
-  
-  if (error) {
+  try {
+    const rows = await readAllOwnedRows(userId, (cursor, signal) => {
+      let query = db.from('goals').select('*').eq('user_id', userId).order('id').limit(250);
+      if (cursor) query = query.gt('id', cursor);
+      return query.abortSignal(signal);
+    });
+    return rows.sort((a, b) => b.created_at.localeCompare(a.created_at));
+  } catch (error) {
     return readFailure('Error fetching goals:', error, [], options);
   }
-  return (data || []) as Goal[];
 }
 
 export async function createGoal(goal: Omit<Goal, 'id' | 'created_at' | 'updated_at'>): Promise<Goal | null> {
@@ -478,18 +473,16 @@ export async function deleteGoal(id: string): Promise<boolean> {
 // ============== STUDY SESSION SERVICES ==============
 
 export async function getStudySessions(userId: string, options?: ReadOptions): Promise<StudySession[]> {
-  
-  
-  const { data, error } = await db
-    .from('study_sessions')
-    .select('*')
-    .eq('user_id', userId)
-    .order('started_at', { ascending: false });
-  
-  if (error) {
+  try {
+    const rows = await readAllOwnedRows(userId, (cursor, signal) => {
+      let query = db.from('study_sessions').select('*').eq('user_id', userId).order('id').limit(250);
+      if (cursor) query = query.gt('id', cursor);
+      return query.abortSignal(signal);
+    });
+    return rows.sort((a, b) => b.started_at.localeCompare(a.started_at));
+  } catch (error) {
     return readFailure('Error fetching study sessions:', error, [], options);
   }
-  return (data || []) as StudySession[];
 }
 
 export async function createStudySession(session: NewStudySession): Promise<StudySession | null> {
@@ -517,18 +510,16 @@ export async function createStudySession(session: NewStudySession): Promise<Stud
 // ============== EXAM SERVICES ==============
 
 export async function getExams(userId: string, options?: ReadOptions): Promise<Exam[]> {
-  
-  
-  const { data, error } = await db
-    .from('exams')
-    .select('*')
-    .eq('user_id', userId)
-    .order('exam_date', { ascending: true });
-  
-  if (error) {
+  try {
+    const rows = await readAllOwnedRows(userId, (cursor, signal) => {
+      let query = db.from('exams').select('*').eq('user_id', userId).order('id').limit(250);
+      if (cursor) query = query.gt('id', cursor);
+      return query.abortSignal(signal);
+    });
+    return rows.sort((a, b) => a.exam_date.localeCompare(b.exam_date));
+  } catch (error) {
     return readFailure('Error fetching exams:', error, [], options);
   }
-  return (data || []) as Exam[];
 }
 
 export async function createExam(exam: Omit<Exam, 'id' | 'created_at' | 'updated_at'>): Promise<Exam | null> {
@@ -597,18 +588,14 @@ export interface CanvasSettings {
   updated_at: string;
 }
 
-export async function getCanvasSettings(userId: string): Promise<CanvasSettings | null> {
-  
-  
-  const { data, error } = await db
+export async function getCanvasSettings(userId: string, options?: ReadOptions & { signal?: AbortSignal }): Promise<CanvasSettings | null> {
+  let query = db
     .from('canvas_settings')
     .select('*')
-    .eq('user_id', userId)
-    .single();
-  
-  if (error && error.code !== 'PGRST116') {
-    console.error('Error fetching canvas settings:', safeErrorCode(error));
-  }
+    .eq('user_id', userId);
+  if (options?.signal) query = query.abortSignal(options.signal);
+  const { data, error } = await query.maybeSingle();
+  if (error) return readFailure('Error fetching canvas settings:', error, null, options);
   return (data as CanvasSettings | null) || null;
 }
 

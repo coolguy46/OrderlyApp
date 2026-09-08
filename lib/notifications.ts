@@ -18,6 +18,7 @@ export function sendDesktopNotification(
     badge?: string;
     tag?: string;
     requireInteraction?: boolean;
+    silent?: boolean;
   }
 ): Notification | null {
   if (typeof window === 'undefined' || !('Notification' in window)) return null;
@@ -30,6 +31,7 @@ export function sendDesktopNotification(
       badge: options?.badge || '/logo.svg',
       tag: options?.tag,
       requireInteraction: options?.requireInteraction || false,
+      silent: options?.silent,
     });
     return notif;
   } catch (e) {

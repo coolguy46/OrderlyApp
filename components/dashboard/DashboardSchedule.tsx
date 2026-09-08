@@ -1,8 +1,9 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { differenceInMinutes, format } from 'date-fns';
+import { format } from 'date-fns';
 import Link from 'next/link';
+import { toast } from 'sonner';
 import { CalendarClock, ChevronLeft, ChevronRight, Clock3, ListTodo, LockKeyhole } from 'lucide-react';
 import { TaskDetailViewer } from '@/components/tasks/TaskDetailViewer';
 import { TaskForm } from '@/components/tasks/TaskForm';
@@ -10,12 +11,9 @@ import { Button } from '@/components/ui/Button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import {
   addLocalDays,
-  buildScheduleOccurrences,
   formatIsoTime,
   localDateFromIso,
   localDateToDateCarrier,
-  localDateTimeToIso,
-  localMinuteOfDayFromIso,
   selectScheduleEntriesForUser,
 } from '@/lib/schedule/selectors';
 import { useScheduleStore } from '@/lib/schedule/store';
@@ -29,7 +27,7 @@ import {
 import { useStoredCalendarEvents } from '@/lib/planner/use-stored-calendar-events';
 import { usePlannerStore } from '@/lib/planner/store';
 import type { RecurringCommitmentInput } from '@/lib/planner/types';
-import { buildCommitmentOccurrences } from '@/lib/planner/commitments';
+import { buildVisibleScheduleOccurrences, calendarIntervalGeometry, visibleCommitmentOccurrences } from '@/lib/schedule/visible-intervals';
 import {
   DASHBOARD_SCHEDULE_HOUR_HEIGHT,
   dashboardScheduleCreationSlot,
@@ -76,22 +74,14 @@ function commitmentBlocksForDate(
   timeZone: string,
 ): DashboardFixedBlock[] {
   return commitments.flatMap(commitment => {
-    return buildCommitmentOccurrences(commitment, date, date).flatMap(occurrence => {
-      const commitmentTimeZone = commitment.timeZone || timeZone;
-      const startAt = localDateTimeToIso(occurrence.date, occurrence.startTime, commitmentTimeZone);
-      const endDate = occurrence.endTime > occurrence.startTime
-        ? occurrence.date
-        : addLocalDays(occurrence.date, 1);
-      const endAt = localDateTimeToIso(endDate, occurrence.endTime, commitmentTimeZone);
-      if (!startAt || !endAt) return [];
-
+    return visibleCommitmentOccurrences(commitment, date, date, timeZone).flatMap(occurrence => {
       return [{
         id: occurrence.id,
         commitment,
         sourceDate: occurrence.sourceDate,
         title: occurrence.title,
-        startAt,
-        endAt,
+        startAt: occurrence.startAt,
+        endAt: occurrence.endAt,
         color: commitment.color || '#64748b',
         locked: commitment.kind === 'school',
       }];
@@ -144,7 +134,7 @@ export function DashboardSchedule() {
     [entriesByUser, user?.id],
   );
   const occurrences = useMemo(
-    () => buildScheduleOccurrences({
+    () => buildVisibleScheduleOccurrences({
       tasks,
       entries,
       subjects,
@@ -175,7 +165,7 @@ export function DashboardSchedule() {
     : null;
   const fixedBlocks = useMemo(() => {
     const savedCommitments = plannerRecord?.commitments || [];
-    const storedCommitments = storedEventsToCommitments(storedEvents, timeZone);
+    const storedCommitments = storedEventsToCommitments(storedEvents, timeZone, savedCommitments);
     const schoolCommitments: RecurringCommitmentInput[] = plannerRecord ? [{
       id: 'dashboard-school-day',
       title: 'School day',
@@ -298,9 +288,9 @@ export function DashboardSchedule() {
                 if (!item.startAt) return null;
                 const start = new Date(item.startAt);
                 const end = item.endAt ? new Date(item.endAt) : new Date(start.getTime() + 30 * 60_000);
-                const startMinute = localMinuteOfDayFromIso(item.startAt, timeZone);
-                if (startMinute === null) return null;
-                const duration = Math.max(15, differenceInMinutes(end, start));
+                const geometry = calendarIntervalGeometry(item.startAt, end.toISOString(), dateKey, timeZone);
+                if (!geometry) return null;
+                const { startMinute, durationMinutes: duration } = geometry;
                 const color = taskColor(item);
                 return (
                   <button
@@ -331,11 +321,9 @@ export function DashboardSchedule() {
               })}
 
               {fixedBlocks.map(item => {
-                const start = new Date(item.startAt);
-                const end = new Date(item.endAt);
-                const startMinute = localMinuteOfDayFromIso(item.startAt, timeZone);
-                if (startMinute === null) return null;
-                const duration = Math.max(15, differenceInMinutes(end, start));
+                const geometry = calendarIntervalGeometry(item.startAt, item.endAt, dateKey, timeZone);
+                if (!geometry) return null;
+                const { startMinute, durationMinutes: duration } = geometry;
                 const startLabel = formatIsoTime(item.startAt, timeZone) || '';
                 const endLabel = formatIsoTime(item.endAt, timeZone) || '';
                 return (
@@ -402,10 +390,10 @@ export function DashboardSchedule() {
         initialDurationSeconds={creationSlot?.userId === userId ? creationSlot.durationSeconds : null}
         onClose={() => { setCreationSlot(null); setEditingEvent(null); }}
         onSaved={() => {
-          if (!userId || !editingEvent?.commitment.id.startsWith('calendar-')) return;
+          if (!userId || editingEvent?.userId !== userId || useAppStore.getState().user?.id !== userId || !editingEvent?.commitment.id.startsWith('calendar-')) return;
           const next = storedEvents.filter(event => event.id !== editingEvent.commitment.id.slice('calendar-'.length));
-          writeStoredCalendarEvents(userId, next);
-          setStoredEvents(next);
+          if (writeStoredCalendarEvents(userId, next)) setStoredEvents(next);
+          else toast.warning('The event was saved, but its old browser copy could not be removed. The backup has been kept.');
         }}
       />
     </Card>

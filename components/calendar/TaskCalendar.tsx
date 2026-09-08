@@ -30,6 +30,7 @@ import { useAppStore } from '@/lib/store';
 import type { Exam, Subject, Task } from '@/lib/supabase/types';
 import {
   buildScheduleOccurrences,
+  addLocalDays,
   localDateFromIso,
   localTimeFromIso,
   selectScheduleEntriesForUser,
@@ -44,7 +45,8 @@ import { getDefaultPlannerSettings, type RecurringCommitmentInput } from '@/lib/
 import { storedEventsToCommitments, writeStoredCalendarEvents } from '@/lib/planner/adapters';
 import { useStoredCalendarEvents } from '@/lib/planner/use-stored-calendar-events';
 import { usePlannerStore } from '@/lib/planner/store';
-import { buildCommitmentOccurrences } from '@/lib/planner/commitments';
+import { toast } from 'sonner';
+import { visibleCommitmentOccurrences } from '@/lib/schedule/visible-intervals';
 import { cn, isExamType } from '@/lib/utils';
 import { hasMissingTaskOnDate, isTaskMissing, taskMissingDate } from '@/lib/task-status';
 import { useCurrentTime } from '@/lib/use-current-time';
@@ -286,7 +288,7 @@ export function TaskCalendar({ date: controlledDate, onDateChange, mode: control
 
   const plannerRecord = user?.id ? plannerUsers[user.id] : null;
   const commitments = useMemo(
-    () => [...(plannerRecord?.commitments || []), ...storedEventsToCommitments(storedEvents, plannerRecord?.settings.timeZone || 'UTC')],
+    () => [...(plannerRecord?.commitments || []), ...storedEventsToCommitments(storedEvents, plannerRecord?.settings.timeZone || 'UTC', plannerRecord?.commitments)],
     [plannerRecord?.commitments, plannerRecord?.settings.timeZone, storedEvents],
   );
   const fallbackTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
@@ -342,19 +344,24 @@ export function TaskCalendar({ date: controlledDate, onDateChange, mode: control
     const calendarEvents = new Map<string, CalendarEventItem[]>();
     if (firstVisibleDate && lastVisibleDate) {
       for (const commitment of commitments) {
-        for (const occurrence of buildCommitmentOccurrences(commitment, firstVisibleDate, lastVisibleDate)) {
-          const values = calendarEvents.get(occurrence.date) || [];
-          values.push({
-            ownerId: user?.id || '',
-            id: occurrence.id,
-            commitment,
-            sourceDate: occurrence.sourceDate,
-            title: occurrence.title,
-            startTime: occurrence.startTime,
-            endTime: occurrence.endTime,
-            color: commitment.color || '#6366f1',
-          });
-          calendarEvents.set(occurrence.date, values);
+        for (const occurrence of visibleCommitmentOccurrences(commitment, firstVisibleDate, lastVisibleDate, timeZone)) {
+          const firstDay = localDateFromIso(occurrence.startAt, timeZone);
+          const lastDay = localDateFromIso(new Date(new Date(occurrence.endAt).getTime() - 1).toISOString(), timeZone);
+          if (!firstDay || !lastDay) continue;
+          for (let date = firstDay < firstVisibleDate ? firstVisibleDate : firstDay; date <= lastDay && date <= lastVisibleDate; date = addLocalDays(date, 1)) {
+            const values = calendarEvents.get(date) || [];
+            values.push({
+              ownerId: user?.id || '',
+              id: occurrence.id,
+              commitment,
+              sourceDate: occurrence.sourceDate,
+              title: occurrence.title,
+              startTime: localTimeFromIso(occurrence.startAt, timeZone) || occurrence.startTime,
+              endTime: localTimeFromIso(occurrence.endAt, timeZone) || occurrence.endTime,
+              color: commitment.color || '#6366f1',
+            });
+            calendarEvents.set(date, values);
+          }
         }
       }
     }
@@ -596,10 +603,10 @@ export function TaskCalendar({ date: controlledDate, onDateChange, mode: control
         occurrenceDate={editingEvent?.sourceDate || editingTaskDate}
         initialDate={format(currentDate, 'yyyy-MM-dd')}
         onSaved={() => {
-          if (!user?.id || !editingEvent?.commitment.id.startsWith('calendar-')) return;
+          if (!user?.id || editingEvent?.ownerId !== user.id || useAppStore.getState().user?.id !== user.id || !editingEvent?.commitment.id.startsWith('calendar-')) return;
           const next = storedEvents.filter(event => event.id !== editingEvent.commitment.id.slice('calendar-'.length));
-          writeStoredCalendarEvents(user.id, next);
-          setStoredEvents(next);
+          if (writeStoredCalendarEvents(user.id, next)) setStoredEvents(next);
+          else toast.warning('The event was saved, but its old browser copy could not be removed. The backup has been kept.');
         }}
       />
     </div>

@@ -305,6 +305,101 @@ test('real calendar/grid/editor UI: navigation, recurrence, click/drag/resize, s
     assert.ok(inputBounds.height > 40 && sendBounds.y >= 0 && sendBounds.y + sendBounds.height <= 667, 'long input and send button remain reachable on a short phone');
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
     await capture('assistant-long-input-mobile');
+    // Invalid end times must never produce a saved-but-invisible event.
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await page.getByRole('button', { name: 'Fixture month', exact: true }).click();
+    await page.getByRole('button', { name: 'New', exact: true }).click();
+    await page.getByRole('tab', { name: 'Event', exact: true }).click();
+    await page.locator('#title').fill('DST event validation');
+    await page.locator('#event-date').fill('2027-03-14');
+    await page.locator('#event-start-time').fill('01:30');
+    await page.locator('#event-end-time').fill('02:30');
+    await page.getByRole('button', { name: 'Create Event', exact: true }).click();
+    await page.getByRole('alert').filter({ hasText: 'end time is not valid' }).waitFor();
+    assert.ok(!(await page.evaluate(() => window.calendarFixture.state().events)).some(event => event.title === 'DST event validation'));
+    await page.locator('#event-end-time').fill('03:30');
+    await page.getByRole('button', { name: 'Create Event', exact: true }).click();
+    await page.getByRole('dialog').waitFor({ state: 'hidden' });
+    assert.equal((await page.evaluate(() => window.calendarFixture.state().events)).filter(event => event.title === 'DST event validation').length, 1);
+    await page.evaluate(() => window.calendarFixture.addOvernightItems());
+    await page.getByRole('button', { name: 'Fixture schedule', exact: true }).click();
+    await page.getByRole('button', { name: 'Next week', exact: true }).click();
+    assert.notEqual(await page.getByRole('button', { name: /^Overnight event,/ }).getAttribute('aria-disabled'), 'true');
+    await page.getByRole('button', { name: /^Overnight event,/ }).press('Enter');
+    assert.equal(await page.locator('#event-date').inputValue(), '2026-09-06', 'continuation opens its original event');
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await page.getByRole('button', { name: /^Overnight task,/ }).press('Enter');
+    assert.equal(await page.locator('#scheduleDate').inputValue(), '2026-09-06', 'continuation opens its original task schedule');
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await page.getByRole('button', { name: 'Fixture dashboard', exact: true }).click();
+    await page.getByRole('button', { name: 'Next day', exact: true }).click();
+    const nightEvent = page.getByRole('button', { name: /^Overnight event,/ });
+    assert.equal(await nightEvent.count(), 1);
+    assert.equal(await nightEvent.evaluate(element => element.style.top), '0px', 'overnight continuation begins at midnight');
+    await page.getByRole('button', { name: 'Fixture month', exact: true }).click();
+    const monday = page.getByRole('button', { name: 'Select Monday, September 7, 2026', exact: true }).locator('../..');
+    assert.equal(await monday.getByRole('button', { name: 'Edit event Overnight event', exact: true }).count(), 1);
+    // Optimistic gestures must disclose failed saves, and only confirm durable success.
+    await page.reload();
+    await page.evaluate(() => window.calendarFixture.addPersistenceTask());
+    await page.getByRole('button', { name: 'Fixture schedule', exact: true }).click();
+    await page.evaluate(() => window.calendarFixture.setPersistenceResult('task', false));
+    await page.getByRole('button', { name: 'Move Save confirmation task to untimed', exact: true }).press('Enter');
+    await page.getByText('Schedule change is not saved yet', { exact: true }).waitFor();
+    assert.equal(await page.getByText('Save confirmation task moved to untimed', { exact: true }).count(), 0);
+    await page.reload();
+    await page.getByRole('button', { name: 'Fixture schedule', exact: true }).click();
+    await page.getByRole('button', { name: 'Move Save confirmation task to untimed', exact: true }).press('Enter');
+    await page.getByText('Save confirmation task moved to untimed', { exact: true }).waitFor();
+    await page.reload();
+    const durableTaskState = await page.evaluate(() => window.calendarFixture.state());
+    const durableTask = durableTaskState.tasks.find(task => task.title === 'Save confirmation task');
+    assert.equal(durableTaskState.entries[durableTask.id].startAt, null);
+    await page.getByRole('button', { name: 'Fixture schedule', exact: true }).click();
+    const eventBeforeFailedResize = (await page.evaluate(() => window.calendarFixture.state().events)).find(event => event.id === 'practice');
+    await page.evaluate(() => window.calendarFixture.setPersistenceResult('event', false));
+    await page.getByRole('button', { name: /^Resize Weekend practice\./ }).first().press('ArrowDown');
+    await page.getByText('Event change is not saved yet', { exact: true }).waitFor();
+    assert.equal(await page.getByText('Weekend practice updated', { exact: true }).count(), 0);
+    await page.reload();
+    assert.deepEqual((await page.evaluate(() => window.calendarFixture.state().events)).find(event => event.id === 'practice'), eventBeforeFailedResize);
+    // A denied legacy browser write cannot mutate the shown event or claim success.
+    const legacyRaw = JSON.stringify([{ id: 'storage-denied', title: 'Legacy storage test', date: '2026-09-06', time: '05:00', endTime: '06:00' }]);
+    await page.evaluate(raw => {
+      const key = 'orderly-calendar-events-v2:calendar-ui-owner';
+      localStorage.setItem(key, raw);
+      const originalSet = Storage.prototype.setItem;
+      Storage.prototype.setItem = function (name, value) {
+        if (name === key) throw new DOMException('Synthetic storage denied', 'QuotaExceededError');
+        return originalSet.call(this, name, value);
+      };
+      window.dispatchEvent(new CustomEvent('orderly-calendar-events-changed', { detail: { userId: 'calendar-ui-owner' } }));
+    }, legacyRaw);
+    await page.getByRole('button', { name: 'Fixture schedule', exact: true }).click();
+    const legacyButton = page.getByRole('button', { name: /^Legacy storage test,/ });
+    const originalLabel = await legacyButton.getAttribute('aria-label');
+    await page.getByRole('button', { name: /^Resize Legacy storage test\./ }).press('ArrowDown');
+    await page.getByText('That calendar event could not be updated', { exact: true }).waitFor();
+    assert.equal(await legacyButton.getAttribute('aria-label'), originalLabel);
+    assert.equal(await page.getByText('Legacy storage test updated', { exact: true }).count(), 0);
+    // Saving through the editor migrates to the server-backed store. Cleanup
+    // failure keeps that successful edit plus the browser backup, without duplicates.
+    await page.clock.runFor(300); // Respect the grid's deliberate post-resize click guard.
+    await legacyButton.click();
+    await page.locator('#title').fill('Saved legacy event');
+    await page.getByRole('button', { name: 'Update Event', exact: true }).click();
+    await page.getByRole('dialog').waitFor({ state: 'hidden' });
+    await page.getByText('The event was saved, but its old browser copy could not be removed. The backup has been kept.', { exact: true }).waitFor();
+    assert.equal(await page.getByRole('button', { name: /^Saved legacy event,/ }).count(), 1);
+    assert.equal(await legacyButton.count(), 0);
+    assert.equal(await page.evaluate(() => localStorage.getItem('orderly-calendar-events-v2:calendar-ui-owner')), legacyRaw);
+    await page.reload();
+    await page.getByRole('button', { name: 'Fixture schedule', exact: true }).click();
+    assert.equal(await page.getByRole('button', { name: /^Saved legacy event,/ }).count(), 1);
+    assert.equal(await page.getByRole('button', { name: /^Legacy storage test,/ }).count(), 0);
+    await page.getByRole('button', { name: /^Resize Saved legacy event\./ }).press('ArrowDown');
+    await page.getByText('Saved legacy event updated', { exact: true }).waitFor();
+    assert.ok((await page.evaluate(() => window.calendarFixture.state().events)).find(event => event.id === 'calendar-storage-denied').occurrenceOverrides['2026-09-06'].endTime > '06:00', 'migrated event gestures save through the durable planner store');
     assert.deepEqual(errors, []);
   } finally {
     await browser?.close();

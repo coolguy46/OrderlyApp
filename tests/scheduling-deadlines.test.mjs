@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { after, test } from 'node:test';
 import { createRequire } from 'node:module';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
@@ -21,9 +21,22 @@ const runtimeSources = [
   'lib/schedule/commands.ts',
 ];
 
-for (const relativePath of runtimeSources) {
+const compiled = new Set();
+async function compileRuntime(relativePath) {
+  if (compiled.has(relativePath)) return;
+  compiled.add(relativePath);
   const sourcePath = join(projectRoot, relativePath);
-  const outputPath = join(buildRoot, relativePath.replace(/\.ts$/, '.js'));
+  const outputPath = join(buildRoot, relativePath.replace(/\.tsx?$/, '.js'));
+  if (relativePath === 'lib/supabase/client.ts') {
+    // Only the remote transport is replaced. Store, persistence, deadline
+    // logic, and security logging remain the real application modules.
+    await mkdir(dirname(outputPath), { recursive: true });
+    await writeFile(outputPath, `exports.supabase = { rpc: async (name, parameters) => {
+      if (name !== 'replace_planner_snapshot') throw new Error('Unexpected fixture RPC ' + name);
+      return { data: parameters.p_expected_revision + 1, error: null };
+    } };`);
+    return;
+  }
   const source = await readFile(sourcePath, 'utf8');
   const transpiled = ts.transpileModule(source, {
     fileName: sourcePath,
@@ -38,15 +51,19 @@ for (const relativePath of runtimeSources) {
   const errors = (transpiled.diagnostics || [])
     .filter(diagnostic => diagnostic.category === ts.DiagnosticCategory.Error);
   assert.equal(errors.length, 0, errors.map(diagnostic => diagnostic.messageText).join('\n'));
-  const output = relativePath === 'lib/schedule/commands.ts'
-    ? transpiled.outputText.replace(
-      'require("@/lib/planner/adapters")',
-      'require("../planner/adapters")',
-    )
-    : transpiled.outputText;
+  const dependencies = [];
+  const output = transpiled.outputText.replace(/require\("([^"\n]+)"\)/g, (match, specifier) => {
+    if (!specifier.startsWith('.') && !specifier.startsWith('@/')) return match;
+    const dependency = specifier.startsWith('@/') ? specifier.slice(2) : relative(projectRoot, resolve(dirname(sourcePath), specifier));
+    const sourceDependency = /\.tsx?$/.test(dependency) ? dependency : `${dependency}.ts`;
+    dependencies.push(sourceDependency);
+    return `require(${JSON.stringify(join(buildRoot, sourceDependency.replace(/\.tsx?$/, '.js')))})`;
+  });
   await mkdir(dirname(outputPath), { recursive: true });
   await writeFile(outputPath, output);
+  for (const dependency of dependencies) await compileRuntime(dependency);
 }
+for (const relativePath of runtimeSources) await compileRuntime(relativePath);
 
 const compiledRequire = createRequire(join(buildRoot, 'runtime.cjs'));
 const memoryStorage = new Map();

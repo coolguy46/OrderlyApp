@@ -21,6 +21,7 @@ import {
   Undo2,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { confirmCalendarPersistence } from '@/lib/schedule/confirm-calendar-persistence';
 import { useAppStore } from '@/lib/store';
 import {
   readStoredCalendarEvents,
@@ -32,9 +33,9 @@ import {
 import { useStoredCalendarEvents } from '@/lib/planner/use-stored-calendar-events';
 import { shiftCalendarWeek } from '@/lib/schedule/calendar-navigation';
 import {
-  buildCommitmentOccurrences,
   withCommitmentOccurrenceOverride,
 } from '@/lib/planner/commitments';
+import { buildVisibleScheduleOccurrences, visibleCommitmentOccurrences } from '@/lib/schedule/visible-intervals';
 import { usePlannerStore } from '@/lib/planner/store';
 import { getDefaultPlannerSettings, type PlannerSettings, type RecurringCommitmentInput } from '@/lib/planner/types';
 import {
@@ -57,7 +58,6 @@ import {
   type ScheduleCommandPreview,
 } from '@/lib/schedule/commands';
 import {
-  addLocalDays,
   buildScheduleOccurrences,
   isLocalDate,
   localDateFromIso,
@@ -75,6 +75,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { cn } from '@/lib/utils';
 import { WeekTimeGrid, type PlannerBlockView } from '@/components/planner';
 import type { ConversationRequest, ConversationResult } from '@/lib/planner/conversation';
+import { isConfirmedConversationRejection } from '@/lib/planner/conversation-response';
 import { AssistantChat } from '@/components/planner/assistant/AssistantChat';
 import { TaskForm } from '@/components/tasks/TaskForm';
 import { TaskCalendar, type TaskCalendarMode } from '@/components/calendar/TaskCalendar';
@@ -360,22 +361,17 @@ function calendarRenderData(
   startDate: LocalDate,
   endDate: LocalDate,
   timeZone: string,
+  savedCommitments: readonly RecurringCommitmentInput[],
 ): CalendarRenderData {
   const blocks: PlannerBlockView[] = [];
   const busy: ScheduleCommandBusyInterval[] = [];
   const eventById = new Map(events.map(event => [event.id, event]));
-  for (const commitment of storedEventsToCommitments(events, timeZone)) {
+  for (const commitment of storedEventsToCommitments(events, timeZone, savedCommitments)) {
     const eventId = commitment.id.slice('calendar-'.length);
     const event = eventById.get(eventId);
     if (!event) continue;
-    for (const occurrence of buildCommitmentOccurrences(commitment, startDate, endDate)) {
-      const startAt = localDateTimeToIso(occurrence.date, `${occurrence.startTime}:00`, timeZone);
-      const intervalEndDate = occurrence.endTime > occurrence.startTime
-        ? occurrence.date
-        : addLocalDays(occurrence.date, 1);
-      const endAt = localDateTimeToIso(intervalEndDate, `${occurrence.endTime}:00`, timeZone);
-      if (!endAt) continue;
-      if (!startAt) continue;
+    for (const occurrence of visibleCommitmentOccurrences(commitment, startDate, endDate, timeZone)) {
+      const { startAt, endAt } = occurrence;
       const id = occurrence.id;
       busy.push({ id, title: occurrence.title, startAt, endAt });
       blocks.push({
@@ -407,14 +403,8 @@ function commitmentRenderData(
   const blocks: PlannerBlockView[] = [];
   const busy: ScheduleCommandBusyInterval[] = [];
   for (const commitment of commitments) {
-    const commitmentTimeZone = commitment.timeZone || timeZone;
-    for (const occurrence of buildCommitmentOccurrences(commitment, startDate, endDate)) {
-      const startAt = localDateTimeToIso(occurrence.date, `${occurrence.startTime}:00`, commitmentTimeZone);
-      const endDateForInterval = occurrence.endTime > occurrence.startTime
-        ? occurrence.date
-        : addLocalDays(occurrence.date, 1);
-      const endAt = localDateTimeToIso(endDateForInterval, `${occurrence.endTime}:00`, commitmentTimeZone);
-      if (!startAt || !endAt) continue;
+    for (const occurrence of visibleCommitmentOccurrences(commitment, startDate, endDate, timeZone)) {
+      const { startAt, endAt } = occurrence;
       const id = occurrence.id;
       const school = commitment.kind === 'school';
       busy.push({
@@ -813,7 +803,7 @@ export function Planner() {
   const pendingTasks = useMemo(() => tasks.filter(task => task.status !== 'completed'), [tasks]);
   const weekStartDate = localDate(weekStart);
   const weekEndDate = localDate(addDays(weekStart, 6));
-  const occurrences = useMemo(() => buildScheduleOccurrences({
+  const occurrences = useMemo(() => buildVisibleScheduleOccurrences({
     tasks,
     entries,
     subjects,
@@ -843,12 +833,12 @@ export function Planner() {
     },
   }), [commandEndDate, commandStartDate, entries, plannerSettings.schoolDays, plannerSettings.schoolHomeTime, plannerSettings.schoolStartTime, subjects, tasks, timeZone]);
   const visibleEvents = useMemo(
-    () => calendarRenderData(storedEvents, weekStartDate, weekEndDate, timeZone),
-    [storedEvents, timeZone, weekEndDate, weekStartDate],
+    () => calendarRenderData(storedEvents, weekStartDate, weekEndDate, timeZone, commitments),
+    [commitments, storedEvents, timeZone, weekEndDate, weekStartDate],
   );
   const commandEvents = useMemo(
-    () => calendarRenderData(storedEvents, commandStartDate, commandEndDate, timeZone),
-    [commandEndDate, commandStartDate, storedEvents, timeZone],
+    () => calendarRenderData(storedEvents, commandStartDate, commandEndDate, timeZone, commitments),
+    [commandEndDate, commandStartDate, commitments, storedEvents, timeZone],
   );
   const visibleCommitments = useMemo(
     () => commitmentRenderData(commitments, weekStartDate, weekEndDate, timeZone),
@@ -875,7 +865,7 @@ export function Planner() {
   ], [occurrences.timed, previewBlocks, previewTaskIds, visibleCommitments.blocks, visibleEvents.blocks]);
   const commitmentById = useMemo(() => new Map([
     ...commitments,
-    ...storedEventsToCommitments(storedEvents, timeZone),
+    ...storedEventsToCommitments(storedEvents, timeZone, commitments),
   ].map(commitment => [commitment.id, commitment])), [commitments, storedEvents, timeZone]);
   const occurrenceById = useMemo(() => new Map(
     [...occurrences.timed, ...occurrences.untimed]
@@ -1114,7 +1104,7 @@ export function Planner() {
       }
       body = { requestId: crypto.randomUUID(), conversationId, timeZone,
         selectedDate: localDate(selectedDate),
-        localEvents: storedEventsToCommitments(storedEvents, timeZone),
+        localEvents: storedEventsToCommitments(storedEvents, timeZone, commitments),
         messages: [...messages, userMessage].slice(-CHAT_CONTEXT_LIMIT).map(({role, content}) => ({role, content})) };
       setMessages(previous => [...previous, userMessage].slice(-CHAT_DISPLAY_LIMIT));
       setCommand('');
@@ -1139,7 +1129,7 @@ export function Planner() {
       const result = await response.json() as ConversationResult & { retryable?: boolean };
       if (!isCurrent()) return;
       if (!response.ok) {
-        if (!result.retryable && response.status !== 409) {
+        if (isConfirmedConversationRejection(result)) {
           retryRequestRef.current = null;
           setRetryPending(false);
           try { window.sessionStorage.removeItem(`orderly:pending-chat:${owner}`); } catch {}
@@ -1180,7 +1170,7 @@ export function Planner() {
       clearTimeout(timeout);
       if (isCurrent()) { chatSendLockRef.current = false; setIsThinking(false); setApplying(false); chatAbortRef.current = null; }
     }
-  }, [chatOwnerUserId, command, storedEvents, finalizeTaskCreations, messages, selectedTaskId, selectedDate, selectDay, timeZone, userId, waitForPlannerPersistence, waitForSchedulePersistence]);
+  }, [chatOwnerUserId, command, commitments, storedEvents, finalizeTaskCreations, messages, selectedTaskId, selectedDate, selectDay, timeZone, userId, waitForPlannerPersistence, waitForSchedulePersistence]);
 
   const undoChatChange = useCallback(async () => {
     if (!lastChatReceipt || lastChatReceipt.userId !== userId || chatSendLockRef.current) return;
@@ -1503,8 +1493,8 @@ export function Planner() {
             readStoredCalendarEvents(operationUserId),
             snapshot.storedEventSnapshots || [],
           );
-          writeStoredCalendarEvents(operationUserId, restoredEvents);
-          if (operationIsCurrent()) setStoredEvents(restoredEvents);
+          storedEventRestoreFailed = !writeStoredCalendarEvents(operationUserId, restoredEvents);
+          if (!storedEventRestoreFailed && operationIsCurrent()) setStoredEvents(restoredEvents);
         } catch {
           storedEventRestoreFailed = true;
         }
@@ -1569,7 +1559,21 @@ export function Planner() {
     }
   }, [deleteTask, finalizeTaskCreations, removeCommitment, replaceUserSchedules, setStoredEvents, undoState, upsertCommitment, userId]);
 
-  const persistCommitmentOccurrence = useCallback((
+  const confirmTaskChange = useCallback(async (taskId: string, successMessage?: string) => {
+    if (!userId) return false;
+    const result = await confirmCalendarPersistence(
+      () => waitForSchedulePersistence(userId, [taskId]),
+      () => useAppStore.getState().user?.id === userId,
+    );
+    if (result === 'stale') return false;
+    if (result === 'pending') toast.error('Schedule change is not saved yet', {
+      description: 'It is still pending on this device. Check your connection and retry before relying on it elsewhere.',
+    });
+    else if (successMessage) toast.success(successMessage);
+    return result === 'saved';
+  }, [userId, waitForSchedulePersistence]);
+
+  const persistCommitmentOccurrence = useCallback(async (
     block: PlannerBlockView,
     nextStart: Date,
     nextEnd: Date,
@@ -1598,13 +1602,11 @@ export function Planner() {
       const nextEvents = storedEvents.map(event => event.id === block.calendarEventId
         ? { ...event, occurrenceOverrides: updated.occurrenceOverrides }
         : event);
-      try {
-        writeStoredCalendarEvents(userId, nextEvents);
-        setStoredEvents(nextEvents);
-      } catch {
+      if (!writeStoredCalendarEvents(userId, nextEvents)) {
         toast.error('That calendar event could not be updated');
         return false;
       }
+      setStoredEvents(nextEvents);
       installUndoState({
         userId,
         entries: currentScheduleEntries(userId),
@@ -1622,10 +1624,22 @@ export function Planner() {
         label: undoLabel,
       });
     }
+    if (!block.calendarEventId) {
+      const result = await confirmCalendarPersistence(
+        () => waitForPlannerPersistence(userId),
+        () => useAppStore.getState().user?.id === userId,
+      );
+      if (result !== 'saved') {
+        if (result === 'pending') toast.error('Event change is not saved yet', {
+          description: 'It is still pending on this device. Check your connection and retry before relying on it elsewhere.',
+        });
+        return false;
+      }
+    }
     return true;
-  }, [commitmentById, installUndoState, setStoredEvents, storedEvents, timeZone, upsertCommitment, userId]);
+  }, [commitmentById, installUndoState, setStoredEvents, storedEvents, timeZone, upsertCommitment, userId, waitForPlannerPersistence]);
 
-  const handleMove = useCallback((block: PlannerBlockView, nextStart: Date, nextEnd: Date) => {
+  const handleMove = useCallback(async (block: PlannerBlockView, nextStart: Date, nextEnd: Date) => {
     if (!userId || applying) return;
     const conflict = conflictingBlock(blocks, block.id, nextStart, nextEnd);
     if (conflict) {
@@ -1634,7 +1648,7 @@ export function Planner() {
     }
     const occurrence = occurrenceById.get(block.id);
     if (!occurrence) {
-      if (persistCommitmentOccurrence(block, nextStart, nextEnd, `Move “${block.title}”`)) {
+      if (await persistCommitmentOccurrence(block, nextStart, nextEnd, `Move “${block.title}”`)) {
         toast.success(`${block.title} moved`);
       }
       return;
@@ -1661,9 +1675,10 @@ export function Planner() {
       moveOccurrence(userId, task.id, occurrence.recurrenceSourceDate, nextDate, nextStart.toISOString());
     }
     installUndoState({ userId, entries: previousEntries, createdTaskIds: [], label: `Move “${task.title}”` });
-  }, [applying, blocks, entries, installUndoState, moveOccurrence, occurrenceById, persistCommitmentOccurrence, timeZone, upsertTaskSchedule, userId]);
+    await confirmTaskChange(task.id);
+  }, [confirmTaskChange, applying, blocks, entries, installUndoState, moveOccurrence, occurrenceById, persistCommitmentOccurrence, timeZone, upsertTaskSchedule, userId]);
 
-  const handleResize = useCallback((block: PlannerBlockView, nextStart: Date, nextEnd: Date) => {
+  const handleResize = useCallback(async (block: PlannerBlockView, nextStart: Date, nextEnd: Date) => {
     if (!userId || applying) return;
     const conflict = conflictingBlock(blocks, block.id, nextStart, nextEnd);
     if (conflict) {
@@ -1672,7 +1687,7 @@ export function Planner() {
     }
     const occurrence = occurrenceById.get(block.id);
     if (!occurrence) {
-      if (persistCommitmentOccurrence(block, nextStart, nextEnd, `Resize “${block.title}”`)) {
+      if (await persistCommitmentOccurrence(block, nextStart, nextEnd, `Resize “${block.title}”`)) {
         toast.success(`${block.title} updated`);
       }
       return;
@@ -1696,9 +1711,10 @@ export function Planner() {
       resizeOccurrence(userId, task.id, occurrence.recurrenceSourceDate, durationSeconds);
     }
     installUndoState({ userId, entries: previousEntries, createdTaskIds: [], label: `Resize “${task.title}”` });
-  }, [applying, blocks, entries, installUndoState, occurrenceById, persistCommitmentOccurrence, resizeOccurrence, timeZone, upsertTaskSchedule, userId]);
+    await confirmTaskChange(task.id);
+  }, [confirmTaskChange, applying, blocks, entries, installUndoState, occurrenceById, persistCommitmentOccurrence, resizeOccurrence, timeZone, upsertTaskSchedule, userId]);
 
-  const handleScheduleUntimed = useCallback((
+  const handleScheduleUntimed = useCallback(async (
     item: UntimedScheduleItem,
     nextStart: Date,
     nextEnd: Date,
@@ -1747,10 +1763,10 @@ export function Planner() {
       });
     }
     installUndoState({ userId, entries: previousEntries, createdTaskIds: [], label: `Schedule “${occurrence.title}”` });
-    toast.success(`${occurrence.title} scheduled`);
-  }, [applying, blocks, entries, installUndoState, occurrenceById, setOccurrenceOverride, timeZone, upsertTaskSchedule, userId]);
+    await confirmTaskChange(occurrence.taskId, `${occurrence.title} scheduled`);
+  }, [confirmTaskChange, applying, blocks, entries, installUndoState, occurrenceById, setOccurrenceOverride, timeZone, upsertTaskSchedule, userId]);
 
-  const handleMoveToUntimed = useCallback((block: PlannerBlockView, targetDate?: string) => {
+  const handleMoveToUntimed = useCallback(async (block: PlannerBlockView, targetDate?: string) => {
     if (!userId || applying) return;
     const occurrence = occurrenceById.get(block.id);
     if (!occurrence?.startAt) return;
@@ -1783,8 +1799,8 @@ export function Planner() {
       });
     }
     installUndoState({ userId, entries: previousEntries, createdTaskIds: [], label: `Move “${occurrence.title}” to untimed` });
-    toast.success(`${occurrence.title} moved to untimed`);
-  }, [applying, entries, installUndoState, occurrenceById, setOccurrenceOverride, timeZone, upsertTaskSchedule, userId]);
+    await confirmTaskChange(occurrence.taskId, `${occurrence.title} moved to untimed`);
+  }, [confirmTaskChange, applying, entries, installUndoState, occurrenceById, setOccurrenceOverride, timeZone, upsertTaskSchedule, userId]);
 
   const startNewChat = useCallback(() => {
     if (retryRequestRef.current) { toast.info('Check the last request before starting a new chat.'); return; }
@@ -2101,15 +2117,11 @@ export function Planner() {
         initialDurationSeconds={creationSlot?.durationSeconds || null}
         onClose={closeTaskForm}
         onSaved={() => {
-          if (!editingCommitment?.id.startsWith('calendar-')) return;
+          if (!userId || useAppStore.getState().user?.id !== userId || !editingCommitment?.id.startsWith('calendar-')) return;
           const legacyId = editingCommitment.id.slice('calendar-'.length);
           const nextEvents = storedEvents.filter(event => event.id !== legacyId);
-          try {
-            writeStoredCalendarEvents(userId, nextEvents);
-            setStoredEvents(nextEvents);
-          } catch {
-            toast.error('The calendar event was saved, but its old copy could not be removed');
-          }
+          if (writeStoredCalendarEvents(userId, nextEvents)) setStoredEvents(nextEvents);
+          else toast.warning('The event was saved, but its old browser copy could not be removed. The backup has been kept.');
         }}
       />
     </div>

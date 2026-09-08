@@ -116,7 +116,7 @@ export const TUTORIAL_SECTIONS: readonly TutorialSection[] = [
     id: 'exams', label: 'Exams', title: 'Prepare before the countdown runs out',
     description: 'Keep exam details and preparation progress together.',
     steps: [
-      'Choose Add Exam and enter the title, subject, date, time, and location as needed.',
+      'Choose Add Exam and enter the title, subject, date, and location as needed. Manual exams use an all-day date; imported Canvas exams retain their exact deadline.',
       'Review upcoming exams and update preparation progress as you study.',
       'Use tasks for specific revision work and schedule those sessions separately from the exam itself.',
     ],

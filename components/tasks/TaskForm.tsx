@@ -51,6 +51,7 @@ import type { CommitmentKind, RecurringCommitmentInput } from '@/lib/planner/typ
 import { toast } from 'sonner';
 import {
   DEFAULT_SCHEDULE_DURATION_SECONDS,
+  addLocalDays,
   formatDurationInput,
   localDateFromIso,
   localDateTimeToIso,
@@ -442,6 +443,11 @@ export function TaskForm({
     const eventWeekday = weekdayForLocalDate(eventDate);
     if (eventWeekday === null || !localDateTimeToIso(eventDate, `${eventStartTime}:00`, eventTimeZone)) {
       setScheduleError('That event date or start time is not valid.');
+      return;
+    }
+    const eventEndDate = eventEndTime > eventStartTime ? eventDate : addLocalDays(eventDate, 1);
+    if (!localDateTimeToIso(eventEndDate, `${eventEndTime}:00`, eventTimeZone)) {
+      setScheduleError('That event end time is not valid on the selected date. Choose a time outside the daylight-saving clock change.');
       return;
     }
 

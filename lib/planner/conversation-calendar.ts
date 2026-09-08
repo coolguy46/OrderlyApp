@@ -44,19 +44,30 @@ function commitments(calendar: ConversationCalendar): RecurringCommitmentInput[]
 export function calendarIntervals(calendar: ConversationCalendar, startDate: string, endDate: string): Interval[] {
   validateCalendarRange({ from: startDate, through: endDate });
   const zone = calendar.settings.timeZone;
+  const rangeStart = localDateTimeToIso(startDate, '00:00:00', zone)!;
+  const rangeEnd = localDateTimeToIso(addLocalDays(endDate, 1), '00:00:00', zone)!;
+  const fromTime = Date.parse(rangeStart), throughTime = Date.parse(rangeEnd);
+  const overlapsRange = (item: { startAt: string; endAt: string }) => Date.parse(item.startAt) < throughTime && Date.parse(item.endAt) > fromTime;
   const tasks = calendar.snapshot.tasks.filter(task => task.status !== 'completed');
-  const occurrences = buildScheduleOccurrences({ tasks, entries: scheduleEntriesFromTasks(tasks, calendar.userId), timeZone: zone, startDate, endDate });
+  // A 24-hour session can span two previous civil dates across a short DST day.
+  const occurrences = buildScheduleOccurrences({ tasks, entries: scheduleEntriesFromTasks(tasks, calendar.userId), timeZone: zone, startDate: addLocalDays(startDate, -2), endDate });
   const taskIntervals = occurrences.timed.flatMap(item => item.startAt && item.endAt ? [{ id: item.id, owner: `task:${item.taskId}`, title: item.title, startAt: item.startAt, endAt: item.endAt, sourceDate: item.recurrenceSourceDate }] : []);
-  const events = commitments(calendar).flatMap(event => buildCommitmentOccurrences(event, startDate, endDate).flatMap(item => {
+  const events = commitments(calendar).flatMap(event => {
     const eventZone = event.timeZone || zone;
-    const startAt = localDateTimeToIso(item.date, `${item.startTime}:00`, eventZone);
-    const endDate = item.endTime <= item.startTime ? addLocalDays(item.date, 1) : item.date;
-    const endAt = localDateTimeToIso(endDate, `${item.endTime}:00`, eventZone);
-    return startAt && endAt ? [{ id: item.id, owner: `event:${event.id}`, title: item.title, startAt, endAt, sourceDate: item.sourceDate }] : [];
-  }));
-  const intervals = [...taskIntervals, ...events, ...(calendar.localBusy || []).filter(item => {
-    return localDateFromIso(item.startAt, zone)! <= endDate && localDateFromIso(item.endAt, zone)! >= startDate;
-  }).map(item => ({ ...item, owner: `event:local-${item.id}`, sourceDate: localDateFromIso(item.startAt, zone)! }))];
+    // Occurrences are anchored in the event's timezone, but the requested
+    // range is in the viewer's. Include the preceding source day so an
+    // overnight event is not reported as free time after midnight.
+    const sourceStart = addLocalDays(localDateFromIso(rangeStart, eventZone)!, -1);
+    const sourceEnd = localDateFromIso(new Date(Date.parse(rangeEnd) - 1).toISOString(), eventZone)!;
+    return buildCommitmentOccurrences(event, sourceStart, sourceEnd).flatMap(item => {
+      const startAt = localDateTimeToIso(item.date, `${item.startTime}:00`, eventZone);
+      const endDate = item.endTime <= item.startTime ? addLocalDays(item.date, 1) : item.date;
+      const endAt = localDateTimeToIso(endDate, `${item.endTime}:00`, eventZone);
+      return startAt && endAt ? [{ id: item.id, owner: `event:${event.id}`, title: item.title, startAt, endAt, sourceDate: item.sourceDate }] : [];
+    });
+  });
+  const intervals = [...taskIntervals, ...events, ...(calendar.localBusy || [])
+    .map(item => ({ ...item, owner: `event:local-${item.id}`, sourceDate: localDateFromIso(item.startAt, zone)! }))].filter(overlapsRange);
   if (intervals.length > 10000) throw new CalendarCapacityError('This date range contains more than 10,000 calendar occurrences. Choose a shorter range; no partial changes were saved.');
   return intervals;
 }
@@ -305,12 +316,19 @@ export function compileConversation(intent: ConversationIntent, calendar: Conver
       }
       writes.push({ entity: 'task', op: 'put', id, data });
     } else {
-      const commitment = scheduleEventActionToCommitment({ type: 'create_event', title, description, kind: event?.kind || 'personal', schedule }, { id, timeZone: zone, updatedAt: calendar.now });
+      // Metadata edits are not new events. Rebuilding one from creation
+      // defaults can change its timezone and silently restore cancelled dates.
+      const commitment = event && !editingOccurrence && schedule === previous
+        ? { ...event, title, description, updatedAt: calendar.now }
+        : scheduleEventActionToCommitment({ type: 'create_event', title, description, kind: event?.kind || 'personal', schedule }, { id, timeZone: zone, updatedAt: calendar.now });
       if (!commitment) throw new Error('An event needs a valid start, duration, and supported repeat rule.');
       const updated = editingOccurrence && event
         ? withCommitmentOccurrenceOverride(event, op.occurrenceDate!, { scheduledDate: schedule.scheduledDate, startTime: commitment.startTime, endTime: commitment.endTime,
           ...(op.title !== undefined ? { title } : {}), ...(op.description !== undefined ? { description } : {}) })
-        : { ...event, ...commitment };
+        : { ...event, ...commitment, ...(event ? {
+          location: event.location, color: event.color, enabled: event.enabled,
+          occurrenceOverrides: event.occurrenceOverrides,
+        } : {}) };
       writes.push({ entity: 'event', op: 'put', id, data: recurringCommitmentInsert(calendar.userId, updated) as Record<string, unknown> });
     }
     if (op.action === 'convert') writes.push({ entity: task ? 'task' : 'event', op: 'delete', id: op.id! });
@@ -326,13 +344,17 @@ export function compileConversation(intent: ConversationIntent, calendar: Conver
     if (startDate < today) throw new Error('That planning window starts in the past. Choose a start date from today onward; the requested window was not shifted automatically.');
     const rangeEnd = calendarRange(startDate, intent.plan.horizonDays).through;
     const entries = scheduleEntriesFromTasks(working.snapshot.tasks, calendar.userId);
-    const occurrences = buildScheduleOccurrences({ tasks: working.snapshot.tasks.filter(t => t.status !== 'completed'), entries, timeZone: zone, startDate, endDate: rangeEnd });
+    const nextDay = addLocalDays(rangeEnd, 1);
+    const occurrences = buildScheduleOccurrences({ tasks: working.snapshot.tasks.filter(t => t.status !== 'completed'), entries, timeZone: zone, startDate: addLocalDays(startDate, -2), endDate: nextDay });
     // Fixed times in this same request are already reserved. A broad replan
     // must not select and relocate those items again; keep their occurrences
     // as busy intervals while planning the remaining work around them.
     const fixedTaskIds = new Set(items.filter(item => item.entity === 'task').map(item => item.id));
     const preview = buildAssistantTaskPlan({ request: intent.plan, now: calendar.now, timeZone: zone, tasks: working.snapshot.tasks.filter(task => !fixedTaskIds.has(task.id)), entries,
-      occurrences: [...occurrences.timed, ...occurrences.untimed], busy: calendarIntervals(working, startDate, rangeEnd).filter(i => i.owner.startsWith('event:')), settings: calendar.settings });
+      occurrences: [...occurrences.timed, ...occurrences.untimed], busy: [
+        ...calendarIntervals(working, startDate, rangeEnd),
+        ...calendarIntervals(working, nextDay, nextDay),
+      ].filter(i => i.owner.startsWith('event:')), settings: calendar.settings });
     if (preview.status !== 'ready') throw new Error(`${preview.summary} ${preview.assumptions.join(' ')} Suggest a specific alternative without dropping the constraints.`);
     // Do not save an incomplete mixed request as if all requirements succeeded.
     if (preview.assumptions.some(a => a.startsWith('I scheduled only the work that fit.'))) throw new Error(preview.assumptions.filter(a => a.startsWith('I scheduled only')).join(' ') + ' Ask whether to extend the planning window or reduce the work; no partial changes were saved.');
