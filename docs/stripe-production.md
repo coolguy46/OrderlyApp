@@ -10,7 +10,7 @@
 - Price tax behavior is unspecified; product tax code is unset. No tax registration or collection was changed.
 - Live public application uses Supabase project `xsisgvqsvsbpvvvzucqx`. Do not restore the unrelated paused project into it.
 - Local `.env.local` contains a sandbox secret. The owner saved a live secret into Git-ignored, mode-600 `.env.stripe-live.local`; it was verified against the exact live account without printing it. The worksheet now includes the live portal ID. It is not automatically loaded by Next.js. A live webhook signing secret and production environment installation remain outstanding.
-- No authenticated Vercel CLI, linked Vercel checkout, or Supabase management credential was found in the checked standard locations. Browser dashboard access timed out. No production SQL or deployment was performed.
+- No authenticated Vercel CLI, linked Vercel checkout, or Supabase management credential was found in the checked standard locations. Both Chrome dashboard connections timed out. No production SQL or production secret installation was performed; source deployment succeeded through the existing GitHub integration, as recorded below.
 
 ## Implemented locally
 
@@ -64,3 +64,11 @@ Reviewed migration SHA-256: `8be3cc17c52ebf5bc6fe1127a0c809eb2e64a949b2a4c351a66
 The database tests use PGlite and fictional users; UI tests block external requests. `scripts/verify-stripe-sandbox.mjs` also passed against the actual verified sandbox: real Checkout accepted the service's seven-day/card-required parameters, double clicks reused the session, no access was granted before checkout completed, and portal settings read back correctly. Its synthetic checkout was expired and synthetic customer deleted. This was API-only, not a completed hosted payment, delivered webhook, or renewal test.
 
 Production migration, production secret configuration, trial reminders, completed sandbox Checkout/webhook/portal verification, and activation remain outstanding. Do not represent this document or the staged code as a launched paywall.
+
+## Source deployment proof
+
+- Implementation commit `a1a742cba152378e5c5362b26b70cefbf4a6c41b` was pushed to `coolguy46/OrderlyApp` `main`.
+- GitHub reported Vercel deployment success, including the established `orderlyappp` project deployment `F2USCU9LtLUT4n3bRnxnr3FrbP3v`. Existing additional `orderly` and `orderlyapp` project checks also succeeded; no new projects were created.
+- Direct canonical-site verification returned HTTP 200 for `https://www.myorderlyapp.com/api/billing/status`, with exactly `{"enabled":false,"subscriptionRequired":false}`. The updated trial terms and Stripe privacy disclosure were also confirmed on that same site.
+- Therefore the code is deployed, but subscriptions cannot yet be purchased and the AI is not locked. Do not mistake GitHub/Vercel success for billing activation or a successful payment test.
+- Next external step: open the correct Orderly Vercel and Supabase dashboards in the Codex in-app browser and sign in. Never request secrets in chat. Follow the remaining activation sequence above after access and approvals are available.
