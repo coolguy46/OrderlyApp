@@ -28,7 +28,7 @@ test('billing UI: trial checkout in AI-only gate, cancellation, failure recovery
     const bundle = await readFile(join(output, 'bundle.js'));
     server = createServer((req, res) => {
       res.setHeader('Content-Type', req.url === '/bundle.js' ? 'text/javascript' : req.url === '/style.css' ? 'text/css' : 'text/html');
-      res.end(req.url === '/bundle.js' ? bundle : req.url === '/style.css' ? css : '<html class="dark"><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/style.css"></head><body><div id="root"></div><script src="/bundle.js"></script></body></html>');
+      res.end(req.url === '/bundle.js' ? bundle : req.url === '/style.css' ? css : '<html class="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/style.css"></head><body><div id="root"></div><script src="/bundle.js"></script></body></html>');
     });
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
     const origin = `http://127.0.0.1:${server.address().port}`;
@@ -38,11 +38,18 @@ test('billing UI: trial checkout in AI-only gate, cancellation, failure recovery
     page.on('pageerror', error => errors.push(error.message));
     const locked = { enabled: true, sandbox: true, checkoutEnabled: true, subscriptionRequired: true, aiAccess: false, hasSubscription: false, canManage: false, status: 'none', trialEligible: true, trialEndsAt: null, accessEndsAt: null };
     let status = { ...locked }, failStatus = false, checkoutResult = { error: 'Synthetic billing outage. Try again.' };
-    let delayStatus = null;
+    let delayStatus = null, previewAllowed = false, previewFailure = false;
+    let previewUrl = 'https://buy.stripe.com/test_fixture';
     await page.route('**/*', async route => {
       const req = route.request();
+      if (req.url() === 'https://buy.stripe.com/test_fixture') return route.fulfill({ contentType: 'text/html', body: '<p>Synthetic sandbox checkout</p>' });
       if (req.url() === 'https://checkout.stripe.com/c/pay/synthetic') return route.fulfill({ contentType: 'text/html', body: '<p>Synthetic secure checkout</p>' });
       if (!req.url().startsWith(origin + '/')) { outside.push(req.url()); return route.abort(); }
+      if (req.url().endsWith('/api/billing/preview')) return route.fulfill({ status: previewAllowed ? 200 : 403, json: { allowed: previewAllowed, userId: 'billing-test-alex' } });
+      if (req.url().includes('/api/billing/preview/checkout')) {
+        mutations.push({ url: req.url(), body: req.postData() });
+        return route.fulfill({ status: previewFailure ? 403 : 200, json: { sandbox: true, url: previewUrl } });
+      }
       if (req.url().endsWith('/api/billing/status')) {
         const current = structuredClone(status), failed = failStatus, pause = delayStatus;
         if (pause) await pause;
@@ -168,6 +175,67 @@ test('billing UI: trial checkout in AI-only gate, cancellation, failure recovery
     if (process.env.ORDERLY_BILLING_SCREENSHOT) await page.screenshot({ path: process.env.ORDERLY_BILLING_SCREENSHOT, fullPage: true });
     await page.setViewportSize({ width: 1280, height: 900 });
     if (process.env.ORDERLY_BILLING_DESKTOP_SCREENSHOT) await page.screenshot({ path: process.env.ORDERLY_BILLING_DESKTOP_SCREENSHOT, fullPage: true });
+    assert.equal(await page.getByRole('button', { name: 'Preview AI screens' }).count(), 0, 'ordinary accounts have no preview');
+    previewAllowed = true;
+    status = { enabled: false, subscriptionRequired: false };
+    await page.goto(origin + '/planner?gate');
+    const previewButton = page.getByRole('button', { name: 'Preview AI screens' });
+    await previewButton.click();
+    const dialog = page.getByRole('dialog', { name: 'AI screen preview' });
+    const select = dialog.getByRole('combobox', { name: 'Screen to preview' });
+    await dialog.getByText('Test mode · no real charges', { exact: true }).waitFor();
+    await dialog.getByRole('button', { name: 'Start 7-day free trial' }).waitFor();
+    const baselineMutations = mutations.length;
+    await select.selectOption('trial');
+    await dialog.getByText(/Your free trial is active/).waitFor();
+    assert.equal(await dialog.getByRole('textbox', { name: 'Sample assistant composer' }).isDisabled(), true);
+    await dialog.getByRole('button', { name: 'Manage subscription' }).click();
+    await dialog.getByText('Billing settings · simulated', { exact: true }).waitFor();
+    await dialog.getByRole('button', { name: 'Simulate cancellation' }).click();
+    await dialog.getByText(/Trial canceled.*You will not be charged/).waitFor();
+    await select.selectOption('paid');
+    await dialog.getByText(/Subscription active/).waitFor();
+    await dialog.getByRole('button', { name: 'Manage subscription' }).click();
+    await dialog.getByRole('button', { name: 'Simulate cancellation' }).click();
+    await dialog.getByRole('status').filter({ hasText: /Renewal canceled/ }).waitFor();
+    for (const value of ['expired', 'pastDue', 'pending', 'abandoned', 'setup', 'loading', 'error', 'locked']) await select.selectOption(value);
+    assert.equal(mutations.length, baselineMutations, 'simulations never call billing mutations');
+    await page.setViewportSize({ width: 390, height: 844 });
+    assert.ok(await dialog.evaluate(el => el.scrollWidth <= el.clientWidth), 'preview fits mobile width');
+    if (process.env.ORDERLY_PREVIEW_MOBILE_SCREENSHOT) await page.screenshot({ path: process.env.ORDERLY_PREVIEW_MOBILE_SCREENSHOT });
+    await page.setViewportSize({ width: 1280, height: 900 });
+    if (process.env.ORDERLY_PREVIEW_DESKTOP_SCREENSHOT) await page.screenshot({ path: process.env.ORDERLY_PREVIEW_DESKTOP_SCREENSHOT });
+    await page.keyboard.press('Escape');
+    await dialog.waitFor({ state: 'hidden' });
+    assert.equal(await previewButton.evaluate(el => document.activeElement === el), true, 'focus returns to preview trigger');
+    await page.getByRole('textbox', { name: 'Private AI message' }).fill('Keep my draft');
+    await previewButton.click();
+    previewFailure = true;
+    await dialog.getByRole('button', { name: 'Start 7-day free trial' }).click();
+    await dialog.getByRole('alert').filter({ hasText: 'Could not open test checkout' }).waitFor();
+    assert.ok(mutations.at(-1).url.endsWith('/api/billing/preview/checkout?kind=trial'));
+    previewFailure = false; previewUrl = 'https://buy.stripe.com/live_not_allowed';
+    await dialog.getByRole('button', { name: 'Start 7-day free trial' }).click();
+    await dialog.getByRole('alert').filter({ hasText: 'Test checkout address could not be verified' }).waitFor();
+    await page.keyboard.press('Escape');
+    assert.equal(await page.getByRole('textbox', { name: 'Private AI message' }).inputValue(), 'Keep my draft', 'real assistant remains mounted and unchanged');
+    await previewButton.click();
+    previewUrl = 'https://buy.stripe.com/test_fixture';
+    await select.selectOption('expired');
+    await dialog.getByRole('button', { name: 'Subscribe for $4.99/month' }).click();
+    await page.getByText('Synthetic sandbox checkout', { exact: true }).waitFor();
+    assert.ok(mutations.at(-1).url.endsWith('/api/billing/preview/checkout?kind=subscription'));
+    status = { ...locked };
+    await page.goto(origin + '/planner?gate&billingPreviewReturn=1');
+    await previewButton.click();
+    await dialog.getByText(/This return link does not confirm payment/).waitFor();
+    await select.selectOption('paid');
+    assert.equal(await page.getByRole('textbox', { name: 'Private AI message', includeHidden: true }).count(), 0, 'simulated paid state never unlocks real chat');
+    await page.evaluate(() => window.billingFixture.signIn('billing-test-other'));
+    await dialog.waitFor({ state: 'hidden' });
+    assert.equal(await previewButton.count(), 0, 'account switch removes preview');
+    await page.evaluate(() => window.billingFixture.signOut());
+    assert.equal(await previewButton.count(), 0);
     assert.deepEqual(errors, []); assert.deepEqual(outside, []);
   } finally {
     await browser?.close();

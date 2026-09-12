@@ -5,12 +5,14 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { useAppStore } from '@/lib/store';
 import { BillingDetails } from './BillingDetails';
 import { useBilling } from './useBilling';
+import { BillingPreviewControl } from './BillingPreviewControl';
 
 function AccountBillingPanel({ userId, returnState }: { userId: string; returnState: string }) {
   const billing = useBilling(userId, returnState);
   return <Card>
     <CardHeader><CardTitle>Orderly AI</CardTitle><p className="text-muted-foreground text-sm">Your personal planner, connected to your tasks and calendar.</p></CardHeader>
     <CardContent className="space-y-5">
+      <BillingPreviewControl userId={userId} />
       <BillingDetails billing={billing} />
       <p className="border-t border-border pt-4 text-sm text-muted-foreground">Only AI is paid. Tasks, calendars, manual scheduling, Canvas integration, goals, and study tools stay free.</p>
       <Link className="inline-block rounded text-sm font-medium text-primary underline underline-offset-4 focus-visible:outline-2" href="/planner">Back to your assistant</Link>
