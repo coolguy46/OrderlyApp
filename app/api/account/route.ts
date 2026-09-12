@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import { guardMutationRequest } from '@/lib/security/request';
+import { billingServer } from '@/lib/billing/server';
+import { billingFailure } from '@/lib/billing/config';
 import { createClient } from '@supabase/supabase-js';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { hasRecentSessionAuthentication } from '@/lib/auth/recent-auth';
@@ -38,6 +40,12 @@ export async function DELETE(request: Request) {
   const admin = createClient(supabaseUrl, serviceRoleKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
+
+  // Do not delete the owner of a recurring subscription or an open checkout.
+  if (process.env.STRIPE_BILLING_ENABLED === 'true') {
+    try { await (await billingServer()).service.prepareDeletion(user.id); }
+    catch (error) { return billingFailure(error); }
+  }
 
   const { error: enqueueError } = await admin
     .from('account_deletion_requests')

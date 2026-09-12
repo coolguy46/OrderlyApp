@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
+import { requireAssistantSubscription } from '@/lib/billing/server';
 import {
   PLANNER_COMMAND_SYSTEM_PROMPT,
   buildPlannerCommandUserPrompt,
@@ -79,6 +80,8 @@ export async function POST(request: NextRequest) {
   if (!input) return noStoreJson({ error: 'Type a schedule request first.' }, { status: 400 });
 
   const apiKey = process.env.DEEPSEEK_API_KEY;
+  const subscriptionDenied = await requireAssistantSubscription(user.id);
+  if (subscriptionDenied) return subscriptionDenied;
   if (!apiKey || process.env.AI_ASSISTANT_ENABLED === 'false') {
     return noStoreJson({ normalizedCommand: input.prompt, aiUsed: false });
   }

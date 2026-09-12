@@ -28,7 +28,7 @@ export default function PrivacyPolicyPage() {
       <main className="px-5 py-12 sm:px-8 sm:py-20">
         <div className="mx-auto max-w-[760px] [overflow-wrap:anywhere]">
           <h1 className="mb-4 font-display text-4xl font-semibold tracking-[-0.035em] sm:text-5xl">Privacy Policy</h1>
-          <p className="mb-10 border-b border-border pb-8 text-sm text-muted-foreground">Last updated: September 6, 2026</p>
+          <p className="mb-10 border-b border-border pb-8 text-sm text-muted-foreground">Last updated: September 11, 2026</p>
 
           <section className="space-y-9 [&>div:not(:last-child)]:border-b [&>div:not(:last-child)]:border-border/60 [&>div:not(:last-child)]:pb-9">
             <div>
@@ -88,6 +88,22 @@ export default function PrivacyPolicyPage() {
                 directly after application checks; a separate preview approval is not always required.
                 Orderly stores saved action results to support conversation continuity and safe retries,
                 and records request and token usage for service operation and abuse protection.
+              </p>
+            </div>
+
+            <div>
+              <h2 className="mb-3 text-lg font-semibold tracking-tight">Subscription Payments</h2>
+              <p className="text-muted-foreground leading-relaxed">
+                When you start an AI trial or subscription, Stripe collects your payment information in its
+                hosted checkout and customer portal. Orderly does not store your full card number or security
+                code. We send Stripe an internal account identifier and store the customer and checkout
+                identifiers needed to associate billing with your account and safely retry requests.
+              </p>
+              <p className="text-muted-foreground leading-relaxed mt-3">
+                We retrieve subscription and invoice status from Stripe to verify AI access, trial eligibility,
+                and cancellation. We record payment-event identifiers, event types, and timestamps to process
+                notifications reliably; we do not store full payment-event payloads. Stripe also processes
+                billing information under its <a href="https://stripe.com/privacy" className="text-primary underline underline-offset-4">privacy policy</a>.
               </p>
             </div>
 

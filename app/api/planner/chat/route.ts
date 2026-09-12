@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
+import { requireAssistantSubscription } from '@/lib/billing/server';
 import {
   PLANNER_CHAT_SYSTEM_PROMPT,
   inferPlannerChatExactCorrection,
@@ -130,6 +131,8 @@ export async function POST(request: NextRequest) {
     });
   }
 
+  const subscriptionDenied = await requireAssistantSubscription(user.id);
+  if (subscriptionDenied) return subscriptionDenied;
   if (process.env.AI_ASSISTANT_ENABLED === 'false') {
     return unavailable('Orderly Assistant is temporarily turned off. Your existing planner still works.', 503);
   }

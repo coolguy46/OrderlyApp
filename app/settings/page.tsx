@@ -361,6 +361,7 @@ export default function SettingsPage() {
         </motion.div>
 
         <nav aria-label="Settings sections" className="workspace-toolbar flex flex-wrap gap-1 p-2">
+          <Link href="/settings/billing" className="rounded-lg px-3 py-2 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Billing</Link>
           {[
             ['appearance', 'Appearance'],
             ['integrations', 'Integrations'],

@@ -28,7 +28,7 @@ export default function TermsOfServicePage() {
       <main className="px-5 py-12 sm:px-8 sm:py-20">
         <div className="mx-auto max-w-[760px] [overflow-wrap:anywhere]">
           <h1 className="mb-4 font-display text-4xl font-semibold tracking-[-0.035em] sm:text-5xl">Terms of Service</h1>
-          <p className="mb-10 border-b border-border pb-8 text-sm text-muted-foreground">Last updated: August 27, 2026</p>
+          <p className="mb-10 border-b border-border pb-8 text-sm text-muted-foreground">Last updated: September 11, 2026</p>
 
           <section className="space-y-9 [&>div:not(:last-child)]:border-b [&>div:not(:last-child)]:border-border/60 [&>div:not(:last-child)]:pb-9">
             <div>
@@ -88,9 +88,34 @@ export default function TermsOfServicePage() {
               <h2 className="mb-3 text-lg font-semibold tracking-tight">AI-Assisted Scheduling</h2>
               <p className="text-muted-foreground leading-relaxed">
                 The Assistant can interpret scheduling requests and suggest changes. AI output may be
-                incomplete or inaccurate, so you are responsible for reviewing each preview, including its
-                dates, times, durations, conflicts, and deadlines, before applying it. Orderly does not apply
-                an Assistant suggestion without your approval.
+                incomplete or inaccurate. When you request changes, the Assistant can save them directly
+                after application checks; a separate preview approval is not always required. Review saved
+                dates, times, durations, conflicts, and deadlines, and use the available undo controls when needed.
+              </p>
+            </div>
+
+            <div>
+              <h2 className="mb-3 text-lg font-semibold tracking-tight">Orderly AI Subscription and Trial</h2>
+              <p className="text-muted-foreground leading-relaxed">
+                Only Orderly AI requires a subscription when paid access is enabled. Manual tasks, calendars,
+                scheduling, study tools, goals, exams, and integrations remain free. Orderly AI costs $4.99 USD
+                per month. Eligible accounts receive a 7-day free trial with a payment method required.
+                The trial is offered once per account; previous subscribers do not receive another trial.
+              </p>
+              <p className="text-muted-foreground leading-relaxed mt-3">
+                Stripe Checkout shows your first charge date and the recurring amount before you confirm.
+                Unless you cancel before the trial ends, the subscription automatically renews monthly at
+                $4.99 USD. Cancel through Manage subscription in Assistant or Settings → Billing. Canceling
+                during the trial prevents the first subscription charge and preserves access until the trial
+                ends. Canceling a paid subscription stops its next renewal and preserves access until the
+                current paid period ends. A subscription does not promise unlimited AI usage.
+              </p>
+              <p className="text-muted-foreground leading-relaxed mt-3">
+                Billing is handled by Stripe. Canceling your subscription does not delete your Orderly data
+                or prevent you from using the free tools. Self-service account deletion first checks that
+                subscriptions have ended and closes outstanding checkout sessions to avoid leaving recurring
+                billing attached to an inaccessible account. Contact support if you need help with deletion
+                while a subscription is still running.
               </p>
             </div>
 

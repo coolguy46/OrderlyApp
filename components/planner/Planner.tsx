@@ -77,6 +77,7 @@ import { WeekTimeGrid, type PlannerBlockView } from '@/components/planner';
 import type { ConversationRequest, ConversationResult } from '@/lib/planner/conversation';
 import { isConfirmedConversationRejection } from '@/lib/planner/conversation-response';
 import { AssistantChat } from '@/components/planner/assistant/AssistantChat';
+import { AssistantSubscriptionGate } from '@/components/billing/AssistantSubscriptionGate';
 import { TaskForm } from '@/components/tasks/TaskForm';
 import { TaskCalendar, type TaskCalendarMode } from '@/components/calendar/TaskCalendar';
 import { CalendarViewTabs, type CalendarSection } from '@/components/calendar/CalendarViewTabs';
@@ -1865,6 +1866,10 @@ export function Planner() {
         </span>
       </header>
 
+      <AssistantSubscriptionGate recoveryActions={<>
+        {retryPending && chatReady && <Button variant="outline" size="sm" disabled={activeIsThinking} onClick={() => void submitCommand('', null, true)}>Check last request</Button>}
+        {lastChatReceipt?.userId === userId && <Button variant="ghost" size="sm" disabled={activeIsThinking} onClick={() => void undoChatChange()}>Undo last chat change</Button>}
+      </>}>
       <AssistantChat
         actions={<>
           {retryPending && chatReady && (
@@ -1893,6 +1898,7 @@ export function Planner() {
         inputRef={commandInputRef}
         endRef={chatEndRef}
       />
+      </AssistantSubscriptionGate>
 
       <section className="workspace-panel min-w-0 space-y-4 p-3 sm:p-5" aria-label="Assistant calendar">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-4">

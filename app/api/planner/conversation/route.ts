@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { CalendarCapacityError } from '@/lib/planner/calendar-range';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
+import { requireAssistantSubscription } from '@/lib/billing/server';
 import { conversationSystemPrompt, parseConversationIntent, readConversationRequest, type ConversationIntent, type ConversationResult } from '@/lib/planner/conversation';
 import { calendarFromSnapshot, compileConversation, conversationFacts, conversationValidationFeedback, type ConversationSnapshot } from '@/lib/planner/conversation-calendar';
 import { completeAssistantUsage, failAssistantUsage, parseAssistantProviderUsage, reserveAssistantUsage, type AssistantUsageRpcClient } from '@/lib/planner/assistant-usage';
@@ -74,6 +75,8 @@ export async function POST(request: NextRequest) {
       return json({ reply: 'I could not confirm the Undo result. Retry this request to check its saved status.', saved: false, retryable: true }, 503);
     }
   }
+  const subscriptionDenied = await requireAssistantSubscription(user.id);
+  if (subscriptionDenied) return subscriptionDenied;
   if (process.env.AI_ASSISTANT_ENABLED === 'false' || !process.env.DEEPSEEK_API_KEY) return json({ reply: 'Orderly Assistant is temporarily unavailable. Your calendar still works.', saved: false }, 503);
   // Include guard/accounting latency in the paid-call lifetime, so a stalled
   // database request cannot start a model call after its 90-second lease expires.

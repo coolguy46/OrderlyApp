@@ -20,6 +20,7 @@ function loadRoute(user, claims) {
     };
   } };
   const stubs = {
+    'server-only': {},
     '@/lib/supabase/server': { createSupabaseServerClient: async () => ({ auth: {
       getUser: async () => ({ data: { user }, error: null }),
       getClaims: async () => ({ data: { claims }, error: null }),

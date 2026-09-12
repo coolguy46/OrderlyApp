@@ -12,6 +12,8 @@ function inspect(text, location) {
   if (/\bsk-[a-zA-Z0-9_-]{32,}\b/.test(text)) kinds.add('possible-provider-key');
   if (/\b(?:ghp_|github_pat_)[a-zA-Z0-9_]{30,}\b/.test(text)) kinds.add('possible-github-token');
   if (/\bsb_secret_[a-zA-Z0-9_-]{20,}\b/.test(text)) kinds.add('supabase-secret-key');
+  if (/\b(?:sk|rk)_(?:live|test)_[a-zA-Z0-9]{24,}\b/.test(text)) kinds.add('stripe-secret-key');
+  if (/\bwhsec_[a-zA-Z0-9]{24,}\b/.test(text)) kinds.add('stripe-webhook-secret');
   for (const match of text.matchAll(/\beyJ[a-zA-Z0-9_-]+\.([a-zA-Z0-9_-]+)\.[a-zA-Z0-9_-]+/g)) {
     try {
       if (JSON.parse(Buffer.from(match[1], 'base64url').toString()).role === 'service_role') kinds.add('service-role-jwt');
