@@ -40,7 +40,7 @@ function fixture({ user = { id: 'owner' }, failed = false } = {}) {
 }
 
 async function configured(fn) {
-  const values = { STRIPE_BILLING_ENABLED: 'true', STRIPE_SECRET_KEY: 'sk_test_fixture', STRIPE_WEBHOOK_SECRET: 'whsec_fixture', STRIPE_AI_PRICE_ID: 'price_fixture', STRIPE_ACCOUNT_ID: 'acct_fixture', STRIPE_APP_ORIGIN: 'http://localhost:3000', VERCEL_ENV: 'preview' };
+  const values = { NODE_ENV: 'test', AI_SUBSCRIPTION_REQUIRED: 'false', STRIPE_BILLING_ENABLED: 'true', STRIPE_SECRET_KEY: 'sk_test_fixture', STRIPE_WEBHOOK_SECRET: 'whsec_fixture', STRIPE_AI_PRICE_ID: 'price_fixture', STRIPE_ACCOUNT_ID: 'acct_fixture', STRIPE_APP_ORIGIN: 'http://localhost:3000', VERCEL_ENV: 'preview' };
   const prior = Object.fromEntries(Object.keys(values).map(k => [k, process.env[k]]));
   Object.assign(process.env, values);
   try { await fn(); } finally { for (const [k, v] of Object.entries(prior)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; } }
@@ -73,6 +73,30 @@ test('wrong configured return origin is denied, and upstream failure exposes no 
 test('success query does not affect the real status handler', async () => configured(async () => {
   const f = fixture(); const response = await f.route('status').GET(new Request('http://localhost:3000/api/billing/status?checkout=success&user_id=attacker'));
   assert.equal((await response.json()).aiAccess, false); assert.deepEqual(f.calls, [['server'], ['status', 'owner']]);
+}));
+
+test('production status stays locked without configured billing, regardless of old free-access flags', async () => configured(async () => {
+  for (const marker of ['NODE_ENV', 'VERCEL_ENV']) {
+    process.env[marker] = 'production';
+    process.env.STRIPE_BILLING_ENABLED = 'false';
+    for (const flag of ['false', '', 'true']) {
+      process.env.AI_SUBSCRIPTION_REQUIRED = flag;
+      const f = fixture();
+      const response = await f.route('status').GET();
+      assert.equal(response.status, 200); assert.match(response.headers.get('cache-control'), /private, no-store/);
+      assert.deepEqual(await response.json(), { enabled: false, subscriptionRequired: true, checkoutEnabled: false, aiAccess: false, status: 'unavailable' });
+      assert.deepEqual(f.calls, [], 'unconfigured billing never falls back to free access or calls Stripe');
+    }
+    process.env[marker] = marker === 'NODE_ENV' ? 'test' : 'preview';
+  }
+}));
+
+test('production configured status still requires subscription when legacy flag is false', async () => configured(async () => {
+  process.env.NODE_ENV = 'production';
+  const f = fixture();
+  const response = await f.route('status').GET();
+  assert.equal((await response.json()).subscriptionRequired, true);
+  assert.deepEqual(f.calls, [['server'], ['status', 'owner']]);
 }));
 
 test('real webhook handler rejects forgery before database access; signed events persist, failed saves return 503', async () => configured(async () => {

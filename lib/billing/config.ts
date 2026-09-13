@@ -3,6 +3,12 @@ export class BillingError extends Error {
   constructor(message: string, status = 503) { super(message); this.status = status; }
 }
 
+/** Production AI is always subscription-gated, even with stale rollout flags. */
+export function assistantSubscriptionRequired(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.NODE_ENV === 'production' || env.VERCEL_ENV === 'production'
+    || env.AI_SUBSCRIPTION_REQUIRED === 'true';
+}
+
 export function billingConfig(env: NodeJS.ProcessEnv = process.env) {
   if (env.STRIPE_BILLING_ENABLED !== 'true') throw new BillingError('Billing is not enabled yet.');
   const mode = env.STRIPE_MODE || 'test';

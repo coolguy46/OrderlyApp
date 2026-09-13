@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { ArrowRight, ShieldCheck } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { billingDate, type BillingStatus, type BillingView } from './useBilling';
+import { BILLING_UNAVAILABLE_MESSAGE } from '@/lib/billing/messages';
 
 export function subscriptionMessage(status: BillingStatus) {
   const trialEnd = billingDate(status.trialEndsAt);
@@ -41,7 +42,8 @@ export function BillingDetails({ billing, dark = false }: { billing: BillingView
     </>}
     {returnState === 'success' && !status?.aiAccess && <p role="status" className={`text-sm ${muted}`}>Checking your checkout with Stripe. AI unlocks only when your subscription is confirmed.</p>}
     {returnState === 'canceled' && !status?.aiAccess && <p role="status" className={`text-sm ${muted}`}>Checkout wasn’t completed. You can start again whenever you’re ready.</p>}
-    {status && !status.enabled && <p role="status" className={`text-sm ${muted}`}>Checkout is not enabled in this environment yet.</p>}
+    {status && !status.enabled && <p role="status" className={`text-sm leading-relaxed ${muted}`}>{status.subscriptionRequired
+      ? BILLING_UNAVAILABLE_MESSAGE : 'Checkout is not enabled in this environment yet.'}</p>}
     {status?.enabled && status.checkoutEnabled === false && <p role="status" className={`text-sm ${muted}`}>New subscriptions are not available yet. Existing subscribers can still manage billing.</p>}
     {error && <p role="alert" className={`text-sm ${dark ? 'text-rose-200' : 'text-destructive'}`}>{error}</p>}
     <div className="flex flex-col items-stretch gap-2">

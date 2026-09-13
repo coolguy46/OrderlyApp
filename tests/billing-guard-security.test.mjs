@@ -11,7 +11,7 @@ const root = resolve('.');
 
 async function configured(run, overrides = {}) {
   const values = {
-    AI_SUBSCRIPTION_REQUIRED: 'true', STRIPE_BILLING_ENABLED: 'true', STRIPE_MODE: 'test',
+    NODE_ENV: 'test', AI_SUBSCRIPTION_REQUIRED: 'true', STRIPE_BILLING_ENABLED: 'true', STRIPE_MODE: 'test',
     STRIPE_SECRET_KEY: 'sk_test_fixture_only', STRIPE_WEBHOOK_SECRET: 'whsec_fixture_only',
     STRIPE_AI_PRICE_ID: 'price_fixture', STRIPE_ACCOUNT_ID: 'acct_fixture',
     STRIPE_APP_ORIGIN: 'http://localhost:3000', VERCEL_ENV: 'preview',
@@ -140,13 +140,42 @@ test('real subscription guard grants only verified paid access and sanitizes bil
   }
 }));
 
-test('billing-disabled with enforcement enabled fails closed; enforcement disabled performs no billing request', async () => configured(async () => {
+test('billing-disabled fails closed; development-only opt-out performs no billing request', async () => configured(async () => {
   process.env.STRIPE_BILLING_ENABLED = 'false';
   const badRollout = fixture(); assert.equal((await badRollout.guard()).status, 503);
   assert.deepEqual(badRollout.calls.stripe, []);
   process.env.AI_SUBSCRIPTION_REQUIRED = 'false';
   const free = fixture(); assert.equal(await free.guard(), null); assert.deepEqual(free.calls.stripe, []);
 }));
+
+test('all production AI handlers stay blocked with stale false/unset flags and unavailable billing', async () => configured(async () => {
+  process.env.STRIPE_BILLING_ENABLED = 'false';
+  for (const marker of ['NODE_ENV', 'VERCEL_ENV']) {
+    process.env[marker] = 'production';
+    for (const flag of ['false', '', 'true']) {
+      process.env.AI_SUBSCRIPTION_REQUIRED = flag;
+      for (const name of ['conversation', 'chat', 'command']) {
+        const f = fixture();
+        const response = await f.route(name)(f.request(name));
+        assert.equal(response.status, 503);
+        const body = await response.json();
+        assert.equal(body.code, 'billing_unavailable');
+        assert.equal(body.aiUsed, false); assert.equal(body.saved, false);
+        assert.deepEqual(f.calls.stripe, []); assert.deepEqual(f.calls.provider, []);
+        assert.ok(f.calls.rpc.every(([rpc]) => rpc === 'assistant_calendar_snapshot'));
+      }
+    }
+    process.env[marker] = marker === 'NODE_ENV' ? 'test' : 'preview';
+  }
+}));
+
+test('production guard cannot skip Stripe verification with a false flag; valid trials and paid accounts retain access', async () => configured(async () => {
+  const unpaid = fixture(); assert.equal((await unpaid.guard()).status, 402);
+  for (const options of [{ paid: true }, { trial: true }]) {
+    const f = fixture(options); assert.equal(await f.guard(), null);
+    assert.deepEqual(f.calls.billingReads, [f.owner]);
+  }
+}, { NODE_ENV: 'production', AI_SUBSCRIPTION_REQUIRED: 'false' }));
 
 test('real guard allows verified trials without a paid invoice and stops expired or canceled trial access', async () => configured(async () => {
   for (const patch of [{}, { cancel_at_period_end: true }]) {

@@ -137,6 +137,26 @@ test('billing UI: trial checkout in AI-only gate, cancellation, failure recovery
     await page.getByRole('button', { name: 'Create manual task' }).click();
     await page.getByText('Manual task saved', { exact: true }).waitFor();
     failStatus = false;
+    status = { enabled: false, subscriptionRequired: true, checkoutEnabled: false, aiAccess: false, status: 'unavailable' };
+    await page.getByRole('button', { name: 'Refresh status', exact: true }).click();
+    await page.getByText(/Subscriptions are temporarily unavailable.*Orderly AI stays locked/).waitFor();
+    assert.equal(await page.getByRole('textbox', { name: 'Private AI message' }).count(), 0);
+    assert.equal(await trialButton().count(), 0, 'no dead purchase button while checkout is unavailable');
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await page.getByRole('button', { name: 'Refresh status', exact: true }).click();
+      await page.getByText(/Subscriptions are temporarily unavailable.*Orderly AI stays locked/).waitFor();
+      assert.equal(await page.getByText('AI chat available', { exact: true }).count(), 0, 'locked state must not disappear after refresh');
+    }
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await page.getByText(/Subscriptions are temporarily unavailable.*Orderly AI stays locked/).waitFor();
+    await page.getByRole('button', { name: 'Create manual task' }).click();
+    await page.getByText('Manual task saved', { exact: true }).waitFor();
+    await page.getByRole('button', { name: 'Undo previous change' }).click();
+    await page.getByText('Previous change undone', { exact: true }).waitFor();
+    await page.reload();
+    await page.getByText(/Subscriptions are temporarily unavailable.*Orderly AI stays locked/).waitFor();
+    assert.equal(await page.getByRole('textbox', { name: 'Private AI message' }).count(), 0);
+    // Explicit non-production development bypass is still supported by the hook.
     status = { enabled: false, subscriptionRequired: false };
     await page.getByRole('button', { name: 'Refresh status', exact: true }).click();
     await page.getByText('AI chat available', { exact: true }).waitFor();

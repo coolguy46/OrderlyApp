@@ -1,5 +1,7 @@
 # Owner-only AI billing preview
 
+September 13 update: production AI now stays locked without a verified trial or subscription, including while checkout is unavailable. The visual preview remains available to the approved owner but does not bypass this lock. Sandbox purchases still cannot unlock production AI.
+
 ## Scope
 
 This is a visual inspection tool, independent of the real billing rollout. The button appears on Assistant (`/planner`) and Settings → Billing only after server verification. It does not activate sales, grant AI access, change a trial, or write to Orderly billing records.

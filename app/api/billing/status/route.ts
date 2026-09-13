@@ -1,13 +1,16 @@
 import { createSupabaseServerClient } from '@/lib/supabase/server';
-import { billingFailure, billingJson } from '@/lib/billing/config';
+import { assistantSubscriptionRequired, billingFailure, billingJson } from '@/lib/billing/config';
 import { billingServer } from '@/lib/billing/server';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export async function GET() {
+  const subscriptionRequired = assistantSubscriptionRequired();
   if (process.env.STRIPE_BILLING_ENABLED !== 'true') {
-    // A bad rollout must never advertise access while the provider guard denies it.
-    if (process.env.AI_SUBSCRIPTION_REQUIRED === 'true') return billingJson({ error: 'Subscription verification is unavailable.' }, 503);
+    // An explicit locked setup state, not a transient error or a free-access fallback.
+    // This matches the server guard and does not require billing credentials.
+    if (subscriptionRequired) return billingJson({ enabled: false, subscriptionRequired: true,
+      checkoutEnabled: false, aiAccess: false, status: 'unavailable' });
     return billingJson({ enabled: false, subscriptionRequired: false });
   }
   try {
@@ -15,6 +18,6 @@ export async function GET() {
     const { data: { user }, error } = await supabase.auth.getUser();
     if (error || !user) return billingJson({ error: 'Sign in to view your subscription.' }, 401);
     const { service } = await billingServer();
-    return billingJson({ ...await service.status(user.id), subscriptionRequired: process.env.AI_SUBSCRIPTION_REQUIRED === 'true' });
+    return billingJson({ ...await service.status(user.id), subscriptionRequired });
   } catch (error) { return billingFailure(error); }
 }

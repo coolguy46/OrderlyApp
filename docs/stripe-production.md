@@ -1,4 +1,14 @@
-# Orderly AI production rollout — not activated
+# Orderly AI production rollout — AI enforced; live checkout not activated
+
+## September 13, 2026: production enforcement
+
+The owner explicitly approved locking AI while live checkout is unavailable. Production now always requires a verified active trial or paid subscription: `NODE_ENV=production` or `VERCEL_ENV=production` makes the gate mandatory, even when the old `AI_SUBSCRIPTION_REQUIRED` flag is false or missing. The local development opt-out cannot unlock the production site. UI and all three paid provider routes use the same policy; unavailable billing fails closed before provider calls or usage reservations. Neither the owner account nor its visual preview has a real-AI exemption.
+
+When billing is not configured, `/api/billing/status` returns an explicit locked state (`subscriptionRequired: true`, `aiAccess: false`, `checkoutEnabled: false`) and the UI says subscriptions are temporarily unavailable. It does not present a dead purchase button or briefly show a lock and then grant free access. Real checkout and database/secret setup are still separate activation gates. Manual tasks/calendar, receipt recovery, and Undo remain available.
+
+Read the September 11 rollout flags and source-deployment evidence below as historical. In particular, `AI_SUBSCRIPTION_REQUIRED=false` no longer disables production enforcement. No live Stripe setting, database migration, secret, or customer charge was changed by this enforcement release.
+
+Local validation: all 558 unit/integration tests passed, including production false/missing-flag denial on all three real AI handlers and verified trial/paid access. Browser regression confirmed the lock persists after reload, focus, and repeated status refresh while manual tasks and Undo remain available. Targeted lint, isolated TypeScript, clean-source Next production build, and credential-pattern scan passed. Production-account billing flows were not exercised or activated.
 
 ## Verified September 11, 2026
 
@@ -39,7 +49,7 @@ STRIPE_WEBHOOK_SECRET=<signing secret of the live website webhook endpoint>
 STRIPE_PORTAL_CONFIGURATION_ID=bpc_1UEgAACchZxGFzZ8bjDYvxvm
 STRIPE_BILLING_ENABLED=false
 STRIPE_CHECKOUT_ENABLED=false
-AI_SUBSCRIPTION_REQUIRED=false
+AI_SUBSCRIPTION_REQUIRED=true
 ```
 
 Reuse the site's existing production Supabase URL, publishable key and service-role key after verifying the target. Do not overwrite unrelated environment values.
@@ -50,10 +60,10 @@ Reuse the site's existing production Supabase URL, publishable key and service-r
 2. Finish integration verification with fictional data in the separate Stripe sandbox. No real charges or test subscriptions in production user records. Automated fixture tests do not substitute for a real sandbox Checkout/webhook/portal flow.
 3. Review and hash the exact `lib/supabase/billing-migration.sql`. Verify target project and its existing schema, including `account_deletion_requests`. Apply only that reviewed migration to the approved database; verify RLS/revokes, lease exclusivity and deletion behavior. Never reconstruct SQL from notes. Never run fixture cleanup against production.
 4. Portal creation/read-back is complete in both modes. Before activation, verify the live dedicated configuration still uses period-end cancellation. Enable and verify Stripe-hosted trial/renewal notifications and the cancellation link under Subscriptions and emails. Receiving `trial_will_end` in Orderly's event ledger does not itself send an email. Stripe does not send trial-reminder emails in sandbox mode. See https://docs.stripe.com/billing/subscriptions/trials/manage-trial-compliance.
-5. Deploy validated source with all switches off, using the established Vercel production project. Preserve unrelated untracked `design-lab/` and research; neither is part of this billing release. The local design lab has unrelated JSX errors, so use a clean release snapshot for build validation.
+5. Deploy validated source with new checkout disabled, using the established Vercel production project. Production AI enforcement stays on while setup is incomplete. Preserve unrelated untracked `design-lab/` and research; neither is part of this billing release. The local design lab has unrelated JSX errors, so use a clean release snapshot for build validation.
 6. Register a live webhook at `https://www.myorderlyapp.com/api/billing/webhook`, for the events in `BILLING_EVENTS`; put its signing secret into production. This is not the sandbox CLI listener secret. Never log a webhook signing secret or full payment payload.
-7. Enable billing services, keeping new purchases and AI enforcement off. Verify signed events, authenticated status, portal configuration, unauthenticated denials and cross-origin protection. Do not disable webhook processing while customers have subscriptions.
-8. Recheck Stripe account payment/payout readiness. Only after all checks and policies pass enable checkout and AI enforcement as a coordinated release. Confirm unpaid users cannot call AI directly and unrelated tasks/calendar stay free. Use a separately authorized payment flow for any real-money acceptance test; never create a real customer charge silently.
+7. Enable billing services, keeping new purchases off and AI enforcement on. Verify signed events, authenticated status, portal configuration, unauthenticated denials and cross-origin protection. Do not disable webhook processing while customers have subscriptions.
+8. Recheck Stripe account payment/payout readiness. Only after all checks and policies pass enable checkout. AI enforcement is already mandatory. Confirm unpaid users cannot call AI directly and unrelated tasks/calendar stay free. Use a separately authorized payment flow for any real-money acceptance test; never create a real customer charge silently.
 
 ## Validation record
 

@@ -2,13 +2,23 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import Stripe from 'stripe';
 import { readFile } from 'node:fs/promises';
-import { billingConfig } from '../lib/billing/config.ts';
+import { assistantSubscriptionRequired, billingConfig } from '../lib/billing/config.ts';
 import { createBillingService, subscriptionAllowsAI, validMonthlyPrice } from '../lib/billing/service.ts';
 import { acceptBillingEvent, webhookBody } from '../lib/billing/webhook.ts';
 
 const config = { priceId: 'price_test', origin: 'http://localhost:3000', portalConfiguration: 'bpc_fixture' };
 const price = { id: 'price_test', active: true, livemode: false, currency: 'usd', unit_amount: 499, type: 'recurring', billing_scheme: 'per_unit', recurring: { interval: 'month', interval_count: 1, usage_type: 'licensed' } };
 const subscription = (patch = {}) => ({ id: 'sub_test', livemode: false, status: 'active', items: { data: [{ price, current_period_end: Math.floor(Date.now() / 1000) + 86400 }] }, latest_invoice: { status: 'paid' }, ...patch });
+
+test('production always requires subscriptions despite missing, false, or malformed rollout flags', () => {
+  for (const production of [{ NODE_ENV: 'production' }, { VERCEL_ENV: 'production' }]) {
+    for (const flag of [undefined, '', 'false', 'true', 'FALSE', '0']) {
+      assert.equal(assistantSubscriptionRequired({ ...production, AI_SUBSCRIPTION_REQUIRED: flag }), true);
+    }
+  }
+  assert.equal(assistantSubscriptionRequired({ NODE_ENV: 'development', AI_SUBSCRIPTION_REQUIRED: 'false' }), false);
+  assert.equal(assistantSubscriptionRequired({ NODE_ENV: 'development', AI_SUBSCRIPTION_REQUIRED: 'true' }), true);
+});
 
 function fixture(livemode = false, checkoutEnabled = true) {
   let account = null;
