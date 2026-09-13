@@ -75,7 +75,7 @@ export async function POST(request: NextRequest) {
       return json({ reply: 'I could not confirm the Undo result. Retry this request to check its saved status.', saved: false, retryable: true }, 503);
     }
   }
-  const subscriptionDenied = await requireAssistantSubscription(user.id);
+  const subscriptionDenied = await requireAssistantSubscription(user);
   if (subscriptionDenied) return subscriptionDenied;
   if (process.env.AI_ASSISTANT_ENABLED === 'false' || !process.env.DEEPSEEK_API_KEY) return json({ reply: 'Orderly Assistant is temporarily unavailable. Your calendar still works.', saved: false }, 503);
   // Include guard/accounting latency in the paid-call lifetime, so a stalled

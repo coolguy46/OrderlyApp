@@ -23,7 +23,7 @@ function ChatBackdrop() {
 export function AssistantAccessView({ billing, children, recoveryActions }: { billing: BillingView; children: ReactNode; recoveryActions?: ReactNode }) {
   const { status, checking, busy, openBilling } = billing;
   if (status && (!status.subscriptionRequired || status.aiAccess === true)) return <>
-    {status.enabled && status.subscriptionRequired && status.aiAccess && <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border/80 bg-card px-4 py-3">
+    {(status.enabled || status.ownerAccess) && status.subscriptionRequired && status.aiAccess && <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border/80 bg-card px-4 py-3">
       <p role="status" className="text-xs leading-relaxed text-muted-foreground">{subscriptionMessage(status)}</p>
       {status.canManage && <Button size="sm" variant="ghost" disabled={!!busy || checking} onClick={() => void openBilling('portal')}>{busy === 'portal' ? 'Opening Stripe…' : 'Manage subscription'}</Button>}
       {billing.error && <p role="alert" className="w-full text-sm text-destructive">{billing.error}</p>}

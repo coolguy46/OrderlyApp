@@ -131,7 +131,7 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  const subscriptionDenied = await requireAssistantSubscription(user.id);
+  const subscriptionDenied = await requireAssistantSubscription(user);
   if (subscriptionDenied) return subscriptionDenied;
   if (process.env.AI_ASSISTANT_ENABLED === 'false') {
     return unavailable('Orderly Assistant is temporarily turned off. Your existing planner still works.', 503);

@@ -4,22 +4,26 @@ import { readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { createRequire } from 'node:module';
 import Stripe from 'stripe';
+import { verifiedOwner, rejectedOwners, withTestOwner } from './fixtures/billing-owner.mjs';
 const require = createRequire(import.meta.url);
 const ts = require('typescript');
 const root = resolve('.');
 
-function fixture({ user = { id: 'owner' }, failed = false } = {}) {
+function fixture({ user = { id: 'owner' }, failed = false, authError = false, authThrows = false, subscription = {} } = {}) {
   const calls = [];
   const stubs = {
     'server-only': {},
-    '@/lib/supabase/server': { createSupabaseServerClient: async () => ({ auth: { getUser: async () => ({ data: { user }, error: null }) } }) },
+    '@/lib/supabase/server': { createSupabaseServerClient: async () => ({ auth: { getUser: async () => {
+      if (authThrows) throw new Error('private authentication details');
+      return { data: { user }, error: authError ? new Error('private authentication details') : null };
+    } } }) },
     '@/lib/billing/server': { billingServer: async () => {
       calls.push(['server']);
       if (failed) throw new Error('private Stripe error with sensitive details');
       return { service: {
         async checkout(id) { calls.push(['checkout', id]); return { url: 'https://checkout.stripe.com/test' }; },
         async portal(id) { calls.push(['portal', id]); return { url: 'https://billing.stripe.com/test' }; },
-        async status(id) { calls.push(['status', id]); return { enabled: true, aiAccess: false }; },
+        async status(id) { calls.push(['status', id]); return { enabled: true, aiAccess: false, ...subscription }; },
       }, store: { async recordEvent(...args) { calls.push(['event', ...args]); } } };
     } },
   };
@@ -27,7 +31,7 @@ function fixture({ user = { id: 'owner' }, failed = false } = {}) {
   function load(file) {
     if (cache.has(file)) return cache.get(file).exports;
     const loadedModule = { exports: {} }; cache.set(file, loadedModule);
-    const source = ts.transpileModule(readFileSync(file, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true } }).outputText;
+    const source = ts.transpileModule(withTestOwner(readFileSync(file, 'utf8')), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true } }).outputText;
     new Function('require', 'module', 'exports', source)(specifier => {
       if (specifier in stubs) return stubs[specifier];
       if (!specifier.startsWith('.') && !specifier.startsWith('@/')) return require(specifier);
@@ -46,6 +50,38 @@ async function configured(fn) {
   try { await fn(); } finally { for (const [k, v] of Object.entries(prior)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; } }
 }
 const request = (name, origin = 'http://localhost:3000') => new Request(`http://localhost:3000/api/billing/${name}`, { method: 'POST', headers: { origin, cookie: 'fixture-only', 'content-type': 'application/json' }, body: JSON.stringify({ user_id: 'attacker', customer: 'cus_other', price: 'price_free', return_url: 'https://attacker.invalid' }) });
+
+test('owner status grants complimentary access during setup and billing outages without inventing a subscription', async () => configured(async () => {
+  process.env.NODE_ENV = 'production';
+  for (const enabled of ['false', 'true']) {
+    process.env.STRIPE_BILLING_ENABLED = enabled;
+    const f = fixture({ user: verifiedOwner, failed: true });
+    const response = await f.route('status').GET();
+    assert.equal(response.status, 200); assert.match(response.headers.get('cache-control'), /private, no-store/);
+    assert.deepEqual(await response.json(), { enabled: false, checkoutEnabled: false, status: 'owner', subscriptionRequired: true, aiAccess: true, ownerAccess: true });
+    assert.deepEqual(f.calls, enabled === 'false' ? [] : [['server']]);
+  }
+  const f = fixture({ user: verifiedOwner, subscription: { hasSubscription: true, canManage: true, status: 'active' } });
+  const result = await (await f.route('status').GET()).json();
+  assert.equal(result.ownerAccess, true); assert.equal(result.canManage, true); assert.equal(result.hasSubscription, true);
+  assert.deepEqual(f.calls, [['server'], ['status', verifiedOwner.id]], 'existing subscriptions remain manageable, never canceled');
+}));
+
+test('owner status denies signed-out, unverified, spoofed and failed-auth requests even with owner query flags', async () => configured(async () => {
+  process.env.NODE_ENV = 'production';
+  for (const enabled of ['false', 'true']) {
+    process.env.STRIPE_BILLING_ENABLED = enabled;
+    for (const options of [{ user: null }, ...rejectedOwners.map(user => ({ user })),
+      { user: verifiedOwner, authError: true }, { user: verifiedOwner, authThrows: true }]) {
+      const f = fixture(options);
+      const response = await f.route('status').GET(new Request('http://localhost:3000/api/billing/status?ownerAccess=true&preview=paid&checkout=success'));
+      const result = await response.json();
+      assert.notEqual(result.aiAccess, true); assert.notEqual(result.ownerAccess, true);
+      assert.doesNotMatch(JSON.stringify(result), /private authentication/);
+      assert.match(response.headers.get('cache-control'), /no-store/);
+    }
+  }
+}));
 
 test('real checkout/portal handlers refuse signed-out and cross-site requests before Stripe access', async () => configured(async () => {
   for (const name of ['checkout', 'portal']) {

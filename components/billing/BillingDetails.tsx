@@ -7,6 +7,7 @@ import { billingDate, type BillingStatus, type BillingView } from './useBilling'
 import { BILLING_UNAVAILABLE_MESSAGE } from '@/lib/billing/messages';
 
 export function subscriptionMessage(status: BillingStatus) {
+  if (status.ownerAccess && status.aiAccess) return 'Owner access — your account has complimentary Orderly AI.';
   const trialEnd = billingDate(status.trialEndsAt);
   const accessEnd = billingDate(status.accessEndsAt);
   if (status.aiAccess && status.status === 'trialing') return status.cancelAtPeriodEnd
@@ -24,6 +25,16 @@ export function BillingDetails({ billing, dark = false }: { billing: BillingView
   const trial = status?.trialEligible === true && !status.hasSubscription;
   const muted = dark ? 'text-slate-300' : 'text-muted-foreground';
   const outline = dark ? 'border-white/20 bg-white/5 text-slate-100 hover:bg-white/10 hover:text-white' : '';
+  if (status?.ownerAccess && status.aiAccess) return <div className="min-w-0 space-y-4">
+    <p role="status" className="text-sm font-medium">{subscriptionMessage(status)}</p>
+    <p className={`text-sm leading-relaxed ${muted}`}>You do not need to purchase a subscription to use AI. Other accounts still need an active trial or paid subscription.</p>
+    <p className={`text-xs ${muted}`}>This access does not create or cancel a Stripe subscription.{status.hasSubscription ? ' You have an existing subscription; manage it below to check charges or cancel renewal.' : ''}</p>
+    {error && <p role="alert" className={`text-sm ${dark ? 'text-rose-200' : 'text-destructive'}`}>{error}</p>}
+    <div className="flex flex-wrap gap-2">
+      {status.canManage && <Button className={outline} variant="outline" disabled={!!busy || checking} onClick={() => void openBilling('portal')}>{busy === 'portal' ? 'Opening Stripe…' : 'Manage subscription'}</Button>}
+      <Button variant="ghost" disabled={checking || !!busy} onClick={refresh}>{checking ? 'Checking…' : 'Refresh status'}</Button>
+    </div>
+  </div>;
   return <div className="min-w-0 space-y-4">
     <div>
       {trial && <p className={`mb-1 text-sm font-medium ${dark ? 'text-violet-200' : 'text-primary'}`}>Your first 7 days are free</p>}

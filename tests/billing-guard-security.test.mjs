@@ -4,6 +4,7 @@ import { dirname, resolve } from 'node:path';
 import { createRequire } from 'node:module';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
+import { verifiedOwner, rejectedOwners, withTestOwner } from './fixtures/billing-owner.mjs';
 
 const require = createRequire(import.meta.url);
 const ts = require('typescript');
@@ -33,9 +34,10 @@ async function configured(run, overrides = {}) {
 
 // Load actual route validation, billing guard, billing service and access policy.
 // Only auth, Stripe and database transports are fake; no live keys/data/network.
-function fixture({ paid = false, trial = false, subscriptionPatch = {}, stripeFailure = false, wrongAccount = false, anonymous = false } = {}) {
-  const owner = randomUUID();
-  const calls = { stripe: [], billingReads: [], provider: [], rpc: [] };
+function fixture({ paid = false, trial = false, subscriptionPatch = {}, stripeFailure = false, wrongAccount = false, anonymous = false, user, rateLimited = false } = {}) {
+  const owner = user?.id || randomUUID();
+  const authUser = anonymous ? null : user ?? { id: owner };
+  const calls = { stripe: [], billingReads: [], provider: [], rpc: [], leases: [] };
   const receipts = new Map();
   const subscription = {
     id: 'sub_fixture', livemode: false, status: 'active', pause_collection: null,
@@ -47,7 +49,7 @@ function fixture({ paid = false, trial = false, subscriptionPatch = {}, stripeFa
   };
   const billingAccount = { user_id: owner, customer_id: 'cus_fixture', closed: false };
   const authClient = {
-    auth: { async getUser() { return { data: { user: anonymous ? null : { id: owner } }, error: null }; } },
+    auth: { async getUser() { return { data: { user: authUser }, error: null }; } },
     from(table) {
       assert.equal(table, 'assistant_action_receipts');
       const filters = {};
@@ -94,14 +96,21 @@ function fixture({ paid = false, trial = false, subscriptionPatch = {}, stripeFa
         calls.billingReads.push(id); return this;
       }, async maybeSingle() { return { data: billingAccount, error: null }; } };
     } }) },
-    '@/lib/planner/assistant-abuse-server': { createAssistantAbuseClient() { assert.fail('Denied AI must not claim a provider lease'); } },
+    '@/lib/planner/assistant-abuse-server': { createAssistantAbuseClient() {
+      assert.equal(rateLimited, true, 'Denied AI must not claim a provider lease');
+      return { async rpc(name, params) {
+        assert.equal(name, 'assistant_acquire_ai_lease'); assert.equal(params.p_user_id, owner);
+        calls.leases.push(params);
+        return { data: { allowed: false, reason: 'rate', retry_after: 30 }, error: null };
+      } };
+    } },
   };
   const cache = new Map();
   function load(file) {
     file = resolve(root, file);
     if (cache.has(file)) return cache.get(file).exports;
     const loadedModule = { exports: {} }; cache.set(file, loadedModule);
-    const output = ts.transpileModule(readFileSync(file, 'utf8'), {
+    const output = ts.transpileModule(withTestOwner(readFileSync(file, 'utf8')), {
       compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true },
     }).outputText;
     new Function('require', 'module', 'exports', output)(specifier => {
@@ -124,9 +133,37 @@ function fixture({ paid = false, trial = false, subscriptionPatch = {}, stripeFa
   return {
     owner, calls, receipts, input, request, load,
     route: name => load(`app/api/planner/${name}/route.ts`).POST,
-    guard: () => load('lib/billing/server.ts').requireAssistantSubscription(owner),
+    guard: () => load('lib/billing/server.ts').requireAssistantSubscription(authUser),
   };
 }
+
+test('only the approved verified Google owner bypasses billing; other identities and editable metadata stay locked', async () => configured(async () => {
+  const f = fixture({ user: verifiedOwner });
+  assert.equal(await f.guard(), null); assert.deepEqual(f.calls.stripe, []); assert.deepEqual(f.calls.billingReads, []);
+  for (const user of rejectedOwners) {
+    const rejected = fixture({ user });
+    const response = await rejected.guard(); assert.equal(response.status, 503);
+    assert.equal((await response.json()).code, 'billing_unavailable');
+  }
+}, { NODE_ENV: 'production', AI_SUBSCRIPTION_REQUIRED: 'false', STRIPE_BILLING_ENABLED: 'false' }));
+
+test('all real AI handlers allow verified owner past billing but still enforce abuse limits; request identity cannot impersonate owner', async () => configured(async () => {
+  for (const name of ['conversation', 'chat', 'command']) {
+    const f = fixture({ user: verifiedOwner, rateLimited: true });
+    const response = await f.route(name)(f.request(name));
+    assert.equal(response.status, 429); assert.equal(response.headers.get('Retry-After'), '30');
+    assert.equal(f.calls.leases.length, 1, 'owner reaches real AI safety boundary');
+    assert.deepEqual(f.calls.stripe, []); assert.deepEqual(f.calls.provider, []);
+    const forged = fixture();
+    const input = name === 'command' ? { prompt: 'Plan my week', context: {} } : forged.input;
+    const denied = await forged.route(name)(forged.request(name, {
+      ...input, user: verifiedOwner, userId: verifiedOwner.id, email: verifiedOwner.email,
+      ownerAccess: true, aiAccess: true, preview: 'paid',
+    }));
+    assert.equal(denied.status, 503); assert.equal((await denied.json()).code, 'billing_unavailable');
+    assert.equal(forged.calls.leases.length, 0); assert.deepEqual(forged.calls.provider, []);
+  }
+}, { NODE_ENV: 'production', AI_SUBSCRIPTION_REQUIRED: 'false', STRIPE_BILLING_ENABLED: 'false' }));
 
 test('real subscription guard grants only verified paid access and sanitizes billing failures', async () => configured(async () => {
   const paid = fixture({ paid: true }); assert.equal(await paid.guard(), null);

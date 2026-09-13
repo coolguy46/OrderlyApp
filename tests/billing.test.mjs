@@ -317,7 +317,10 @@ test('webhook payload size is enforced without trusting content-length', async (
 test('all active AI provider routes guard paid access before fetching DeepSeek', async () => {
   for (const name of ['command', 'chat', 'conversation']) {
     const source = await readFile(new URL(`../app/api/planner/${name}/route.ts`, import.meta.url), 'utf8');
-    assert.ok(source.indexOf('await requireAssistantSubscription(user.id)') < source.indexOf("fetch('https://api.deepseek.com"));
+    const auth = source.indexOf('auth.getUser()');
+    const guard = source.indexOf('await requireAssistantSubscription(user)');
+    const provider = source.indexOf("fetch('https://api.deepseek.com");
+    assert.ok(auth >= 0 && guard > auth && provider > guard, 'server-verified user is checked before provider calls');
     assert.match(source, /if \(subscriptionDenied\) return subscriptionDenied/);
   }
   const moved = await readFile(new URL('../app/api/planner/interpret/route.ts', import.meta.url), 'utf8');

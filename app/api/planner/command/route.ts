@@ -80,7 +80,7 @@ export async function POST(request: NextRequest) {
   if (!input) return noStoreJson({ error: 'Type a schedule request first.' }, { status: 400 });
 
   const apiKey = process.env.DEEPSEEK_API_KEY;
-  const subscriptionDenied = await requireAssistantSubscription(user.id);
+  const subscriptionDenied = await requireAssistantSubscription(user);
   if (subscriptionDenied) return subscriptionDenied;
   if (!apiKey || process.env.AI_ASSISTANT_ENABLED === 'false') {
     return noStoreJson({ normalizedCommand: input.prompt, aiUsed: false });

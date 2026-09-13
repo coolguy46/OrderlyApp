@@ -1,8 +1,9 @@
 import 'server-only';
 import Stripe from 'stripe';
-import { createClient } from '@supabase/supabase-js';
+import { createClient, type User } from '@supabase/supabase-js';
 import { assistantSubscriptionRequired, billingConfig, BillingError, billingJson } from './config';
 import { BILLING_UNAVAILABLE_MESSAGE } from './messages';
+import { isOrderlyOwner } from './owner-access';
 import { createBillingService, type BillingAccount, type BillingStore } from './service';
 
 export async function billingServer() {
@@ -46,12 +47,13 @@ export async function billingServer() {
   return { stripe, config, store, service: createBillingService(stripe, store, { ...config, checkoutEnabled }) };
 }
 
-/** No production rollout flag or owner identity can bypass paid AI access. */
-export async function requireAssistantSubscription(userId: string): Promise<Response | null> {
+/** Call only after server auth.getUser(). The approved owner alone has complimentary access. */
+export async function requireAssistantSubscription(user: User): Promise<Response | null> {
+  if (isOrderlyOwner(user)) return null;
   if (!assistantSubscriptionRequired()) return null;
   try {
     const { service } = await billingServer();
-    if ((await service.status(userId)).aiAccess) return null;
+    if ((await service.status(user.id)).aiAccess) return null;
     const message = 'Orderly AI requires a trial or subscription. Open Assistant to get started, or Settings → Billing to manage your subscription.';
     return billingJson({ error: message, reply: message, code: 'subscription_required', saved: false, aiUsed: false, normalizedCommands: [], normalizedCommand: null, planRequest: null }, 402);
   } catch {

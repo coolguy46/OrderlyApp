@@ -1,6 +1,6 @@
 # Owner-only AI billing preview
 
-September 13 update: production AI now stays locked without a verified trial or subscription, including while checkout is unavailable. The visual preview remains available to the approved owner but does not bypass this lock. Sandbox purchases still cannot unlock production AI.
+September 13 update: non-owner production accounts stay locked without a verified trial or subscription, including while checkout is unavailable. The owner subsequently requested complimentary real AI access for their approved Google account; that is now independently checked server-side by `lib/billing/owner-access.ts`. The visual preview itself grants nothing. Switching its scenarios or completing sandbox purchases still cannot unlock production AI.
 
 ## Scope
 

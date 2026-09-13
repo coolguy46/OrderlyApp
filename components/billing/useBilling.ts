@@ -9,6 +9,7 @@ export interface BillingStatus {
   checkoutEnabled?: boolean;
   subscriptionRequired: boolean;
   aiAccess?: boolean;
+  ownerAccess?: boolean;
   hasSubscription?: boolean;
   canManage?: boolean;
   status?: string;

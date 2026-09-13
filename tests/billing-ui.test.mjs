@@ -37,6 +37,7 @@ test('billing UI: trial checkout in AI-only gate, cancellation, failure recovery
     const errors = [], outside = [], mutations = [];
     page.on('pageerror', error => errors.push(error.message));
     const locked = { enabled: true, sandbox: true, checkoutEnabled: true, subscriptionRequired: true, aiAccess: false, hasSubscription: false, canManage: false, status: 'none', trialEligible: true, trialEndsAt: null, accessEndsAt: null };
+    const ownerAccess = { enabled: false, checkoutEnabled: false, subscriptionRequired: true, aiAccess: true, ownerAccess: true, status: 'owner' };
     let status = { ...locked }, failStatus = false, checkoutResult = { error: 'Synthetic billing outage. Try again.' };
     let delayStatus = null, previewAllowed = false, previewFailure = false;
     let previewUrl = 'https://buy.stripe.com/test_fixture';
@@ -156,6 +157,27 @@ test('billing UI: trial checkout in AI-only gate, cancellation, failure recovery
     await page.reload();
     await page.getByText(/Subscriptions are temporarily unavailable.*Orderly AI stays locked/).waitFor();
     assert.equal(await page.getByRole('textbox', { name: 'Private AI message' }).count(), 0);
+    // Explicit server-authorized owner access is independent of Stripe setup.
+    status = { ...ownerAccess };
+    await page.getByRole('button', { name: 'Refresh status', exact: true }).click();
+    await page.getByText(/Owner access — your account has complimentary Orderly AI/).waitFor();
+    await page.getByRole('textbox', { name: 'Private AI message' }).waitFor();
+    assert.equal(await trialButton().count(), 0);
+    await page.goto(origin + '/settings/billing');
+    await page.getByText(/You do not need to purchase a subscription/).waitFor();
+    assert.equal(await page.getByText(/Orderly AI stays locked/).count(), 0);
+    assert.equal(await page.getByText(/Subscription active/).count(), 0, 'complimentary access is not a fabricated subscription');
+    status = { ...ownerAccess, enabled: true, hasSubscription: true, canManage: true };
+    await page.getByRole('button', { name: 'Refresh status', exact: true }).click();
+    await page.getByText(/You have an existing subscription/).waitFor();
+    await page.getByRole('button', { name: 'Manage subscription', exact: true }).waitFor();
+    status = { ...ownerAccess };
+    await page.goto(origin + '/planner?gate');
+    await page.getByRole('textbox', { name: 'Private AI message' }).waitFor();
+    status = { ...locked };
+    await page.evaluate(() => window.billingFixture.signIn('billing-test-other'));
+    await trialButton().waitFor();
+    assert.equal(await page.getByRole('textbox', { name: 'Private AI message' }).count(), 0, 'owner exception does not carry to another signed-in account');
     // Explicit non-production development bypass is still supported by the hook.
     status = { enabled: false, subscriptionRequired: false };
     await page.getByRole('button', { name: 'Refresh status', exact: true }).click();
@@ -165,7 +187,7 @@ test('billing UI: trial checkout in AI-only gate, cancellation, failure recovery
     await page.getByRole('alert').filter({ hasText: 'Could not check AI access' }).waitFor();
     assert.equal(await page.getByText('AI chat available', { exact: true }).count(), 0);
 
-    status = { ...locked, aiAccess: true, hasSubscription: true, canManage: true, status: 'active', trialEligible: false };
+    status = { ...ownerAccess };
     let release;
     delayStatus = new Promise(resolve => { release = resolve; });
     await page.reload();
@@ -176,7 +198,7 @@ test('billing UI: trial checkout in AI-only gate, cancellation, failure recovery
     await trialButton().waitFor();
     release();
     await page.getByText('Your first 7 days are free', { exact: true }).waitFor();
-    assert.equal(await page.getByText('AI chat available', { exact: true }).count(), 0, 'old owner response cannot unlock new owner');
+    assert.equal(await page.getByText('AI chat available', { exact: true }).count(), 0, 'late complimentary owner response cannot unlock another account');
 
     await page.goto(origin + '/settings/billing');
     await trialButton().waitFor();
@@ -197,7 +219,7 @@ test('billing UI: trial checkout in AI-only gate, cancellation, failure recovery
     if (process.env.ORDERLY_BILLING_DESKTOP_SCREENSHOT) await page.screenshot({ path: process.env.ORDERLY_BILLING_DESKTOP_SCREENSHOT, fullPage: true });
     assert.equal(await page.getByRole('button', { name: 'Preview AI screens' }).count(), 0, 'ordinary accounts have no preview');
     previewAllowed = true;
-    status = { enabled: false, subscriptionRequired: false };
+    status = { ...ownerAccess };
     await page.goto(origin + '/planner?gate');
     const previewButton = page.getByRole('button', { name: 'Preview AI screens' });
     await previewButton.click();
