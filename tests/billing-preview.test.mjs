@@ -89,7 +89,7 @@ test('owner checkout only returns fixed test-mode links, ignoring forged body fi
     const result = await response.json(); assert.equal(result.sandbox, true);
     assert.match(result.url, /^https:\/\/buy\.stripe\.com\/test_[A-Za-z0-9]+$/); urls.push(result.url);
   }
-  assert.notEqual(urls[0], urls[1]);
+  assert.equal(urls[0], urls[1], 'all purchase previews use the no-trial sandbox checkout while trials are disabled');
 });
 test('synthetic screen states stay local and cover billing lifecycle', () => {
   const { previewScenarios, previewScenario } = fixture()('lib/billing/preview-scenarios.ts');

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { requireAssistantSubscription } from '@/lib/billing/server';
+import type { AssistantBillingPeriod } from '@/lib/billing/plan';
 import {
   PLANNER_COMMAND_SYSTEM_PROMPT,
   buildPlannerCommandUserPrompt,
@@ -8,13 +9,14 @@ import {
   sanitizePlannerCommandAIInput,
 } from '@/lib/planner/deepseek-command';
 import {
+  bindAssistantUsageClient,
   completeAssistantUsage,
   failAssistantUsage,
   parseAssistantProviderUsage,
   reserveAssistantUsage,
   type AssistantProviderUsage,
-  type AssistantUsageRpcClient,
 } from '@/lib/planner/assistant-usage';
+import { fetchBudgetedAssistantProvider, AssistantTokenLimitError } from '@/lib/planner/assistant-budget';
 import { guardMutationRequest, readJsonBody, requestBodyErrorResponse } from '@/lib/security/request';
 import { assistantProviderBody, AssistantContextCapacityError, readAssistantProviderResponse } from '@/lib/planner/assistant-provider';
 import { acquireAssistantLease, assistantLeaseFailure, releaseAssistantLease } from '@/lib/planner/assistant-abuse';
@@ -56,9 +58,10 @@ function isRateLimited(userId: string): boolean {
 }
 
 export async function POST(request: NextRequest) {
+  const providerDeadline = Date.now() + 20_000;
   const rejectedOrigin = guardMutationRequest(request);
   if (rejectedOrigin) return rejectedOrigin;
-  const supabase = await createSupabaseServerClient();
+  const supabase = await createSupabaseServerClient({ deadline: providerDeadline + 5_000 });
   const { data: { user }, error: authError } = await supabase.auth.getUser();
   if (authError || !user) return noStoreJson({ error: 'Unauthorized' }, { status: 401 });
 
@@ -80,21 +83,21 @@ export async function POST(request: NextRequest) {
   if (!input) return noStoreJson({ error: 'Type a schedule request first.' }, { status: 400 });
 
   const apiKey = process.env.DEEPSEEK_API_KEY;
-  const subscriptionDenied = await requireAssistantSubscription(user);
+  let billingPeriod: AssistantBillingPeriod | undefined;
+  const subscriptionDenied = await requireAssistantSubscription(user, period => { billingPeriod = period; });
   if (subscriptionDenied) return subscriptionDenied;
   if (!apiKey || process.env.AI_ASSISTANT_ENABLED === 'false') {
     return noStoreJson({ normalizedCommand: input.prompt, aiUsed: false });
   }
 
   const requestId = crypto.randomUUID();
-  const providerDeadline = Date.now() + 20_000;
-  const abuseClient = createAssistantAbuseClient();
+  const abuseClient = createAssistantAbuseClient(providerDeadline + 5_000);
   const lease = await acquireAssistantLease(abuseClient, user.id, requestId);
   if (!lease.allowed) {
     const failure = assistantLeaseFailure(lease);
     return noStoreJson({ normalizedCommand: input.prompt, aiUsed: false, error: failure.message }, { status: failure.status, headers: failure.headers });
   }
-  const usageClient = supabase as unknown as AssistantUsageRpcClient;
+  const usageClient = bindAssistantUsageClient(abuseClient, user.id);
   const usageRequestId = lease.leaseId!;
   const usageAttempt = await reserveAssistantUsage(usageClient, usageRequestId);
   if (usageAttempt.error || !usageAttempt.reservation) {
@@ -133,17 +136,8 @@ export async function POST(request: NextRequest) {
       { role: 'user', content: buildPlannerCommandUserPrompt(providerInput) },
     ], 500);
     if (controller.signal.aborted || Date.now() >= providerDeadline) throw new Error('Assistant request timed out');
-    providerDispatched = true;
-    const providerRequest = fetch('https://api.deepseek.com/chat/completions', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: providerBody,
-      signal: controller.signal,
-      cache: 'no-store',
-      redirect: 'error',
+    const providerRequest = fetchBudgetedAssistantProvider(abuseClient, user.id, usageRequestId, providerBody, {
+      apiKey, signal: controller.signal, deadline: providerDeadline, billingPeriod, onDispatch: () => { providerDispatched = true; },
     });
     const response = await providerRequest;
     if (!response.ok) {
@@ -164,6 +158,11 @@ export async function POST(request: NextRequest) {
       usage: usageAttempt.reservation.usage,
     });
   } catch (error) {
+    if (error instanceof AssistantTokenLimitError) {
+      if (providerDispatched) await completeAssistantUsage(usageClient, usageRequestId, EMPTY_PROVIDER_USAGE, model);
+      else await failAssistantUsage(usageClient, usageRequestId);
+      return noStoreJson({ error: error.message, aiUsed: false, normalizedCommand: null }, { status: 429 });
+    }
     if (providerDispatched) {
       await completeAssistantUsage(usageClient, usageRequestId, EMPTY_PROVIDER_USAGE, model);
     } else {

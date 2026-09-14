@@ -3,7 +3,8 @@ import { BillingError } from './config';
 
 // Verified in sandbox acct_1UE0rgCjmnlmrlsX. These have no Orderly user/customer mapping.
 const links = {
-  trial: 'https://buy.stripe.com/test_eVqaEWeKFbqd1YNeEigYU02',
+  // New checkout no longer offers a trial, including the owner's purchase preview.
+  trial: 'https://buy.stripe.com/test_8x24gy5a52THgTH67MgYU03',
   subscription: 'https://buy.stripe.com/test_8x24gy5a52THgTH67MgYU03',
 } as const;
 

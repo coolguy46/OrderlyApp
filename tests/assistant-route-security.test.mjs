@@ -10,11 +10,15 @@ const ts = require('typescript');
 const root = resolve('.');
 const originalFetch = globalThis.fetch;
 const originalEnvironment = { key: process.env.DEEPSEEK_API_KEY, enabled: process.env.AI_ASSISTANT_ENABLED };
-before(() => { process.env.DEEPSEEK_API_KEY = 'synthetic-test-key'; delete process.env.AI_ASSISTANT_ENABLED; });
+const fixtureBudget = { DEEPSEEK_BUDGET_MODEL: 'deepseek-v4-flash', AI_PROVIDER_DAILY_BUDGET_USD: '10', AI_PROVIDER_MONTHLY_BUDGET_USD: '100',
+  AI_PROVIDER_DAILY_TOKEN_LIMIT: '1000000', AI_PROVIDER_MONTHLY_TOKEN_LIMIT: '10000000', DEEPSEEK_INPUT_USD_PER_MILLION_TOKENS: '1', DEEPSEEK_OUTPUT_USD_PER_MILLION_TOKENS: '2' };
+const originalBudget = Object.fromEntries(Object.keys(fixtureBudget).map(key => [key,process.env[key]]));
+before(() => { process.env.DEEPSEEK_API_KEY = 'synthetic-test-key'; delete process.env.AI_ASSISTANT_ENABLED; Object.assign(process.env,fixtureBudget); });
 after(() => {
   globalThis.fetch = originalFetch;
   if (originalEnvironment.key === undefined) delete process.env.DEEPSEEK_API_KEY; else process.env.DEEPSEEK_API_KEY = originalEnvironment.key;
   if (originalEnvironment.enabled === undefined) delete process.env.AI_ASSISTANT_ENABLED; else process.env.AI_ASSISTANT_ENABLED = originalEnvironment.enabled;
+  for (const [key,value] of Object.entries(originalBudget)) { if (value === undefined) delete process.env[key]; else process.env[key]=value; }
 });
 
 // Evaluate the real route and its real validators/compiler. Only infrastructure
@@ -31,8 +35,9 @@ function fixture(options = {}) {
     const override = await options.rpc?.(name, parameters);
     if (override !== undefined) return override;
     if (name === 'assistant_acquire_ai_lease') return { data: typeof lease === 'function' ? lease(parameters) : lease, error: null };
-    if (name === 'assistant_reserve_ai_request') return { data: [{ allowed: true, daily_used: 1, monthly_used: 1, daily_limit: 0, monthly_limit: 0 }], error: null };
+    if (name === 'assistant_reserve_ai_request_server') return { data: [{ allowed: true, daily_used: 1, monthly_used: 1, daily_limit: 0, monthly_limit: 0 }], error: null };
     if (name === 'assistant_calendar_snapshot') return { data: snapshot, error: null };
+    if (name === 'assistant_reserve_paid_provider_budget') return { data: 'allowed', error: null };
     if (name === 'apply_assistant_calendar_changes') {
       calls.writes.push(parameters.p_operations);
       const response = { ...parameters.p_response, requestId: parameters.p_request_id,
@@ -178,7 +183,7 @@ test('all paid routes fail closed without the server-only guard and apply shared
       assert.equal(f.calls.provider.length, 0);
       const acquisition = f.calls.rpc.find(call => call.name === 'assistant_acquire_ai_lease');
       if (acquisition) assert.equal(acquisition.parameters.p_user_id, f.owner);
-      assert.ok(!f.calls.rpc.some(call => call.name === 'assistant_reserve_ai_request'));
+      assert.ok(!f.calls.rpc.some(call => call.name === 'assistant_reserve_ai_request_server'));
     }
   }
 });
@@ -237,7 +242,7 @@ test('an interrupted no-receipt request recovers after lease expiry using fresh 
         return { allowed: true, reason: 'allowed', retry_after: 0, lease_id: lastLease.id };
       },
       rpc: (name, parameters) => {
-        if (name !== 'assistant_reserve_ai_request') return;
+        if (name !== 'assistant_reserve_ai_request_server') return;
         ledgerIds.push(parameters.p_request_id);
         if (firstReservation) {
           firstReservation = false;
@@ -297,7 +302,7 @@ test('slow accounting cannot dispatch a paid call after its technical lease life
     let clock = originalNow();
     Date.now = () => clock;
     try {
-      const f = fixture({ beforeRpc: name => { if (name === 'assistant_reserve_ai_request') clock += 91_000; } });
+      const f = fixture({ beforeRpc: name => { if (name === 'assistant_reserve_ai_request_server') clock += 91_000; } });
       const body = route === 'command' ? { prompt: 'Add practice tomorrow at 7 pm for 30 minutes', context: {} } : f.input;
       await f.route(route)(f.request(body));
       assert.equal(f.calls.provider.length, 0, route);
@@ -306,6 +311,23 @@ test('slow accounting cannot dispatch a paid call after its technical lease life
     } finally {
       Date.now = originalNow;
     }
+  }
+});
+
+test('every paid route fails closed on budget denial without consuming a provider message or bypassing its access gate', async () => {
+  for(const route of ['conversation','chat','command']) {
+    const f=fixture({rpc:name=>name==='assistant_reserve_paid_provider_budget'?{data:false,error:null}:undefined});
+    const body=route==='command'?{prompt:'Add practice tomorrow at 7 pm for 30 minutes',context:{}}:f.input;
+    await f.route(route)(f.request(body));
+    assert.equal(f.calls.provider.length,0,route);
+    assert.ok(f.calls.rpc.some(call=>call.name==='assistant_fail_ai_request_server'),`${route}: no message charged before provider dispatch`);
+    assert.ok(!f.calls.rpc.some(call=>call.name==='assistant_complete_ai_request_server'),route);
+    const accounting=f.calls.rpc.find(call=>call.name==='assistant_reserve_ai_request_server');
+    const budget=f.calls.rpc.find(call=>call.name==='assistant_reserve_paid_provider_budget');
+    assert.equal(accounting.parameters.p_user_id,f.owner);
+    assert.equal(budget.parameters.p_user_id,f.owner);
+    assert.equal(accounting.parameters.p_request_id,budget.parameters.p_lease_id);
+    assert.ok(f.calls.writes.every(operations=>operations.length===0),route);
   }
 });
 

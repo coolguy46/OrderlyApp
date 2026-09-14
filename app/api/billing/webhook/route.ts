@@ -1,6 +1,6 @@
 import Stripe from 'stripe';
 import { billingConfig, BillingError, billingFailure, billingJson } from '@/lib/billing/config';
-import { billingServer } from '@/lib/billing/server';
+import { billingStore } from '@/lib/billing/server';
 import { acceptBillingEvent, webhookBody } from '@/lib/billing/webhook';
 
 export const runtime = 'nodejs';
@@ -15,8 +15,9 @@ export async function POST(request: Request) {
     try { event = new Stripe(config.secretKey).webhooks.constructEvent(raw, signature, config.webhookSecret); }
     catch { throw new BillingError('Invalid webhook signature.', 400); }
     // No database or Stripe network work occurs for an unsigned request.
-    const { store } = await billingServer();
-    await acceptBillingEvent(event, store, config.accountId, config.livemode);
+    // Persist the signed event directly; Stripe outages/retries must not trigger
+    // another Stripe API lookup. This ledger never grants subscription access.
+    await acceptBillingEvent(event, billingStore(), config.accountId, config.livemode);
     return billingJson({ received: true });
   } catch (error) { return billingFailure(error); }
 }

@@ -34,15 +34,15 @@ async function configured(run, overrides = {}) {
 
 // Load actual route validation, billing guard, billing service and access policy.
 // Only auth, Stripe and database transports are fake; no live keys/data/network.
-function fixture({ paid = false, trial = false, subscriptionPatch = {}, stripeFailure = false, wrongAccount = false, anonymous = false, user, rateLimited = false } = {}) {
+function fixture({ paid = false, trial = false, subscriptionPatch = {}, stripeFailure = false, wrongAccount = false, anonymous = false, user, rateLimited = false, billingRateLimited = false } = {}) {
   const owner = user?.id || randomUUID();
   const authUser = anonymous ? null : user ?? { id: owner };
-  const calls = { stripe: [], billingReads: [], provider: [], rpc: [], leases: [] };
+  const calls = { stripe: [], billingReads: [], provider: [], rpc: [], leases: [], billingRates: [], billingTransports: [] };
   const receipts = new Map();
   const subscription = {
     id: 'sub_fixture', livemode: false, status: 'active', pause_collection: null,
     latest_invoice: { status: 'paid' }, cancel_at_period_end: false,
-    items: { data: [{ price: { id: 'price_fixture' }, current_period_end: Math.floor(Date.now() / 1000) + 86400 }] },
+    items: { data: [{ price: { id: 'price_fixture' }, current_period_start: Math.floor(Date.now()/1000) - 86400, current_period_end: Math.floor(Date.now() / 1000) + 86400 }] },
     ...(trial ? { status: 'trialing', latest_invoice: null, trial_start: Math.floor(Date.now() / 1000) - 86400,
       trial_end: Math.floor(Date.now() / 1000) + 86400 } : {}),
     ...subscriptionPatch,
@@ -72,6 +72,7 @@ function fixture({ paid = false, trial = false, subscriptionPatch = {}, stripeFa
     },
   };
   class FakeStripe {
+    static createFetchHttpClient() { return {}; }
     accounts = { retrieve: async () => {
       calls.stripe.push('account');
       if (stripeFailure) throw new Error('PRIVATE_PROVIDER_FAILURE');
@@ -88,14 +89,21 @@ function fixture({ paid = false, trial = false, subscriptionPatch = {}, stripeFa
   }
   const stubs = {
     'server-only': {}, 'next/server': { NextResponse: Response }, stripe: FakeStripe,
+    '@/lib/security/rate-limit-server': { async enforceRateLimit(userId, policy) {
+      calls.billingRates.push({ userId, policy });
+      assert.deepEqual(calls.stripe, [], 'billing burst guard runs before Stripe');
+      return billingRateLimited ? Response.json({ error: 'Too many requests', saved: false, aiUsed: false }, { status: 429 }) : null;
+    } },
     '@/lib/supabase/server': { createSupabaseServerClient: async () => authClient },
-    '@supabase/supabase-js': { createClient: () => ({ from(table) {
+    '@supabase/supabase-js': { createClient: (_url, _key, options) => {
+      calls.billingTransports.push(options.global.fetch);
+      return { from(table) {
       assert.equal(table, 'billing_accounts');
       return { select() { return this; }, eq(key, id) {
         assert.equal(key, 'user_id'); assert.equal(id, owner);
         calls.billingReads.push(id); return this;
       }, async maybeSingle() { return { data: billingAccount, error: null }; } };
-    } }) },
+    } }; } },
     '@/lib/planner/assistant-abuse-server': { createAssistantAbuseClient() {
       assert.equal(rateLimited, true, 'Denied AI must not claim a provider lease');
       return { async rpc(name, params) {
@@ -175,6 +183,45 @@ test('real subscription guard grants only verified paid access and sanitizes bil
     assert.equal(response.status, 503); assert.doesNotMatch(await response.text(), /PRIVATE_PROVIDER_FAILURE|acct_other/);
     assert.deepEqual(failed.calls.billingReads, []);
   }
+}));
+
+test('billing lookup bursts are denied before Stripe and do not unlock an unpaid account', async () => configured(async () => {
+  for (const paid of [false, true]) {
+    const f = fixture({ paid, billingRateLimited: true });
+    assert.equal((await f.guard()).status, 429);
+    assert.equal(f.calls.billingRates.length, 1);
+    assert.equal(f.calls.billingRates[0].userId, f.owner);
+    assert.equal(f.calls.billingRates[0].policy.scope, 'billing_entitlement');
+    assert.deepEqual(f.calls.stripe, []); assert.deepEqual(f.calls.provider, []);
+  }
+  const owner = fixture({ user: verifiedOwner, billingRateLimited: true });
+  assert.equal(await owner.guard(), null);
+  assert.deepEqual(owner.calls.billingRates, []); assert.deepEqual(owner.calls.stripe, []);
+}));
+
+test('private billing database transport rejects redirects and preserves both cancellation sources', async () => configured(async () => {
+  const f = fixture();
+  f.load('lib/billing/server.ts').billingStore();
+  const transport = f.calls.billingTransports[0];
+  let fetched = 0, signal, redirect;
+  globalThis.fetch = async (_, init) => {
+    fetched++; signal = init.signal; redirect = init.redirect; return new Response('{}');
+  };
+  for (const abortRequest of [true, false]) {
+    const requestCancel = new AbortController(), initCancel = new AbortController();
+    await transport(new Request('https://billing-fixture.invalid/rest/v1/billing_accounts',
+      { signal: requestCancel.signal, redirect: 'follow' }), { signal: initCancel.signal, redirect: 'follow' });
+    assert.equal(redirect, 'error'); assert.equal(signal.aborted, false);
+    (abortRequest ? requestCancel : initCancel).abort(); assert.equal(signal.aborted, true);
+  }
+  const before = fetched;
+  for (const abortRequest of [true, false]) {
+    const requestCancel = new AbortController(), initCancel = new AbortController();
+    (abortRequest ? requestCancel : initCancel).abort();
+    assert.throws(() => transport(new Request('https://billing-fixture.invalid/rest/v1/billing_accounts',
+      { signal: requestCancel.signal }), { signal: initCancel.signal }), error => error.name === 'AbortError');
+  }
+  assert.equal(fetched, before, 'pre-aborted privileged requests never dispatch');
 }));
 
 test('billing-disabled fails closed; development-only opt-out performs no billing request', async () => configured(async () => {

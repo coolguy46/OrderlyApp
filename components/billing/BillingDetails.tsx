@@ -5,7 +5,7 @@ import { ArrowRight, ShieldCheck } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { billingDate, type BillingStatus, type BillingView } from './useBilling';
 import { BILLING_UNAVAILABLE_MESSAGE } from '@/lib/billing/messages';
-import { ORDERLY_AI_MONTHLY_PRICE_LABEL } from '@/lib/billing/plan';
+import { ORDERLY_AI_MONTHLY_PRICE_LABEL, ORDERLY_AI_NEW_TRIAL_DAYS } from '@/lib/billing/plan';
 
 export function subscriptionMessage(status: BillingStatus) {
   if (status.ownerAccess && status.aiAccess) return 'Owner access — your account has complimentary Orderly AI.';
@@ -23,7 +23,7 @@ export function subscriptionMessage(status: BillingStatus) {
 
 export function BillingDetails({ billing, dark = false }: { billing: BillingView; dark?: boolean }) {
   const { status, error, checking, busy, returnState, refresh, openBilling } = billing;
-  const trial = status?.trialEligible === true && !status.hasSubscription;
+  const trial = ORDERLY_AI_NEW_TRIAL_DAYS === 7 && status?.trialEligible === true && !status.hasSubscription;
   const muted = dark ? 'text-slate-300' : 'text-muted-foreground';
   const outline = dark ? 'border-white/20 bg-white/5 text-slate-100 hover:bg-white/10 hover:text-white' : '';
   if (status?.ownerAccess && status.aiAccess) return <div className="min-w-0 space-y-4">
@@ -47,11 +47,12 @@ export function BillingDetails({ billing, dark = false }: { billing: BillingView
       {!status.hasSubscription && <p className={`text-xs leading-relaxed ${muted}`}>{trial
         ? 'Payment method required. Your first charge date is shown at checkout. Cancel before the trial ends and pay nothing; otherwise your subscription renews monthly.'
         : 'Billed monthly. Cancel anytime to stop your next renewal and keep AI access until your paid period ends.'}</p>}
-      {!trial && !status.hasSubscription && status.trialEligible === false && <p className={`text-xs ${muted}`}>The free trial is available only once per account.</p>}
+      {!trial && !status.hasSubscription && <p className={`text-xs ${muted}`}>No free trial is currently offered. Your first payment is due at checkout.</p>}
       {status.hasSubscription && <p role="status" className={`text-sm leading-relaxed ${muted}`}>{subscriptionMessage(status)}</p>}
       {status.sandbox && <p className={`rounded-lg p-3 text-xs ${dark ? 'bg-white/5 text-slate-300' : 'bg-muted text-muted-foreground'}`}>Sandbox preview — no real payments.</p>}
       {!status.subscriptionRequired && <p className={`text-xs ${muted}`}>The AI paywall is not enabled during setup.</p>}
     </>}
+    <p className={`text-xs leading-relaxed ${muted}`}>Includes 1,000,000 total input and output tokens per billing month, with a 50,000-token daily cap. Daily allowance resets at midnight UTC; monthly allowance resets at renewal. Context, history and additional AI attempts count. No automatic overage charges.</p>
     {returnState === 'success' && !status?.aiAccess && <p role="status" className={`text-sm ${muted}`}>Checking your checkout with Stripe. AI unlocks only when your subscription is confirmed.</p>}
     {returnState === 'canceled' && !status?.aiAccess && <p role="status" className={`text-sm ${muted}`}>Checkout wasn’t completed. You can start again whenever you’re ready.</p>}
     {status && !status.enabled && <p role="status" className={`text-sm leading-relaxed ${muted}`}>{status.subscriptionRequired

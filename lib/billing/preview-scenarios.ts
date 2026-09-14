@@ -1,8 +1,8 @@
 import type { BillingStatus } from '@/components/billing/useBilling';
 
 export const previewScenarios = {
-  locked: 'Locked · first-time trial',
-  trial: 'Trial active',
+  locked: 'Locked · subscribe now',
+  trial: 'Existing trial active',
   trialCanceled: 'Trial canceled · access remaining',
   paid: 'Paid subscription',
   paidCanceled: 'Renewal canceled · access remaining',
@@ -20,7 +20,7 @@ export type PreviewScenario = keyof typeof previewScenarios;
 export function previewScenario(key: PreviewScenario, now: number) {
   const future = (days: number) => new Date(now + days * 86_400_000).toISOString();
   const status: BillingStatus = { enabled: true, subscriptionRequired: true, checkoutEnabled: true,
-    aiAccess: false, hasSubscription: false, canManage: false, trialEligible: true, status: 'none' };
+    aiAccess: false, hasSubscription: false, canManage: false, trialEligible: false, status: 'none' };
   if (['trial', 'trialCanceled', 'paid', 'paidCanceled'].includes(key)) {
     const trial = key === 'trial' || key === 'trialCanceled';
     Object.assign(status, { aiAccess: true, hasSubscription: true, canManage: true, trialEligible: false,

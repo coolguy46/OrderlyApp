@@ -40,11 +40,19 @@ export async function readJsonBody(request: Pick<Request, 'headers' | 'body'>, m
   if (request.headers.get('content-type')?.split(';')[0].trim().toLowerCase() !== 'application/json') {
     throw new RequestBodyError('Send this request as application/json.', 415);
   }
+  const text = await readBoundedText(request, maxBytes);
+  try { return JSON.parse(text); }
+  catch { throw new RequestBodyError('Request body must be valid JSON.', 400); }
+}
+
+/** Worker requests may be empty, but never bypass streaming byte/time limits. */
+export async function readBoundedText(request: Pick<Request, 'headers' | 'body'>, maxBytes = 131_072): Promise<string> {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) throw new Error('Invalid body limit');
   const contentLength = request.headers.get('content-length');
   if (contentLength && (!/^\d+$/.test(contentLength) || Number(contentLength) > maxBytes)) {
     throw new RequestBodyError('Request body is too large.', 413);
   }
-  if (!request.body) throw new RequestBodyError('Request body must be valid JSON.', 400);
+  if (!request.body) return '';
   const reader = request.body.getReader();
   const chunks: Uint8Array[] = [];
   let size = 0;
@@ -70,7 +78,7 @@ export async function readJsonBody(request: Pick<Request, 'headers' | 'body'>, m
     let offset = 0;
     for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
     try {
-      return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+      return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
     } catch {
       throw new RequestBodyError('Request body must be valid JSON.', 400);
     }

@@ -1,6 +1,6 @@
 import type Stripe from 'stripe';
 import { BillingError } from './config.ts';
-import { ORDERLY_AI_MONTHLY_PRICE_CENTS, ORDERLY_AI_MONTHLY_PRICE_LABEL } from './plan.ts';
+import { ORDERLY_AI_MONTHLY_PRICE_CENTS, ORDERLY_AI_MONTHLY_PRICE_LABEL, ORDERLY_AI_NEW_TRIAL_DAYS, type AssistantBillingPeriod } from './plan.ts';
 
 export interface BillingAccount {
   user_id: string;
@@ -18,7 +18,15 @@ export interface BillingStore {
   release(userId: string, token: string): Promise<void>;
   recordEvent(id: string, type: string, created: number): Promise<void>;
 }
-type Config = { priceId: string; origin: string; portalConfiguration?: string; livemode?: boolean; checkoutEnabled?: boolean };
+type Config = { priceId: string; origin: string; portalConfiguration?: string; livemode?: boolean; checkoutEnabled?: boolean; newTrialDays?: 0 | 7 };
+
+export function subscriptionBillingPeriod(subscription: Stripe.Subscription, priceId: string, now = Date.now()): AssistantBillingPeriod | null {
+  const item = subscription.items.data.find(item => item.price.id === priceId);
+  const start = subscription.status === 'trialing' ? subscription.trial_start : item?.current_period_start;
+  const end = subscription.status === 'trialing' ? subscription.trial_end : item?.current_period_end;
+  if (!start || !end || !Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start * 1000 > now || end * 1000 <= now || end <= start || end - start > 32 * 86400) return null;
+  return { start: new Date(start * 1000).toISOString(), end: new Date(end * 1000).toISOString() };
+}
 
 function accessEnd(subscription: Stripe.Subscription, priceId: string) {
   const periods = subscription.items.data.filter(item => item.price.id === priceId)
@@ -53,6 +61,7 @@ export function validMonthlyPrice(price: Stripe.Price, livemode = false) {
 export function createBillingService(stripe: Stripe, store: BillingStore, config: Config) {
   const livemode = config.livemode === true;
   const checkoutEnabled = config.checkoutEnabled ?? !livemode;
+  const newTrialDays = config.newTrialDays ?? ORDERLY_AI_NEW_TRIAL_DAYS;
   async function verifyCustomer(customerId: string) {
     const customer = await stripe.customers.retrieve(customerId);
     if (customer.deleted || customer.livemode !== livemode) throw new BillingError('Billing customer mode could not be verified.');
@@ -81,7 +90,8 @@ export function createBillingService(stripe: Stripe, store: BillingStore, config
       cancelAtPeriodEnd: (eligible || existing)?.cancel_at_period_end || false,
       // Account/customer history, not a client flag. Deleting/recreating an account
       // is not a retained identity and is not advertised as a one-trial-per-person guarantee.
-      trialEligible: !account?.closed && records.length === 0,
+      trialEligible: newTrialDays === 7 && !account?.closed && records.length === 0,
+      billingPeriod: eligible ? subscriptionBillingPeriod(eligible, config.priceId) : null,
       trialEndsAt: eligible?.status === 'trialing' ? new Date(eligible.trial_end! * 1000).toISOString() : null,
       accessEndsAt: eligible ? new Date(accessEnd(eligible, config.priceId)).toISOString() : null,
     };
@@ -132,7 +142,7 @@ export function createBillingService(stripe: Stripe, store: BillingStore, config
       if (records.some(sub => !['canceled', 'incomplete_expired'].includes(sub.status))) {
         return portalFor(account.customer_id);
       }
-      const trialDays = records.length === 0 ? 7 : 0;
+      const trialDays = records.length === 0 ? newTrialDays : 0;
       if (account.checkout_session_id) {
         const previous = await stripe.checkout.sessions.retrieve(account.checkout_session_id);
         if (previous.customer !== account.customer_id || previous.livemode !== livemode) throw new BillingError('Checkout ownership could not be verified.');
@@ -208,7 +218,9 @@ export function createBillingService(stripe: Stripe, store: BillingStore, config
           throw new BillingError('Manage your subscription before deleting your account. Deletion is available after the subscription has ended.', 409);
         }
         // Expire all open sessions, including a session whose response was lost.
+        let openSessions = 0;
         for await (const session of stripe.checkout.sessions.list({ customer: account.customer_id, status: 'open', limit: 100 })) {
+          if (++openSessions > 1000) throw new BillingError('Billing history needs administrator review.');
           if (session.livemode !== livemode || session.customer !== account.customer_id) throw new BillingError('Checkout ownership could not be verified.');
           await stripe.checkout.sessions.expire(session.id);
         }

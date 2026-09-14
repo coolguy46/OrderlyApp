@@ -2,9 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { CalendarCapacityError } from '@/lib/planner/calendar-range';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { requireAssistantSubscription } from '@/lib/billing/server';
+import type { AssistantBillingPeriod } from '@/lib/billing/plan';
 import { conversationSystemPrompt, parseConversationIntent, readConversationRequest, type ConversationIntent, type ConversationResult } from '@/lib/planner/conversation';
 import { calendarFromSnapshot, compileConversation, conversationFacts, conversationValidationFeedback, type ConversationSnapshot } from '@/lib/planner/conversation-calendar';
-import { completeAssistantUsage, failAssistantUsage, parseAssistantProviderUsage, reserveAssistantUsage, type AssistantUsageRpcClient } from '@/lib/planner/assistant-usage';
+import { bindAssistantUsageClient, completeAssistantUsage, failAssistantUsage, parseAssistantProviderUsage, reserveAssistantUsage, type AssistantUsageRpcClient } from '@/lib/planner/assistant-usage';
+import { fetchBudgetedAssistantProvider, AssistantTokenLimitError } from '@/lib/planner/assistant-budget';
 import { guardMutationRequest, readJsonBody, requestBodyErrorResponse } from '@/lib/security/request';
 import { assistantDataMessage, assistantProviderBody, AssistantContextCapacityError, readAssistantProviderResponse } from '@/lib/planner/assistant-provider';
 import { acquireAssistantLease, assistantLeaseFailure, releaseAssistantLease } from '@/lib/planner/assistant-abuse';
@@ -18,9 +20,12 @@ function json(value: unknown, status = 200) {
 }
 
 export async function POST(request: NextRequest) {
+  // Count authentication/billing/database latency too; leave ten seconds of
+  // platform lifetime for confirmed persistence and safety-accounting cleanup.
+  const providerDeadline = Date.now() + 50_000;
   const rejectedOrigin = guardMutationRequest(request);
   if (rejectedOrigin) return rejectedOrigin;
-  const supabase = await createSupabaseServerClient();
+  const supabase = await createSupabaseServerClient({ deadline: providerDeadline + 5_000 });
   const { data: { user }, error: authError } = await supabase.auth.getUser();
   if (authError || !user) return json({ reply: 'Sign in to use Orderly Assistant.', saved: false }, 401);
   let input;
@@ -75,13 +80,13 @@ export async function POST(request: NextRequest) {
       return json({ reply: 'I could not confirm the Undo result. Retry this request to check its saved status.', saved: false, retryable: true }, 503);
     }
   }
-  const subscriptionDenied = await requireAssistantSubscription(user);
+  let billingPeriod: AssistantBillingPeriod | undefined;
+  const subscriptionDenied = await requireAssistantSubscription(user, period => { billingPeriod = period; });
   if (subscriptionDenied) return subscriptionDenied;
   if (process.env.AI_ASSISTANT_ENABLED === 'false' || !process.env.DEEPSEEK_API_KEY) return json({ reply: 'Orderly Assistant is temporarily unavailable. Your calendar still works.', saved: false }, 503);
   // Include guard/accounting latency in the paid-call lifetime, so a stalled
   // database request cannot start a model call after its 90-second lease expires.
-  const providerDeadline = Date.now() + 45_000;
-  const abuseClient = createAssistantAbuseClient();
+  const abuseClient = createAssistantAbuseClient(providerDeadline + 5_000);
   const lease = await acquireAssistantLease(abuseClient, user.id, input.requestId);
   if (!lease.allowed) {
     if (lease.reason === 'completed') {
@@ -96,7 +101,8 @@ export async function POST(request: NextRequest) {
   // The action ID stays stable for exactly-once saves; accounting is per paid
   // attempt so an expired no-receipt request can recover without reusing a ledger row.
   const usageRequestId = lease.leaseId!;
-  const reservation = await reserveAssistantUsage(rpc, usageRequestId);
+  const usageClient = bindAssistantUsageClient(abuseClient, user.id);
+  const reservation = await reserveAssistantUsage(usageClient, usageRequestId);
   if (reservation.error || !reservation.reservation?.allowed) {
     await releaseAssistantLease(abuseClient, user.id, lease.leaseId);
     return json({ reply: reservation.error ? 'I could not start usage tracking. No changes were made.' : 'This request may still be processing. Retry the same message in a moment to check its saved result.', saved: false, retryable: !reservation.error }, reservation.error ? 503 : 409);
@@ -138,11 +144,8 @@ export async function POST(request: NextRequest) {
       if (controller.signal.aborted) throw new Error('That response was stopped before saving.');
       const providerBody = assistantProviderBody(model, providerMessages, 1800);
       if (Date.now() >= providerDeadline) throw new Error('That response was stopped before saving.');
-      dispatched = true;
-      const response = await fetch('https://api.deepseek.com/chat/completions', {
-        method: 'POST', headers: { Authorization: `Bearer ${process.env.DEEPSEEK_API_KEY}`, 'Content-Type': 'application/json' },
-        body: providerBody,
-        signal: controller.signal, cache: 'no-store', redirect: 'error',
+      const response = await fetchBudgetedAssistantProvider(abuseClient, user.id, usageRequestId, providerBody, {
+        apiKey: process.env.DEEPSEEK_API_KEY, signal: controller.signal, deadline: providerDeadline, billingPeriod, onDispatch: () => { dispatched = true; },
       });
       if (!response.ok) throw new Error('I could not reach the AI service. No changes were made.');
       const payload = await readAssistantProviderResponse(response);
@@ -173,7 +176,7 @@ export async function POST(request: NextRequest) {
           assistantDataMessage('Validation result', { feedback: conversationValidationFeedback(error) }));
       }
     }
-    await completeAssistantUsage(rpc, usageRequestId, usage, model);
+    await completeAssistantUsage(usageClient, usageRequestId, usage, model);
     usageFinalized = true;
     if (controller.signal.aborted) throw new Error('That response was stopped before saving.');
     if (!compiled || !intent) {
@@ -186,9 +189,10 @@ export async function POST(request: NextRequest) {
     return json(result);
   } catch (error) {
     if (!usageFinalized) {
-      if (dispatched) await completeAssistantUsage(rpc, usageRequestId, usage, model);
-      else await failAssistantUsage(rpc, usageRequestId);
+      if (dispatched) await completeAssistantUsage(usageClient, usageRequestId, usage, model);
+      else await failAssistantUsage(usageClient, usageRequestId);
     }
+    if (error instanceof AssistantTokenLimitError) return json({ reply: error.message, saved: false, code: 'token_limit' }, 429);
     const message = error instanceof Error ? error.message : 'The request could not finish.';
     if (!saveAttempted || message.includes('CALENDAR_CHANGED')) {
       try {

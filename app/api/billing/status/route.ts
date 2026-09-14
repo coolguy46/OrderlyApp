@@ -2,6 +2,8 @@ import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { assistantSubscriptionRequired, billingFailure, billingJson } from '@/lib/billing/config';
 import { billingServer } from '@/lib/billing/server';
 import { isOrderlyOwner } from '@/lib/billing/owner-access';
+import { enforceRateLimit } from '@/lib/security/rate-limit-server';
+import { RATE_LIMIT_POLICIES } from '@/lib/security/rate-limit';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -18,7 +20,7 @@ export async function GET() {
     // Never derive the exception from a query, request body, client store or preview.
     if (!error && user && isOrderlyOwner(user)) {
       let subscription = {};
-      if (billingEnabled) {
+      if (billingEnabled && !await enforceRateLimit(user.id, RATE_LIMIT_POLICIES.billingStatus)) {
         try {
           const { service } = await billingServer();
           subscription = await service.status(user.id);
@@ -31,6 +33,8 @@ export async function GET() {
     }
     if (!billingEnabled) return setupStatus();
     if (error || !user) return billingJson({ error: 'Sign in to view your subscription.' }, 401);
+    const limited = await enforceRateLimit(user.id, RATE_LIMIT_POLICIES.billingStatus);
+    if (limited) return limited;
     const { service } = await billingServer();
     return billingJson({ ...await service.status(user.id), subscriptionRequired });
   } catch (error) { return billingEnabled ? billingFailure(error) : setupStatus(); }

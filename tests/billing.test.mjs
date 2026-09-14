@@ -3,7 +3,8 @@ import test from 'node:test';
 import Stripe from 'stripe';
 import { readFile } from 'node:fs/promises';
 import { assistantSubscriptionRequired, billingConfig } from '../lib/billing/config.ts';
-import { createBillingService, subscriptionAllowsAI, validMonthlyPrice } from '../lib/billing/service.ts';
+import { createBillingService, subscriptionAllowsAI, subscriptionBillingPeriod, validMonthlyPrice } from '../lib/billing/service.ts';
+import { ORDERLY_AI_NEW_TRIAL_DAYS } from '../lib/billing/plan.ts';
 import { acceptBillingEvent, webhookBody } from '../lib/billing/webhook.ts';
 
 const config = { priceId: 'price_test', origin: 'http://localhost:3000', portalConfiguration: 'bpc_fixture' };
@@ -60,8 +61,43 @@ function fixture(livemode = false, checkoutEnabled = true) {
       sessions: { async create(params) { state.calls.push(['portal', params]); return { url: 'https://billing.stripe.com/test' }; } }
     },
   };
-  return { service: createBillingService(stripe, store, { ...config, livemode, checkoutEnabled }), state, store, stripe, setAccount(value) { account = value; } };
+  // Retain legacy-trial regression coverage explicitly; production defaults to no trial.
+  return { service: createBillingService(stripe, store, { ...config, livemode, checkoutEnabled, newTrialDays: 7 }), state, store, stripe, setAccount(value) { account = value; } };
 }
+
+test('new purchases charge immediately, advertise no trial, and replace unfinished legacy trial checkout', async () => {
+  assert.equal(ORDERLY_AI_NEW_TRIAL_DAYS, 0);
+  const f = fixture();
+  await f.service.checkout('owner');
+  assert.equal(f.state.session.metadata.orderly_trial_days, '7');
+  const legacy = f.state.session;
+  const service = createBillingService(f.stripe, f.store, config);
+  assert.equal((await service.status('owner')).trialEligible, false);
+  await service.checkout('owner');
+  assert.equal(legacy.status, 'expired');
+  const checkout = f.state.calls.filter(c => c[0] === 'checkout').at(-1)[1];
+  assert.equal(checkout.metadata.orderly_trial_days, '0');
+  assert.equal(checkout.subscription_data?.trial_period_days, undefined);
+  assert.equal(checkout.subscription_data?.trial_settings, undefined);
+  const calls = f.state.calls.filter(c => c[0] === 'checkout').length;
+  const now = Math.floor(Date.now()/1000);
+  f.state.subscriptions = [subscription({status:'trialing',trial_start:now-86400,trial_end:now+86400})];
+  assert.equal((await service.status('owner')).aiAccess, true, 'previously agreed trials are preserved');
+  await service.checkout('owner');
+  assert.equal(f.state.calls.filter(c => c[0] === 'checkout').length,calls,'existing trial is managed, never replaced or charged');
+});
+
+test('token periods come from current matching Stripe items or existing trial terms, never calendar guesses', () => {
+  const now = Math.floor(Date.now()/1000);
+  const start=now-5*86400,end=now+25*86400;
+  const s=subscription({items:{data:[{price,current_period_start:start,current_period_end:end}]}});
+  assert.deepEqual(subscriptionBillingPeriod(s,price.id),{start:new Date(start*1000).toISOString(),end:new Date(end*1000).toISOString()});
+  for(const [a,b] of [[null,end],[start,null],[now+60,end],[start,now-1],[now-40*86400,end],[NaN,end]]) {
+    assert.equal(subscriptionBillingPeriod({...s,items:{data:[{price,current_period_start:a,current_period_end:b}]}},price.id),null);
+  }
+  assert.equal(subscriptionBillingPeriod(s,'price_other'),null);
+  assert.deepEqual(subscriptionBillingPeriod({...s,status:'trialing',trial_start:now-86400,trial_end:now+86400},price.id),{start:new Date((now-86400)*1000).toISOString(),end:new Date((now+86400)*1000).toISOString()});
+});
 
 test('billing is disabled by default, rejects mixed modes and untrusted redirects', () => {
   assert.throws(() => billingConfig({}), /not enabled/);
@@ -342,8 +378,8 @@ test('all active AI provider routes guard paid access before fetching DeepSeek',
   for (const name of ['command', 'chat', 'conversation']) {
     const source = await readFile(new URL(`../app/api/planner/${name}/route.ts`, import.meta.url), 'utf8');
     const auth = source.indexOf('auth.getUser()');
-    const guard = source.indexOf('await requireAssistantSubscription(user)');
-    const provider = source.indexOf("fetch('https://api.deepseek.com");
+    const guard = source.indexOf('await requireAssistantSubscription(user,');
+    const provider = source.indexOf('fetchBudgetedAssistantProvider(abuseClient,');
     assert.ok(auth >= 0 && guard > auth && provider > guard, 'server-verified user is checked before provider calls');
     assert.match(source, /if \(subscriptionDenied\) return subscriptionDenied/);
   }
@@ -351,6 +387,18 @@ test('all active AI provider routes guard paid access before fetching DeepSeek',
   assert.match(moved, /status: 410/);
   const source = await readFile(new URL('../app/api/planner/conversation/route.ts', import.meta.url), 'utf8');
   assert.ok(source.indexOf('if (prior.data)') < source.indexOf('await requireAssistantSubscription'));
+});
+
+test('billing history enumeration is bounded before account deletion can be marked complete', async () => {
+  const f = fixture(); await f.service.checkout('owner');
+  let expired = 0;
+  f.stripe.checkout.sessions.list = () => (async function* () {
+    for (let i = 0; i < 1002; i++) yield { id: `cs_${i}`, customer: 'cus_owner', livemode: false };
+  })();
+  f.stripe.checkout.sessions.expire = async () => { expired++; };
+  await assert.rejects(f.service.prepareDeletion('owner'), /administrator review/);
+  assert.equal(expired, 1000);
+  assert.equal((await f.store.load('owner')).closed, false);
 });
 
 test('billing mutation routes authenticate and reject cross-origin requests; ignore client identity', async () => {

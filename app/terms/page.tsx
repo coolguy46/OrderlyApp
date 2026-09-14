@@ -96,20 +96,27 @@ export default function TermsOfServicePage() {
             </div>
 
             <div>
-              <h2 className="mb-3 text-lg font-semibold tracking-tight">Orderly AI Subscription and Trial</h2>
+              <h2 className="mb-3 text-lg font-semibold tracking-tight">Orderly AI Subscription and Usage</h2>
               <p className="text-muted-foreground leading-relaxed">
                 Only Orderly AI requires a subscription when paid access is enabled. Manual tasks, calendars,
                 scheduling, study tools, goals, exams, and integrations remain free. Orderly AI costs {ORDERLY_AI_MONTHLY_PRICE_LABEL} USD
-                per month. Eligible accounts receive a 7-day free trial with a payment method required.
-                The trial is offered once per account; previous subscribers do not receive another trial.
+                per month, with the first payment due at checkout. No free trial is currently offered for new subscriptions.
               </p>
               <p className="text-muted-foreground leading-relaxed mt-3">
                 Stripe Checkout shows your first charge date and the recurring amount before you confirm.
-                Unless you cancel before the trial ends, the subscription automatically renews monthly at
+                Your subscription automatically renews monthly at
                 {ORDERLY_AI_MONTHLY_PRICE_LABEL} USD. Cancel through Manage subscription in Assistant or Settings → Billing. Canceling
-                during the trial prevents the first subscription charge and preserves access until the trial
-                ends. Canceling a paid subscription stops its next renewal and preserves access until the
-                current paid period ends. A subscription does not promise unlimited AI usage.
+                a paid subscription stops its next renewal and preserves access until the current paid period ends.
+                Previously granted trials retain their original terms; canceling before an existing trial ends
+                prevents its first subscription charge. A subscription does not promise unlimited AI usage.
+              </p>
+              <p className="text-muted-foreground leading-relaxed mt-3">
+                Each paid billing month includes 1,000,000 total input and output tokens, capped at 50,000 per UTC day.
+                Daily limits reset at midnight UTC; monthly limits reset at your subscription renewal.
+                AI context, conversation history and additional model attempts count toward usage.
+                Requests reserve a safe maximum before dispatch and are reconciled to confirmed provider usage.
+                Unconfirmed requests retain their reservation, and requests that cannot fit the remaining allowance may be refused.
+                There are no automatic overage charges. Manual tools remain available when AI limits are reached.
               </p>
               <p className="text-muted-foreground leading-relaxed mt-3">
                 Billing is handled by Stripe. Canceling your subscription does not delete your Orderly data

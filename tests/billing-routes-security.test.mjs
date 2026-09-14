@@ -9,15 +9,24 @@ const require = createRequire(import.meta.url);
 const ts = require('typescript');
 const root = resolve('.');
 
-function fixture({ user = { id: 'owner' }, failed = false, authError = false, authThrows = false, subscription = {} } = {}) {
+function fixture({ user = { id: 'owner' }, failed = false, authError = false, authThrows = false, subscription = {}, limited = false } = {}) {
   const calls = [];
+  const rateCalls = [];
   const stubs = {
     'server-only': {},
+    '@/lib/security/rate-limit-server': { async enforceRateLimit(userId, policy) {
+      rateCalls.push({ userId, policy });
+      assert.equal(calls.length, 0, 'throttling must happen before any Stripe lookup');
+      return limited ? Response.json({ error: 'Slow down' }, { status: 429, headers: { 'Cache-Control': 'private, no-store', 'Retry-After': '10' } }) : null;
+    } },
     '@/lib/supabase/server': { createSupabaseServerClient: async () => ({ auth: { getUser: async () => {
       if (authThrows) throw new Error('private authentication details');
       return { data: { user }, error: authError ? new Error('private authentication details') : null };
     } } }) },
-    '@/lib/billing/server': { billingServer: async () => {
+    '@/lib/billing/server': { billingStore: () => ({ async recordEvent(...args) {
+      if (failed) throw new Error('private database details');
+      calls.push(['event', ...args]);
+    } }), billingServer: async () => {
       calls.push(['server']);
       if (failed) throw new Error('private Stripe error with sensitive details');
       return { service: {
@@ -40,7 +49,7 @@ function fixture({ user = { id: 'owner' }, failed = false, authError = false, au
     }, loadedModule, loadedModule.exports);
     return loadedModule.exports;
   }
-  return { calls, route: name => load(resolve(root, `app/api/billing/${name}/route.ts`)) };
+  return { calls, rateCalls, route: name => load(resolve(root, `app/api/billing/${name}/route.ts`)) };
 }
 
 async function configured(fn) {
@@ -143,6 +152,35 @@ test('real webhook handler rejects forgery before database access; signed events
   const f = fixture(); assert.equal((await f.route('webhook').POST(req())).status, 400);
   assert.equal((await f.route('webhook').POST(req('bad-signature'))).status, 400); assert.deepEqual(f.calls, []);
   assert.equal((await f.route('webhook').POST(req(signature))).status, 200);
-  assert.deepEqual(f.calls[1], ['event', 'evt_fixture', 'invoice.paid', 123]);
+  assert.deepEqual(f.calls, [['event', 'evt_fixture', 'invoice.paid', 123]], 'verified event persists without Stripe API calls');
   assert.equal((await fixture({ failed: true }).route('webhook').POST(req(signature))).status, 503);
+}));
+
+test('billing status, checkout and portal throttle verified identity before any Stripe/network work', async () => configured(async () => {
+  for (const name of ['status', 'checkout', 'portal']) {
+    const f = fixture({ limited: true });
+    const response = await (name === 'status' ? f.route(name).GET() : f.route(name).POST(request(name)));
+    assert.equal(response.status, 429); assert.equal(response.headers.get('Retry-After'), '10');
+    assert.deepEqual(f.calls, []); assert.equal(f.rateCalls.length, 1);
+    assert.equal(f.rateCalls[0].userId, 'owner');
+    assert.equal(f.rateCalls[0].policy.scope, `billing_${name}`);
+  }
+  const owner = fixture({ user: verifiedOwner, limited: true });
+  const result = await (await owner.route('status').GET()).json();
+  assert.equal(result.aiAccess, true); assert.equal(result.ownerAccess, true);
+  assert.deepEqual(owner.calls, [], 'throttled Stripe lookup does not revoke complimentary owner AI');
+}));
+
+test('unsigned, wrong-mode, wrong-account and irrelevant webhook events perform no database persistence', async () => configured(async () => {
+  const sdk = new Stripe('sk_test_fixture');
+  for (const [patch, status] of [[{ livemode: true }, 400], [{ account: 'acct_other' }, 400], [{ type: 'payment_intent.created' }, 200]]) {
+    const payload = JSON.stringify({ id: 'evt_fixture', object: 'event', type: 'invoice.paid', livemode: false,
+      created: 123, data: { object: {} }, ...patch });
+    const signature = sdk.webhooks.generateTestHeaderString({ payload, secret: process.env.STRIPE_WEBHOOK_SECRET });
+    const f = fixture();
+    const response = await f.route('webhook').POST(new Request('http://localhost:3000/api/billing/webhook', {
+      method: 'POST', body: payload, headers: { 'stripe-signature': signature },
+    }));
+    assert.equal(response.status, status); assert.deepEqual(f.calls, []);
+  }
 }));

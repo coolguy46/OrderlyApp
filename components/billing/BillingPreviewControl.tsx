@@ -54,7 +54,7 @@ function PreviewScreens({ userId }: { userId: string }) {
     {returned && <p role="status" className="rounded-xl border border-border p-3 text-sm">Back from test checkout. This return link does not confirm payment or change your real AI access.</p>}
     <div className="rounded-xl border border-amber-500/25 bg-amber-500/10 p-4 text-sm">
       <p className="flex items-center gap-2 font-medium"><FlaskConical className="h-4 w-4" aria-hidden="true" /> Test mode · no real charges</p>
-      <p className="mt-1 text-muted-foreground">Buy and trial buttons below open Stripe’s sandbox. Manage subscription is simulated. Nothing here unlocks real AI or changes your account.</p>
+      <p className="mt-1 text-muted-foreground">Subscribe buttons below open Stripe’s sandbox without a free trial. Existing-trial and billing-management screens are simulations. Nothing here unlocks real AI or changes your account.</p>
       <p className="mt-2 text-xs text-muted-foreground">For test checkout, use card 4242 4242 4242 4242, any future expiry and any 3-digit CVC. Never enter a real card.</p>
     </div>
     <label className="block space-y-2 text-sm font-medium">Screen to preview

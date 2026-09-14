@@ -12,7 +12,7 @@ const postcss = require('postcss');
 const tailwind = require('@tailwindcss/postcss');
 const root = resolve('.');
 
-test('billing UI: trial checkout in AI-only gate, cancellation, failure recovery, free tools, responsive states and owner isolation', { timeout: 120000 }, async () => {
+test('billing UI: no-trial checkout, legacy trials, persistent AI gate, cancellation, free tools, responsiveness and owner isolation', { timeout: 120000 }, async () => {
   const output = await mkdtemp(join(tmpdir(), 'orderly-billing-ui-'));
   let server, browser;
   try {
@@ -61,20 +61,21 @@ test('billing UI: trial checkout in AI-only gate, cancellation, failure recovery
     });
 
     await page.goto(origin + '/planner?gate&checkout=success');
-    const trialButton = () => page.getByRole('button', { name: 'Start 7-day free trial', exact: true });
-    await trialButton().waitFor();
+    const purchaseButton = () => page.getByRole('button', { name: 'Subscribe for $8.99/month', exact: true });
+    await purchaseButton().waitFor();
     await page.getByText(/AI unlocks only when your subscription is confirmed/).waitFor();
     assert.equal(await page.getByText('AI chat available', { exact: true }).count(), 0, 'success address never grants access');
     assert.equal(await page.getByRole('textbox', { name: 'Private AI message' }).count(), 0, 'private chat is not mounted under blur');
     assert.equal(await page.getByRole('button', { name: 'Send AI message' }).count(), 0);
-    await page.getByText('Then $8.99 USD / month', { exact: true }).waitFor();
-    await page.getByText(/Payment method required/).waitFor();
+    await page.getByText('$8.99', { exact: true }).waitFor();
+    await page.getByText('USD / month', { exact: true }).waitFor();
+    await page.getByText(/first payment is due at checkout/).waitFor();
     await page.getByRole('button', { name: 'Create manual task' }).click();
     await page.getByText('Manual task saved', { exact: true }).waitFor();
     await page.getByRole('button', { name: 'Undo previous change' }).click();
     await page.getByText('Previous change undone', { exact: true }).waitFor();
-    await trialButton().focus();
-    assert.equal(await trialButton().evaluate(element => document.activeElement === element), true);
+    await purchaseButton().focus();
+    assert.equal(await purchaseButton().evaluate(element => document.activeElement === element), true);
     await page.keyboard.press('Enter');
     await page.getByRole('alert').filter({ hasText: 'Synthetic billing outage' }).waitFor();
     assert.equal(mutations.length, 1); assert.equal(mutations[0].body, null);
@@ -86,13 +87,13 @@ test('billing UI: trial checkout in AI-only gate, cancellation, failure recovery
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
 
     checkoutResult = { url: 'https://checkout.stripe.com/c/pay/synthetic' };
-    await trialButton().click();
+    await purchaseButton().click();
     await page.getByText('Synthetic secure checkout', { exact: true }).waitFor();
     status = { ...locked, aiAccess: true, hasSubscription: true, canManage: true, status: 'trialing', trialEligible: false, trialEndsAt: new Date(Date.now() + 7 * 86400000).toISOString(), accessEndsAt: new Date(Date.now() + 7 * 86400000).toISOString() };
     await page.goto(origin + '/planner?gate&checkout=success');
     await page.getByText('AI chat available', { exact: true }).waitFor();
     await page.getByText(/Your free trial is active.*First charge: \$8\.99 USD on/).waitFor();
-    assert.equal(await trialButton().count(), 0);
+    assert.equal(await purchaseButton().count(), 0);
     status = { ...status, cancelAtPeriodEnd: true };
     await page.evaluate(() => window.dispatchEvent(new Event('focus')));
     await page.getByText(/Trial canceled.*You will not be charged/).waitFor();
@@ -120,8 +121,8 @@ test('billing UI: trial checkout in AI-only gate, cancellation, failure recovery
     status = { ...locked, sandbox: false, trialEligible: false };
     await page.evaluate(() => window.dispatchEvent(new Event('focus')));
     await page.getByRole('button', { name: 'Subscribe for $8.99/month', exact: true }).waitFor();
-    assert.equal(await trialButton().count(), 0, 'returning accounts never get a promised second trial');
-    await page.getByText(/free trial is available only once per account/).waitFor();
+    assert.equal(await page.getByRole('button', {name:'Start 7-day free trial'}).count(), 0, 'returning accounts never get a promised second trial');
+    await page.getByText(/No free trial is currently offered/).waitFor();
     status = { ...status, checkoutEnabled: false };
     await page.getByRole('button', { name: 'Refresh status', exact: true }).click();
     await page.getByText(/New subscriptions are not available yet/).waitFor();
@@ -129,7 +130,7 @@ test('billing UI: trial checkout in AI-only gate, cancellation, failure recovery
     status = { ...locked, aiAccess: false, hasSubscription: true, canManage: true, status: 'past_due', trialEligible: false };
     await page.getByRole('button', { name: 'Refresh status', exact: true }).click();
     await page.getByText(/Your subscription needs attention/).waitFor();
-    assert.equal(await trialButton().count(), 0);
+    assert.equal(await purchaseButton().count(), 0);
 
     failStatus = true;
     await page.getByRole('button', { name: 'Refresh status', exact: true }).click();
@@ -142,7 +143,7 @@ test('billing UI: trial checkout in AI-only gate, cancellation, failure recovery
     await page.getByRole('button', { name: 'Refresh status', exact: true }).click();
     await page.getByText(/Subscriptions are temporarily unavailable.*Orderly AI stays locked/).waitFor();
     assert.equal(await page.getByRole('textbox', { name: 'Private AI message' }).count(), 0);
-    assert.equal(await trialButton().count(), 0, 'no dead purchase button while checkout is unavailable');
+    assert.equal(await purchaseButton().count(), 0, 'no dead purchase button while checkout is unavailable');
     for (let attempt = 0; attempt < 3; attempt++) {
       await page.getByRole('button', { name: 'Refresh status', exact: true }).click();
       await page.getByText(/Subscriptions are temporarily unavailable.*Orderly AI stays locked/).waitFor();
@@ -162,7 +163,7 @@ test('billing UI: trial checkout in AI-only gate, cancellation, failure recovery
     await page.getByRole('button', { name: 'Refresh status', exact: true }).click();
     await page.getByText(/Owner access — your account has complimentary Orderly AI/).waitFor();
     await page.getByRole('textbox', { name: 'Private AI message' }).waitFor();
-    assert.equal(await trialButton().count(), 0);
+    assert.equal(await purchaseButton().count(), 0);
     await page.goto(origin + '/settings/billing');
     await page.getByText(/You do not need to purchase a subscription/).waitFor();
     assert.equal(await page.getByText(/Orderly AI stays locked/).count(), 0);
@@ -176,7 +177,7 @@ test('billing UI: trial checkout in AI-only gate, cancellation, failure recovery
     await page.getByRole('textbox', { name: 'Private AI message' }).waitFor();
     status = { ...locked };
     await page.evaluate(() => window.billingFixture.signIn('billing-test-other'));
-    await trialButton().waitFor();
+    await purchaseButton().waitFor();
     assert.equal(await page.getByRole('textbox', { name: 'Private AI message' }).count(), 0, 'owner exception does not carry to another signed-in account');
     // Explicit non-production development bypass is still supported by the hook.
     status = { enabled: false, subscriptionRequired: false };
@@ -195,13 +196,13 @@ test('billing UI: trial checkout in AI-only gate, cancellation, failure recovery
     status = { ...locked };
     delayStatus = null;
     await page.evaluate(() => window.billingFixture.signIn('billing-test-another-user'));
-    await trialButton().waitFor();
+    await purchaseButton().waitFor();
     release();
-    await page.getByText('Your first 7 days are free', { exact: true }).waitFor();
+    await page.getByText(/No free trial is currently offered/).waitFor();
     assert.equal(await page.getByText('AI chat available', { exact: true }).count(), 0, 'late complimentary owner response cannot unlock another account');
 
     await page.goto(origin + '/settings/billing');
-    await trialButton().waitFor();
+    await purchaseButton().waitFor();
     status = { ...locked, hasSubscription: true, aiAccess: true, canManage: true, status: 'trialing', trialEligible: false, cancelAtPeriodEnd: true, trialEndsAt: new Date(Date.now() + 86400000).toISOString() };
     await page.getByRole('button', { name: 'Refresh status', exact: true }).click();
     await page.getByText(/Trial canceled.*You will not be charged/).waitFor();
@@ -212,7 +213,7 @@ test('billing UI: trial checkout in AI-only gate, cancellation, failure recovery
 
     status = { ...locked, sandbox: false };
     await page.goto(origin + '/planner?gate');
-    await trialButton().waitFor();
+    await purchaseButton().waitFor();
     await page.setViewportSize({ width: 390, height: 844 });
     if (process.env.ORDERLY_BILLING_SCREENSHOT) await page.screenshot({ path: process.env.ORDERLY_BILLING_SCREENSHOT, fullPage: true });
     await page.setViewportSize({ width: 1280, height: 900 });
@@ -226,7 +227,7 @@ test('billing UI: trial checkout in AI-only gate, cancellation, failure recovery
     const dialog = page.getByRole('dialog', { name: 'AI screen preview' });
     const select = dialog.getByRole('combobox', { name: 'Screen to preview' });
     await dialog.getByText('Test mode · no real charges', { exact: true }).waitFor();
-    await dialog.getByRole('button', { name: 'Start 7-day free trial' }).waitFor();
+    await dialog.getByRole('button', { name: 'Subscribe for $8.99/month' }).waitFor();
     const baselineMutations = mutations.length;
     await select.selectOption('trial');
     await dialog.getByText(/Your free trial is active/).waitFor();
@@ -253,11 +254,11 @@ test('billing UI: trial checkout in AI-only gate, cancellation, failure recovery
     await page.getByRole('textbox', { name: 'Private AI message' }).fill('Keep my draft');
     await previewButton.click();
     previewFailure = true;
-    await dialog.getByRole('button', { name: 'Start 7-day free trial' }).click();
+    await dialog.getByRole('button', { name: 'Subscribe for $8.99/month' }).click();
     await dialog.getByRole('alert').filter({ hasText: 'Could not open test checkout' }).waitFor();
-    assert.ok(mutations.at(-1).url.endsWith('/api/billing/preview/checkout?kind=trial'));
+    assert.ok(mutations.at(-1).url.endsWith('/api/billing/preview/checkout?kind=subscription'));
     previewFailure = false; previewUrl = 'https://buy.stripe.com/live_not_allowed';
-    await dialog.getByRole('button', { name: 'Start 7-day free trial' }).click();
+    await dialog.getByRole('button', { name: 'Subscribe for $8.99/month' }).click();
     await dialog.getByRole('alert').filter({ hasText: 'Test checkout address could not be verified' }).waitFor();
     await page.keyboard.press('Escape');
     assert.equal(await page.getByRole('textbox', { name: 'Private AI message' }).inputValue(), 'Keep my draft', 'real assistant remains mounted and unchanged');

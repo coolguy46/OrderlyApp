@@ -38,6 +38,24 @@ export interface AssistantUsageAttempt {
   error: 'unavailable' | null;
 }
 
+/** Bind only a service-role client to an identity already verified by getUser.
+ * Calendar reads/writes must continue using the ordinary RLS client.
+ */
+export function bindAssistantUsageClient(
+  serverClient: AssistantUsageRpcClient | null,
+  verifiedUserId: string,
+): AssistantUsageRpcClient {
+  const allowed = new Set(['assistant_reserve_ai_request', 'assistant_complete_ai_request', 'assistant_fail_ai_request']);
+  return {
+    rpc(name, parameters) {
+      if (!serverClient || !verifiedUserId || !allowed.has(name)) {
+        return Promise.resolve({ data: null, error: { code: '42501' } });
+      }
+      return serverClient.rpc(`${name}_server`, { ...parameters, p_user_id: verifiedUserId });
+    },
+  };
+}
+
 async function usageRpc(client: AssistantUsageRpcClient, name: string, parameters: Record<string, unknown>): Promise<RpcResult> {
   try {
     return await client.rpc(name, parameters);

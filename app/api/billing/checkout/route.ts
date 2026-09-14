@@ -2,6 +2,8 @@ import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { guardMutationRequest } from '@/lib/security/request';
 import { billingConfig, BillingError, billingFailure, billingJson } from '@/lib/billing/config';
 import { billingServer } from '@/lib/billing/server';
+import { enforceRateLimit } from '@/lib/security/rate-limit-server';
+import { RATE_LIMIT_POLICIES } from '@/lib/security/rate-limit';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -13,6 +15,8 @@ export async function POST(request: Request) {
     const { data: { user }, error } = await supabase.auth.getUser();
     if (error || !user) return billingJson({ error: 'Sign in to subscribe.' }, 401);
     if (new URL(request.url).origin !== billingConfig().origin) throw new BillingError('Open checkout from the configured Orderly website.', 403);
+    const limited = await enforceRateLimit(user.id, RATE_LIMIT_POLICIES.billingCheckout);
+    if (limited) return limited;
     // No price, customer, user ID, quantity, or return URL is accepted from the body.
     const { service } = await billingServer();
     return billingJson(await service.checkout(user.id));

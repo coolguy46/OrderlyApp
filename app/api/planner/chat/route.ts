@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { requireAssistantSubscription } from '@/lib/billing/server';
+import type { AssistantBillingPeriod } from '@/lib/billing/plan';
 import {
   PLANNER_CHAT_SYSTEM_PROMPT,
   inferPlannerChatExactCorrection,
@@ -13,13 +14,14 @@ import {
   type PlannerChatPlanRequest,
 } from '@/lib/planner/deepseek-command';
 import {
+  bindAssistantUsageClient,
   completeAssistantUsage,
   failAssistantUsage,
   parseAssistantProviderUsage,
   reserveAssistantUsage,
   type AssistantProviderUsage,
-  type AssistantUsageRpcClient,
 } from '@/lib/planner/assistant-usage';
+import { fetchBudgetedAssistantProvider, AssistantTokenLimitError } from '@/lib/planner/assistant-budget';
 import { guardMutationRequest, readJsonBody, requestBodyErrorResponse } from '@/lib/security/request';
 import { assistantDataMessage, assistantProviderBody, AssistantContextCapacityError, readAssistantProviderResponse } from '@/lib/planner/assistant-provider';
 import { acquireAssistantLease, assistantLeaseFailure, releaseAssistantLease } from '@/lib/planner/assistant-abuse';
@@ -89,9 +91,10 @@ function unavailable(
 }
 
 export async function POST(request: NextRequest) {
+  const providerDeadline = Date.now() + 20_000;
   const rejectedOrigin = guardMutationRequest(request);
   if (rejectedOrigin) return rejectedOrigin;
-  const supabase = await createSupabaseServerClient();
+  const supabase = await createSupabaseServerClient({ deadline: providerDeadline + 5_000 });
   const { data: { user }, error: authError } = await supabase.auth.getUser();
   if (authError || !user) return unavailable('Sign in to use Orderly Assistant.', 401);
 
@@ -131,7 +134,8 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  const subscriptionDenied = await requireAssistantSubscription(user);
+  let billingPeriod: AssistantBillingPeriod | undefined;
+  const subscriptionDenied = await requireAssistantSubscription(user, period => { billingPeriod = period; });
   if (subscriptionDenied) return subscriptionDenied;
   if (process.env.AI_ASSISTANT_ENABLED === 'false') {
     return unavailable('Orderly Assistant is temporarily turned off. Your existing planner still works.', 503);
@@ -142,8 +146,7 @@ export async function POST(request: NextRequest) {
   }
 
   const requestId = crypto.randomUUID();
-  const providerDeadline = Date.now() + 20_000;
-  const abuseClient = createAssistantAbuseClient();
+  const abuseClient = createAssistantAbuseClient(providerDeadline + 5_000);
   const lease = await acquireAssistantLease(abuseClient, user.id, requestId);
   if (!lease.allowed) {
     const failure = assistantLeaseFailure(lease);
@@ -151,7 +154,7 @@ export async function POST(request: NextRequest) {
     response.headers.set('Retry-After', failure.headers['Retry-After']);
     return response;
   }
-  const usageClient = supabase as unknown as AssistantUsageRpcClient;
+  const usageClient = bindAssistantUsageClient(abuseClient, user.id);
   const usageRequestId = lease.leaseId!;
   const usageAttempt = await reserveAssistantUsage(usageClient, usageRequestId);
   if (usageAttempt.error || !usageAttempt.reservation?.allowed) {
@@ -179,17 +182,8 @@ export async function POST(request: NextRequest) {
       assistantDataMessage('Conversation transcript; answer the final user message', transcript),
     ], 1_000);
     if (providerController.signal.aborted || Date.now() >= providerDeadline) throw new Error('Assistant request timed out');
-    providerDispatched = true;
-    const providerRequest = fetch('https://api.deepseek.com/chat/completions', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: providerBody,
-      signal: providerController.signal,
-      cache: 'no-store',
-      redirect: 'error',
+    const providerRequest = fetchBudgetedAssistantProvider(abuseClient, user.id, usageRequestId, providerBody, {
+      apiKey, signal: providerController.signal, deadline: providerDeadline, billingPeriod, onDispatch: () => { providerDispatched = true; },
     });
     const providerResponse = await providerRequest;
 
@@ -254,6 +248,7 @@ export async function POST(request: NextRequest) {
     } else {
       await failAssistantUsage(usageClient, usageRequestId);
     }
+    if (error instanceof AssistantTokenLimitError) return unavailable(error.message, 429);
     return unavailable(
       error instanceof AssistantContextCapacityError ? error.message : request.signal.aborted
         ? 'That response was stopped.'

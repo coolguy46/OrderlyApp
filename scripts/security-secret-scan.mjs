@@ -22,13 +22,20 @@ function inspect(text, location) {
   for (const kind of kinds) findings.add(`${location}: ${kind}`);
 }
 
-const tracked = execFileSync('git', ['ls-files', '-z'], { encoding: 'utf8' }).split('\0').filter(Boolean);
-for (const path of tracked) {
+// New application files need the same protection before their first commit.
+// Git exclusions keep local secret worksheets out; unrelated experiments are
+// deliberately outside the shipped app's source scan.
+const sourcePaths = [...new Set(execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard', '-z'], { encoding: 'utf8' })
+  .split('\0').filter(path => path && !path.startsWith('design-lab/') && !path.startsWith('research/')))];
+for (const path of sourcePaths) {
   if (!/\.(?:[cm]?[jt]sx?|json|md|sql|ya?ml|toml|txt|env|pem|key)$/.test(path) && !path.startsWith('.env')) continue;
   inspect(readFileSync(path, 'utf8'), path);
 }
 
 if (process.argv.includes('--build')) {
+  const argument = process.argv.find(value => value.startsWith('--build-dir='));
+  const buildDirectory = argument ? argument.slice('--build-dir='.length) : '.next/static';
+  if (!buildDirectory) throw new Error('Build output path must not be empty.');
   function walk(path) {
     for (const entry of readdirSync(path, { withFileTypes: true })) {
       const file = join(path, entry.name);
@@ -36,8 +43,8 @@ if (process.argv.includes('--build')) {
       else if (/\.(?:js|map|json)$/.test(file)) inspect(readFileSync(file, 'utf8'), file);
     }
   }
-  if (!statSync('.next/static', { throwIfNoEntry: false })) throw new Error('Build output missing; run the production build first.');
-  walk('.next/static');
+  if (!statSync(buildDirectory, { throwIfNoEntry: false })?.isDirectory()) throw new Error('Build output missing; run the production build first.');
+  walk(buildDirectory);
 }
 
 if (process.argv.includes('--history')) {
