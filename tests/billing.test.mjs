@@ -7,7 +7,7 @@ import { createBillingService, subscriptionAllowsAI, validMonthlyPrice } from '.
 import { acceptBillingEvent, webhookBody } from '../lib/billing/webhook.ts';
 
 const config = { priceId: 'price_test', origin: 'http://localhost:3000', portalConfiguration: 'bpc_fixture' };
-const price = { id: 'price_test', active: true, livemode: false, currency: 'usd', unit_amount: 499, type: 'recurring', billing_scheme: 'per_unit', recurring: { interval: 'month', interval_count: 1, usage_type: 'licensed' } };
+const price = { id: 'price_test', active: true, livemode: false, currency: 'usd', unit_amount: 899, type: 'recurring', billing_scheme: 'per_unit', recurring: { interval: 'month', interval_count: 1, usage_type: 'licensed' } };
 const subscription = (patch = {}) => ({ id: 'sub_test', livemode: false, status: 'active', items: { data: [{ price, current_period_end: Math.floor(Date.now() / 1000) + 86400 }] }, latest_invoice: { status: 'paid' }, ...patch });
 
 test('production always requires subscriptions despite missing, false, or malformed rollout flags', () => {
@@ -51,6 +51,7 @@ function fixture(livemode = false, checkoutEnabled = true) {
     checkout: { sessions: {
       async create(params, options) { state.calls.push(['checkout', params, options]); state.session = { id: 'cs_test', status: 'open', customer: 'cus_owner', url: 'https://checkout.stripe.com/test', metadata: params.metadata, livemode }; return state.session; },
       async retrieve(id) { assert.equal(id, 'cs_test'); return state.session; },
+      async listLineItems(id) { assert.equal(id, 'cs_test'); return { data: [{ price, quantity: 1 }], has_more: false }; },
       list() { return (async function* () { if (state.session?.status === 'open') yield state.session; })(); },
       async expire() { state.session.status = 'expired'; },
     } },
@@ -128,7 +129,30 @@ test('customer mode is checked even for empty subscriptions and direct portal ac
 
 test('only the approved active flat monthly price is accepted', () => {
   assert.equal(validMonthlyPrice(price), true);
+  assert.equal(validMonthlyPrice({ ...price, unit_amount: 499 }), false, 'old price cannot start a new checkout');
   for (const patch of [{ active: false }, { livemode: true }, { unit_amount: 0 }, { currency: 'eur' }, { recurring: { interval: 'year', interval_count: 1 } }, { transform_quantity: { divide_by: 10 } }]) assert.equal(validMonthlyPrice({ ...price, ...patch }), false);
+});
+
+test('old-price open checkout is expired instead of reused after a price change', async () => {
+  const f = fixture();
+  await f.service.checkout('owner');
+  const oldSession = f.state.session;
+  f.stripe.checkout.sessions.listLineItems = async () => ({ data: [{ price: { ...price, id: 'price_old', unit_amount: 499 }, quantity: 1 }], has_more: false });
+  await f.service.checkout('owner');
+  assert.equal(oldSession.status, 'expired');
+  const calls = f.state.calls.filter(c => c[0] === 'checkout');
+  assert.equal(calls.length, 2);
+  assert.notEqual(calls[0][2].idempotencyKey, calls[1][2].idempotencyKey);
+  assert.deepEqual(calls[1][1].line_items, [{ price: config.priceId, quantity: 1 }]);
+  assert.equal(calls[1][1].subscription_data.trial_period_days, 7);
+});
+
+test('unverifiable checkout line items fail closed before any new purchase', async () => {
+  const f = fixture();
+  await f.service.checkout('owner');
+  f.stripe.checkout.sessions.listLineItems = async () => { throw new Error('line items unavailable'); };
+  await assert.rejects(f.service.checkout('owner'), /line items unavailable/);
+  assert.equal(f.state.calls.filter(c => c[0] === 'checkout').length, 1);
 });
 
 test('entitlement requires current paid Stripe state, not redirects or a subscription ID', () => {

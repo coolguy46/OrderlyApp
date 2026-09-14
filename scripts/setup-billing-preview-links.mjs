@@ -3,10 +3,11 @@
 import { readFileSync } from 'node:fs';
 import { parseEnv } from 'node:util';
 import Stripe from 'stripe';
+import { ORDERLY_AI_MONTHLY_PRICE_CENTS } from '../lib/billing/plan.ts';
 
 const accountId = 'acct_1UE0rgCjmnlmrlsX';
-const priceId = 'price_1UE1DQCjmnlmrlsXHxHfcpa4';
-const purpose = 'owner-billing-preview-v1';
+const priceId = 'price_1UFft1CjmnlmrlsXPVZuVx2l';
+const purpose = 'owner-billing-preview-899-v1';
 const returnUrl = 'https://www.myorderlyapp.com/planner?billingPreviewReturn=1';
 let phase = 'configuration';
 const check = condition => { if (!condition) throw new Error('Verification failed'); };
@@ -18,7 +19,7 @@ try {
   phase = 'verify_account_and_price';
   check((await stripe.accounts.retrieve(null)).id === accountId);
   const price = await stripe.prices.retrieve(priceId);
-  check(!price.livemode && price.active && price.unit_amount === 499 && price.currency === 'usd'
+  check(!price.livemode && price.active && price.unit_amount === ORDERLY_AI_MONTHLY_PRICE_CENTS && price.currency === 'usd'
     && price.recurring?.interval === 'month' && price.recurring.interval_count === 1);
   const existing = [];
   for await (const link of stripe.paymentLinks.list({ limit: 100 })) {

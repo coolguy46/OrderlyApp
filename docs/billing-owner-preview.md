@@ -18,6 +18,12 @@ Twelve synthetic states cover first-time paywall, active/canceled trial, paid/ca
 
 ## Sandbox checkout
 
+September 14, 2026 update: current previews use **$8.99 USD/month** price
+`price_1UFft1CjmnlmrlsXPVZuVx2l`. Replacement trial link:
+`plink_1UFg03CjmnlmrlsXPqqor49F`; no-trial link: `plink_1UFg03CjmnlmrlsXehXANZPl`.
+The seven-day trial, test-only warning, required payment method and canonical return
+URL are unchanged. The September 12 price and links below are historical.
+
 The trial/subscribe buttons in the dialog open dedicated, fixed Stripe **test-mode Payment Links**. The UI and hosted checkout explicitly say test mode. No sandbox secret is installed in production. The server returns only the approved test URL after owner and same-origin verification, and the client independently rejects non-test/foreign URLs.
 
 Verified September 12, 2026:
@@ -31,7 +37,7 @@ Verified September 12, 2026:
 
 These test links have no Orderly user/customer mapping. A completed sandbox checkout does not unlock AI. Return-query presence is never payment evidence. Test links are reusable bearer URLs if copied elsewhere, but cannot charge real money; the private control itself is server-authorized. This does **not** replace or verify the production Checkout Sessions, webhooks, or portal integration.
 
-Setup is reproducible with `node scripts/setup-billing-preview-links.mjs --run`. It requires the already-saved sandbox key in ignored `.env.local`, verifies the exact account and price before writes, reuses tagged links, and sanitizes errors. It never reads the live key. To retire these previews, deactivate only these exact sandbox links and remove the preview entry points.
+Setup is reproducible with `node --experimental-strip-types scripts/setup-billing-preview-links.mjs --run`. It requires the already-saved sandbox key in ignored `.env.local`, verifies the exact account and current price before writes, reuses tagged links, and sanitizes errors. It never reads the live key. To retire these previews, deactivate only the current exact sandbox links and remove the preview entry points.
 
 Reference: [Stripe Payment Links API](https://docs.stripe.com/api/payment-link/create). The implementation planner was called but misclassified this narrow preview request as an invoicing integration; no irrelevant invoicing flow was added.
 

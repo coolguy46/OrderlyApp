@@ -1,5 +1,14 @@
 # Orderly AI production rollout — AI enforced; live checkout not activated
 
+## September 14, 2026: current price
+
+Orderly AI is now USD **$8.99/month** after the eligible seven-day trial. Live price:
+`price_1UFfrPCchZxGFzZ8vEXAr9du`. Sandbox price: `price_1UFft1CjmnlmrlsXPVZuVx2l`.
+Both account/product identities and the absence of existing subscribers to the old
+price were checked before replacement. No customer subscription was repriced or charged.
+The dated $4.99 records below describe historical verification, not the current offer.
+Payment activation remains separate; see the September 14 activation and pricing records.
+
 ## September 13, 2026: explicitly approved owner access
 
 The owner subsequently clarified that their own approved Google account should have complimentary real AI access. `lib/billing/owner-access.ts` now holds the shared server-only identity check: confirmed primary email AND matching verified Google identity returned by Supabase `auth.getUser()`. Only this allowlisted identity bypasses subscription checks in `/api/billing/status` and all three AI provider handlers, including when billing is disabled or unavailable. All other production accounts remain locked without a verified active trial or paid subscription, irrespective of old rollout flags.
@@ -22,7 +31,7 @@ Local validation: all 558 unit/integration tests passed, including production fa
 
 - Production Stripe account: `acct_1UE0rYCchZxGFzZ8` (Orderly, live).
 - Existing live product: `prod_VEUB0jmCeXN7lx` (Orderly AI).
-- Existing live price: `price_1UEeraCchZxGFzZ81FrIVc1K`, USD 499 cents, recurring monthly, active. Reuse it; do not duplicate the sandbox price.
+- Historical live price: `price_1UEeraCchZxGFzZ81FrIVc1K`, USD 499 cents, recurring monthly (superseded September 14; do not use for new checkouts).
 - Created and read back dedicated live portal `bpc_1UEgAACchZxGFzZ8bjDYvxvm`: cancellation at period end, payment-method updates and invoice history enabled. Owner approved keeping trial/paid access through its end. No customers were charged.
 - Latest live account read still reported `charges_enabled=false` and `payouts_enabled=false`; do not enable new sales while Stripe review is pending.
 - Price tax behavior is unspecified; product tax code is unset. No tax registration or collection was changed.
@@ -37,7 +46,7 @@ Local validation: all 558 unit/integration tests passed, including production fa
 - `STRIPE_BILLING_ENABLED` enables billing services; `STRIPE_CHECKOUT_ENABLED` separately enables new purchases. Live purchases default off. Stripe `charges_enabled` must also be true.
 - Turning off new purchases does not disable existing users' portal/status/webhooks. Keep billing services configured for all existing subscribers.
 - Live checkout requires an active live portal configuration with period-end cancellation and payment-method updates enabled.
-- Eligible accounts receive seven days free with a payment method collected upfront, then $4.99 USD/month. Full server-owned customer subscription history determines eligibility. Checkout attempts persist 0/7-day terms before Stripe calls so retries use identical parameters. Changed eligibility expires stale open links. This is one trial per Orderly account/customer, not proof against a person recreating an account.
+- Eligible accounts receive seven days free with a payment method collected upfront, then $8.99 USD/month. Full server-owned customer subscription history determines eligibility. Checkout attempts persist 0/7-day terms before Stripe calls so retries use identical parameters. Changed eligibility or a changed price expires stale open links. This is one trial per Orderly account/customer, not proof against a person recreating an account.
 - Verified, unexpired trials grant AI access without a paid invoice. Paid subscriptions require a paid latest invoice and current matching-price period. Canceled-at-period-end trials/subscriptions keep access until their effective end. Expired, canceled, past-due, paused and unpaid state cannot unlock AI.
 - Assistant chat alone is gated by a dim/blurred fictional backdrop and a direct trial/subscribe button. Private chat is not rendered under the blur. Manual calendar/scheduling, tasks, goals, exams, study and integrations remain free; request recovery and undo controls stay available. Paid enforcement is server-side on all active provider routes.
 - Billing UI refreshes on return, focus and access expiry. Checkout return query strings never grant access. Terms/privacy disclose the approved trial and renewal flow and actual billing data handling, without promising unlimited usage or inventing refund/retention rules.
@@ -51,7 +60,7 @@ Install the following **server-only** values in the existing Vercel production p
 STRIPE_MODE=live
 STRIPE_SECRET_KEY=<live secret from the verified live account>
 STRIPE_ACCOUNT_ID=acct_1UE0rYCchZxGFzZ8
-STRIPE_AI_PRICE_ID=price_1UEeraCchZxGFzZ81FrIVc1K
+STRIPE_AI_PRICE_ID=price_1UFfrPCchZxGFzZ8vEXAr9du
 STRIPE_APP_ORIGIN=https://www.myorderlyapp.com
 STRIPE_WEBHOOK_SECRET=<signing secret of the live website webhook endpoint>
 STRIPE_PORTAL_CONFIGURATION_ID=bpc_1UEgAACchZxGFzZ8bjDYvxvm

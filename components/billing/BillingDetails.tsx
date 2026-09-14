@@ -5,6 +5,7 @@ import { ArrowRight, ShieldCheck } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { billingDate, type BillingStatus, type BillingView } from './useBilling';
 import { BILLING_UNAVAILABLE_MESSAGE } from '@/lib/billing/messages';
+import { ORDERLY_AI_MONTHLY_PRICE_LABEL } from '@/lib/billing/plan';
 
 export function subscriptionMessage(status: BillingStatus) {
   if (status.ownerAccess && status.aiAccess) return 'Owner access — your account has complimentary Orderly AI.';
@@ -12,7 +13,7 @@ export function subscriptionMessage(status: BillingStatus) {
   const accessEnd = billingDate(status.accessEndsAt);
   if (status.aiAccess && status.status === 'trialing') return status.cancelAtPeriodEnd
     ? `Trial canceled. AI access continues${accessEnd || trialEnd ? ` until ${accessEnd || trialEnd}` : ' until your trial ends'}. You will not be charged.`
-    : `Your free trial is active.${trialEnd ? ` First charge: $4.99 USD on ${trialEnd}.` : ' Your first charge date is available in Stripe.'}`;
+    : `Your free trial is active.${trialEnd ? ` First charge: ${ORDERLY_AI_MONTHLY_PRICE_LABEL} USD on ${trialEnd}.` : ' Your first charge date is available in Stripe.'}`;
   if (status.aiAccess) return status.cancelAtPeriodEnd
     ? `Renewal canceled. AI access continues${accessEnd ? ` until ${accessEnd}` : ' until your paid period ends'}. You will not be charged again.`
     : `Subscription active.${accessEnd ? ` Next renewal: ${accessEnd}.` : ''}`;
@@ -38,8 +39,8 @@ export function BillingDetails({ billing, dark = false }: { billing: BillingView
   return <div className="min-w-0 space-y-4">
     <div>
       {trial && <p className={`mb-1 text-sm font-medium ${dark ? 'text-violet-200' : 'text-primary'}`}>Your first 7 days are free</p>}
-      <p><span className="text-3xl font-semibold tracking-tight">{trial ? '$0' : '$4.99'}</span><span className={`ml-1.5 text-sm ${muted}`}>{trial ? 'for 7 days' : 'USD / month'}</span></p>
-      {trial && <p className={`mt-1 text-sm ${muted}`}>Then $4.99 USD / month</p>}
+      <p><span className="text-3xl font-semibold tracking-tight">{trial ? '$0' : ORDERLY_AI_MONTHLY_PRICE_LABEL}</span><span className={`ml-1.5 text-sm ${muted}`}>{trial ? 'for 7 days' : 'USD / month'}</span></p>
+      {trial && <p className={`mt-1 text-sm ${muted}`}>Then {ORDERLY_AI_MONTHLY_PRICE_LABEL} USD / month</p>}
     </div>
     {checking && !status && <p role="status" className={`text-sm ${muted}`}>Checking AI access…</p>}
     {status?.enabled && <>
@@ -59,7 +60,7 @@ export function BillingDetails({ billing, dark = false }: { billing: BillingView
     {error && <p role="alert" className={`text-sm ${dark ? 'text-rose-200' : 'text-destructive'}`}>{error}</p>}
     <div className="flex flex-col items-stretch gap-2">
       {status?.enabled && status.checkoutEnabled !== false && !status.hasSubscription && <Button variant="secondary" className="h-auto min-h-11 whitespace-normal bg-violet-600 px-4 text-white hover:bg-violet-700" disabled={!!busy || checking} onClick={() => void openBilling('checkout')}>
-        {busy === 'checkout' ? 'Opening secure checkout…' : trial ? 'Start 7-day free trial' : 'Subscribe for $4.99/month'}{!busy && <ArrowRight aria-hidden="true" className="h-4 w-4" />}
+        {busy === 'checkout' ? 'Opening secure checkout…' : trial ? 'Start 7-day free trial' : `Subscribe for ${ORDERLY_AI_MONTHLY_PRICE_LABEL}/month`}{!busy && <ArrowRight aria-hidden="true" className="h-4 w-4" />}
       </Button>}
       {status?.enabled && status.canManage && <Button className={`h-auto min-h-10 whitespace-normal ${outline}`} variant="outline" disabled={!!busy || checking} onClick={() => void openBilling('portal')}>{busy === 'portal' ? 'Opening Stripe…' : 'Manage subscription'}</Button>}
       <Button className={dark ? 'text-slate-300 hover:bg-white/5 hover:text-white' : ''} variant="ghost" disabled={checking || !!busy} onClick={refresh}>{checking ? 'Checking…' : 'Refresh status'}</Button>

@@ -67,7 +67,7 @@ test('billing UI: trial checkout in AI-only gate, cancellation, failure recovery
     assert.equal(await page.getByText('AI chat available', { exact: true }).count(), 0, 'success address never grants access');
     assert.equal(await page.getByRole('textbox', { name: 'Private AI message' }).count(), 0, 'private chat is not mounted under blur');
     assert.equal(await page.getByRole('button', { name: 'Send AI message' }).count(), 0);
-    await page.getByText('Then $4.99 USD / month', { exact: true }).waitFor();
+    await page.getByText('Then $8.99 USD / month', { exact: true }).waitFor();
     await page.getByText(/Payment method required/).waitFor();
     await page.getByRole('button', { name: 'Create manual task' }).click();
     await page.getByText('Manual task saved', { exact: true }).waitFor();
@@ -91,7 +91,7 @@ test('billing UI: trial checkout in AI-only gate, cancellation, failure recovery
     status = { ...locked, aiAccess: true, hasSubscription: true, canManage: true, status: 'trialing', trialEligible: false, trialEndsAt: new Date(Date.now() + 7 * 86400000).toISOString(), accessEndsAt: new Date(Date.now() + 7 * 86400000).toISOString() };
     await page.goto(origin + '/planner?gate&checkout=success');
     await page.getByText('AI chat available', { exact: true }).waitFor();
-    await page.getByText(/Your free trial is active.*First charge: \$4.99 USD on/).waitFor();
+    await page.getByText(/Your free trial is active.*First charge: \$8\.99 USD on/).waitFor();
     assert.equal(await trialButton().count(), 0);
     status = { ...status, cancelAtPeriodEnd: true };
     await page.evaluate(() => window.dispatchEvent(new Event('focus')));
@@ -112,20 +112,20 @@ test('billing UI: trial checkout in AI-only gate, cancellation, failure recovery
     await page.goto(origin + '/planner?gate');
     await page.getByText('AI chat available', { exact: true }).waitFor();
     status = { ...locked, trialEligible: false };
-    await page.getByRole('button', { name: 'Subscribe for $4.99/month', exact: true }).waitFor({ timeout: 5000 });
+    await page.getByRole('button', { name: 'Subscribe for $8.99/month', exact: true }).waitFor({ timeout: 5000 });
     assert.equal(await page.getByRole('textbox', { name: 'Private AI message' }).count(), 0, 'effective trial expiry relocks only AI');
     await page.getByRole('button', { name: 'Create manual task' }).click();
     await page.getByText('Manual task saved', { exact: true }).waitFor();
 
     status = { ...locked, sandbox: false, trialEligible: false };
     await page.evaluate(() => window.dispatchEvent(new Event('focus')));
-    await page.getByRole('button', { name: 'Subscribe for $4.99/month', exact: true }).waitFor();
+    await page.getByRole('button', { name: 'Subscribe for $8.99/month', exact: true }).waitFor();
     assert.equal(await trialButton().count(), 0, 'returning accounts never get a promised second trial');
     await page.getByText(/free trial is available only once per account/).waitFor();
     status = { ...status, checkoutEnabled: false };
     await page.getByRole('button', { name: 'Refresh status', exact: true }).click();
     await page.getByText(/New subscriptions are not available yet/).waitFor();
-    assert.equal(await page.getByRole('button', { name: 'Subscribe for $4.99/month', exact: true }).count(), 0);
+    assert.equal(await page.getByRole('button', { name: 'Subscribe for $8.99/month', exact: true }).count(), 0);
     status = { ...locked, aiAccess: false, hasSubscription: true, canManage: true, status: 'past_due', trialEligible: false };
     await page.getByRole('button', { name: 'Refresh status', exact: true }).click();
     await page.getByText(/Your subscription needs attention/).waitFor();
@@ -264,7 +264,7 @@ test('billing UI: trial checkout in AI-only gate, cancellation, failure recovery
     await previewButton.click();
     previewUrl = 'https://buy.stripe.com/test_fixture';
     await select.selectOption('expired');
-    await dialog.getByRole('button', { name: 'Subscribe for $4.99/month' }).click();
+    await dialog.getByRole('button', { name: 'Subscribe for $8.99/month' }).click();
     await page.getByText('Synthetic sandbox checkout', { exact: true }).waitFor();
     assert.ok(mutations.at(-1).url.endsWith('/api/billing/preview/checkout?kind=subscription'));
     status = { ...locked };

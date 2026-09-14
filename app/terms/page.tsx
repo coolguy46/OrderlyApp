@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { Button } from '@/components/ui/Button';
 import { Sparkles, ArrowLeft } from 'lucide-react';
+import { ORDERLY_AI_MONTHLY_PRICE_LABEL } from '@/lib/billing/plan';
 
 export default function TermsOfServicePage() {
   return (
@@ -28,7 +29,7 @@ export default function TermsOfServicePage() {
       <main className="px-5 py-12 sm:px-8 sm:py-20">
         <div className="mx-auto max-w-[760px] [overflow-wrap:anywhere]">
           <h1 className="mb-4 font-display text-4xl font-semibold tracking-[-0.035em] sm:text-5xl">Terms of Service</h1>
-          <p className="mb-10 border-b border-border pb-8 text-sm text-muted-foreground">Last updated: September 11, 2026</p>
+          <p className="mb-10 border-b border-border pb-8 text-sm text-muted-foreground">Last updated: September 14, 2026</p>
 
           <section className="space-y-9 [&>div:not(:last-child)]:border-b [&>div:not(:last-child)]:border-border/60 [&>div:not(:last-child)]:pb-9">
             <div>
@@ -98,14 +99,14 @@ export default function TermsOfServicePage() {
               <h2 className="mb-3 text-lg font-semibold tracking-tight">Orderly AI Subscription and Trial</h2>
               <p className="text-muted-foreground leading-relaxed">
                 Only Orderly AI requires a subscription when paid access is enabled. Manual tasks, calendars,
-                scheduling, study tools, goals, exams, and integrations remain free. Orderly AI costs $4.99 USD
+                scheduling, study tools, goals, exams, and integrations remain free. Orderly AI costs {ORDERLY_AI_MONTHLY_PRICE_LABEL} USD
                 per month. Eligible accounts receive a 7-day free trial with a payment method required.
                 The trial is offered once per account; previous subscribers do not receive another trial.
               </p>
               <p className="text-muted-foreground leading-relaxed mt-3">
                 Stripe Checkout shows your first charge date and the recurring amount before you confirm.
                 Unless you cancel before the trial ends, the subscription automatically renews monthly at
-                $4.99 USD. Cancel through Manage subscription in Assistant or Settings → Billing. Canceling
+                {ORDERLY_AI_MONTHLY_PRICE_LABEL} USD. Cancel through Manage subscription in Assistant or Settings → Billing. Canceling
                 during the trial prevents the first subscription charge and preserves access until the trial
                 ends. Canceling a paid subscription stops its next renewal and preserves access until the
                 current paid period ends. A subscription does not promise unlimited AI usage.

@@ -2,15 +2,15 @@
 
 ## Current scope
 
-Hosted subscription Checkout and Customer Portal for Orderly AI, seven days free for eligible accounts, then $4.99 USD/month. The rest of Orderly remains free. The implementation supports explicit test/live modes, with separate checkout and AI-enforcement switches. It has not been connected to the production application database. See `docs/stripe-production.md` for the production rollout; the following instructions remain sandbox-only.
+Hosted subscription Checkout and Customer Portal for Orderly AI, seven days free for eligible accounts, then $8.99 USD/month. The rest of Orderly remains free. The implementation supports explicit test/live modes, with separate checkout and AI-enforcement switches. Sandbox tests must not connect to the production application database. See `docs/stripe-production.md` for the production rollout; the following instructions remain sandbox-only.
 
 The Stripe account connection used by Codex is not an API credential for the running website. No secret keys were copied from that connection into the app.
 
-Verified existing sandbox resources (no new product or price created by this change):
+Verified sandbox resources (price replaced September 14, 2026; product reused):
 
 - Account: `acct_1UE0rgCjmnlmrlsX` (Orderly sandbox)
 - Product: `prod_VEUB0jmCeXN7lx` (Orderly AI)
-- Price: `price_1UE1DQCjmnlmrlsXHxHfcpa4` (499 USD cents per month)
+- Price: `price_1UFft1CjmnlmrlsXPVZuVx2l` (899 USD cents per month)
 - Dedicated sandbox portal: `bpc_1UEgA9CjmnlmrlsXkvvWYvcF`, period-end cancellation, payment updates and invoice history enabled.
 - Installed official `stripe` SDK 22.6.2; its default API version is `2026-08-26.dahlia`.
 
@@ -27,7 +27,7 @@ AI_SUBSCRIPTION_REQUIRED=false
 STRIPE_SECRET_KEY=
 STRIPE_WEBHOOK_SECRET=
 STRIPE_ACCOUNT_ID=acct_1UE0rgCjmnlmrlsX
-STRIPE_AI_PRICE_ID=price_1UE1DQCjmnlmrlsXHxHfcpa4
+STRIPE_AI_PRICE_ID=price_1UFft1CjmnlmrlsXPVZuVx2l
 STRIPE_APP_ORIGIN=http://localhost:3000
 STRIPE_PORTAL_CONFIGURATION_ID=bpc_1UEgA9CjmnlmrlsXkvvWYvcF
 ```

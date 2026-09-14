@@ -1,5 +1,6 @@
 import type Stripe from 'stripe';
 import { BillingError } from './config.ts';
+import { ORDERLY_AI_MONTHLY_PRICE_CENTS, ORDERLY_AI_MONTHLY_PRICE_LABEL } from './plan.ts';
 
 export interface BillingAccount {
   user_id: string;
@@ -43,7 +44,7 @@ export function subscriptionAllowsAI(subscription: Stripe.Subscription, priceId:
 }
 
 export function validMonthlyPrice(price: Stripe.Price, livemode = false) {
-  return price.livemode === livemode && price.active && price.currency === 'usd' && price.unit_amount === 499 &&
+  return price.livemode === livemode && price.active && price.currency === 'usd' && price.unit_amount === ORDERLY_AI_MONTHLY_PRICE_CENTS &&
     price.type === 'recurring' && price.billing_scheme === 'per_unit' && !price.transform_quantity &&
     price.recurring?.interval === 'month' && price.recurring.interval_count === 1 && price.recurring.usage_type === 'licensed';
 }
@@ -107,7 +108,7 @@ export function createBillingService(stripe: Stripe, store: BillingStore, config
     try {
       if (account.closed) throw new BillingError('This account is being deleted.', 409);
       const price = await stripe.prices.retrieve(config.priceId);
-      if (!validMonthlyPrice(price, livemode)) throw new BillingError('The configured price does not match Orderly AI ($4.99 USD/month) and its billing mode.');
+      if (!validMonthlyPrice(price, livemode)) throw new BillingError(`The configured price does not match Orderly AI (${ORDERLY_AI_MONTHLY_PRICE_LABEL} USD/month) and its billing mode.`);
       if (livemode) {
         if (!config.portalConfiguration) throw new BillingError('Subscription management is not configured.');
         const portal = await stripe.billingPortal.configurations.retrieve(config.portalConfiguration);
@@ -138,9 +139,12 @@ export function createBillingService(stripe: Stripe, store: BillingStore, config
         let previousStatus = previous.status;
         if (previousStatus === 'open') {
           const previousTrialDays = previous.metadata?.orderly_trial_days === '7' ? 7 : 0;
-          if (previousTrialDays === trialDays && previous.url) return { url: previous.url };
+          const items = await stripe.checkout.sessions.listLineItems(previous.id, { limit: 2 });
+          const currentPrice = !items.has_more && items.data.length === 1 &&
+            items.data[0].price?.id === config.priceId && items.data[0].quantity === 1;
+          if (previousTrialDays === trialDays && currentPrice && previous.url) return { url: previous.url };
           // Do not reuse a stale trial after another subscription, or send a new
-          // customer to a pre-trial checkout that would charge them immediately.
+          // customer to a pre-trial checkout or a superseded price.
           await stripe.checkout.sessions.expire(previous.id);
           previousStatus = 'expired';
         }

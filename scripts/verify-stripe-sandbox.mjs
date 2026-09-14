@@ -13,7 +13,7 @@ import Stripe from 'stripe';
 import { createBillingService } from '../lib/billing/service.ts';
 
 const ACCOUNT_ID = 'acct_1UE0rgCjmnlmrlsX';
-const PRICE_ID = 'price_1UE1DQCjmnlmrlsXHxHfcpa4';
+const PRICE_ID = 'price_1UFft1CjmnlmrlsXPVZuVx2l';
 const PORTAL_ID = 'bpc_1UEgA9CjmnlmrlsXkvvWYvcF';
 const runId = randomUUID();
 const owner = randomUUID();
@@ -83,6 +83,7 @@ async function main() {
     },
     checkout: { sessions: {
       retrieve: (...args) => stripe.checkout.sessions.retrieve(...args),
+      listLineItems: (...args) => stripe.checkout.sessions.listLineItems(...args),
       expire: (...args) => stripe.checkout.sessions.expire(...args),
       async create(params, options) {
         check(verifiedAccount && createdCustomerIds.has(params.customer), 'unverified_write');
