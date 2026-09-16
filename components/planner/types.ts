@@ -17,6 +17,8 @@ export interface PlannerBlockView {
   title: string;
   startAt: string | Date;
   endAt: string | Date;
+  /** Actual deadline, independent of the scheduled work block. */
+  dueAt?: string | Date | null;
   description?: string | null;
   reason?: string | null;
   subjectName?: string | null;

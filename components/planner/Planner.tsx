@@ -82,6 +82,7 @@ import { TaskForm } from '@/components/tasks/TaskForm';
 import { TaskCalendar, type TaskCalendarMode } from '@/components/calendar/TaskCalendar';
 import { CalendarViewTabs, type CalendarSection } from '@/components/calendar/CalendarViewTabs';
 import type { UntimedScheduleItem } from '@/components/schedule/UntimedTaskShelf';
+import { scheduleOccurrenceDueAt } from '@/lib/schedule/overdue';
 
 interface ConversationMessage {
   id: string;
@@ -451,7 +452,7 @@ function schoolCommitment(settings: PlannerSettings): RecurringCommitmentInput {
   };
 }
 
-function occurrenceBlocks(occurrences: readonly ScheduleOccurrence[]): PlannerBlockView[] {
+function occurrenceBlocks(occurrences: readonly ScheduleOccurrence[], timeZone: string): PlannerBlockView[] {
   return occurrences.flatMap(occurrence => {
     if (!occurrence.startAt || !occurrence.endAt) return [];
     return [{
@@ -460,6 +461,7 @@ function occurrenceBlocks(occurrences: readonly ScheduleOccurrence[]): PlannerBl
       description: occurrence.description,
       startAt: occurrence.startAt,
       endAt: occurrence.endAt,
+      dueAt: scheduleOccurrenceDueAt(occurrence, timeZone),
       subjectName: occurrence.subject?.name || occurrence.task.course_name || null,
       subjectColor: occurrence.color || '#6366f1',
       source: occurrence.task.source || 'manual',
@@ -861,9 +863,9 @@ export function Planner() {
   const blocks = useMemo(() => [
     ...visibleCommitments.blocks,
     ...visibleEvents.blocks,
-    ...occurrenceBlocks(occurrences.timed).filter(block => !block.taskId || !previewTaskIds.has(block.taskId)),
+    ...occurrenceBlocks(occurrences.timed, timeZone).filter(block => !block.taskId || !previewTaskIds.has(block.taskId)),
     ...previewBlocks,
-  ], [occurrences.timed, previewBlocks, previewTaskIds, visibleCommitments.blocks, visibleEvents.blocks]);
+  ], [occurrences.timed, previewBlocks, previewTaskIds, visibleCommitments.blocks, visibleEvents.blocks, timeZone]);
   const commitmentById = useMemo(() => new Map([
     ...commitments,
     ...storedEventsToCommitments(storedEvents, timeZone, commitments),
@@ -880,8 +882,9 @@ export function Planner() {
     date: occurrence.date,
     durationSeconds: occurrence.durationSeconds,
     color: occurrence.color || '#6366f1',
+    dueAt: scheduleOccurrenceDueAt(occurrence, timeZone),
     completed: occurrence.task.status === 'completed',
-  })), [occurrences.untimed]);
+  })), [occurrences.untimed, timeZone]);
 
   const context = useMemo<ScheduleCommandContext>(() => ({
     now: new Date().toISOString(),

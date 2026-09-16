@@ -38,6 +38,8 @@ import {
 } from 'date-fns';
 import { Clock3, Expand, GripVertical, ListTodo, LockKeyhole, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
+import { OverdueBadge } from '@/components/schedule/OverdueBadge';
+import { isScheduleItemOverdue } from '@/lib/schedule/overdue';
 import {
   UntimedTaskShelf,
   type UntimedScheduleItem,
@@ -196,6 +198,7 @@ function formatBlockTime(start: Date, end: Date): string {
 
 interface PositionedBlockProps {
   block: PlannerBlockView;
+  now: Date;
   start: Date;
   end: Date;
   editable: boolean;
@@ -215,6 +218,7 @@ interface PositionedBlockProps {
 
 function PositionedBlock({
   block,
+  now,
   start,
   end,
   editable,
@@ -246,6 +250,7 @@ function PositionedBlock({
   const height = Math.max(SNAP_MINUTES * PIXELS_PER_MINUTE, duration * PIXELS_PER_MINUTE);
   const compact = height < 42;
   const roomy = height >= 66;
+  const overdue = block.kind === 'task' && !block.draft && isScheduleItemOverdue(block, now);
 
   const style: CSSProperties = {
     top: startMinute * PIXELS_PER_MINUTE,
@@ -263,12 +268,14 @@ function PositionedBlock({
     <div
       ref={setNodeRef}
       style={style}
+      data-overdue={overdue || undefined}
       className={cn(
-        'group absolute left-1 right-1 overflow-hidden rounded-lg border border-l-[3px] text-left shadow-sm transition-[box-shadow,opacity]',
+        '@container/schedule-item group absolute left-1 right-1 overflow-hidden rounded-lg border border-l-[3px] text-left shadow-sm transition-[box-shadow,opacity]',
         draggable && 'cursor-grab active:cursor-grabbing',
         fixed && 'border-dashed bg-muted/70',
         block.draft && 'border-primary/80 bg-primary/15 shadow-lg ring-1 ring-primary/35',
         block.completed && 'opacity-55',
+        overdue && 'outline outline-2 -outline-offset-2 outline-red-500 dark:outline-red-400/90',
         isDragging && 'opacity-25',
         active && 'shadow-xl ring-1 ring-primary/50',
       )}
@@ -278,8 +285,8 @@ function PositionedBlock({
         type="button"
         {...(draggable ? attributes : {})}
         {...(draggable ? listeners : {})}
-        title={block.kind === 'school' ? 'School hours are managed in Settings' : undefined}
-        aria-label={`${block.title}, ${formatBlockTime(start, end)}, ${minutesLabel(duration)}`}
+        title={overdue ? `${block.title} · Overdue` : block.kind === 'school' ? 'School hours are managed in Settings' : undefined}
+        aria-label={`${block.title}, ${formatBlockTime(start, end)}, ${minutesLabel(duration)}${overdue ? ', overdue' : ''}`}
         onClick={(event) => {
           event.stopPropagation();
           if (Date.now() >= suppressClickUntil.current && !isDragging) onClick?.(block);
@@ -295,7 +302,7 @@ function PositionedBlock({
         className={cn(
           'absolute inset-0 z-0 flex w-full items-start px-2 py-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary',
           draggable && 'cursor-grab touch-none active:cursor-grabbing',
-          compact && 'py-0.5',
+          compact && 'py-0',
         )}
       >
         <div className="flex w-full min-w-0 items-start gap-1">
@@ -307,15 +314,18 @@ function PositionedBlock({
             <GripVertical className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground/70" />
           ) : null}
           <div className={cn('min-w-0 flex-1', draggable && block.kind === 'task' && onMoveToUntimed && 'pr-5')}>
-            <p
-              className={cn(
-                'truncate text-xs font-medium leading-tight text-foreground',
-                compact && 'text-[11px]',
-                block.completed && 'line-through',
-              )}
-            >
-              {block.title}
-            </p>
+            <div className={cn('flex min-w-0 items-center gap-1', compact && 'h-3')}>
+              <p
+                className={cn(
+                  'min-w-0 flex-1 truncate text-xs font-medium leading-tight text-foreground',
+                  compact && 'text-[11px] leading-3',
+                  block.completed && 'line-through',
+                )}
+              >
+                {block.title}
+              </p>
+              {overdue && <OverdueBadge />}
+            </div>
             {!compact && (
               <p className="mt-0.5 truncate text-[11px] leading-tight text-muted-foreground">
                 {formatBlockTime(start, end)}
@@ -345,7 +355,10 @@ function PositionedBlock({
             void Promise.resolve(onMoveToUntimed(block));
           }}
           data-size="icon-sm"
-          className="absolute right-0.5 top-0.5 z-20 flex h-6 w-6 items-center justify-center rounded text-muted-foreground/70 transition-colors hover:bg-background/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary"
+          className={cn(
+            'absolute right-0.5 top-0.5 z-20 flex h-6 w-6 items-center justify-center rounded text-muted-foreground/70 transition-colors hover:bg-background/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary',
+            compact && 'top-0 h-3',
+          )}
         >
           <ListTodo className="h-3 w-3" />
         </button>
@@ -359,7 +372,10 @@ function PositionedBlock({
           data-size="icon-sm"
           onPointerDown={(event) => onResizeStart?.(event, block)}
           onKeyDown={(event) => onResizeKeyDown(event, block)}
-          className="absolute inset-x-1 bottom-0 z-20 h-2 cursor-ns-resize touch-none rounded-full opacity-50 transition-opacity after:absolute after:bottom-0.5 after:left-1/2 after:h-0.5 after:w-7 after:-translate-x-1/2 after:rounded-full after:bg-foreground/35 hover:opacity-100 focus-visible:opacity-100 group-hover:opacity-100"
+          className={cn(
+            'absolute inset-x-1 bottom-0 z-20 h-2 cursor-ns-resize touch-none rounded-full opacity-50 transition-opacity after:absolute after:bottom-0.5 after:left-1/2 after:h-0.5 after:w-7 after:-translate-x-1/2 after:rounded-full after:bg-foreground/35 hover:opacity-100 focus-visible:opacity-100 group-hover:opacity-100',
+            compact && 'h-1 opacity-0',
+          )}
         />
       )}
     </div>
@@ -559,8 +575,13 @@ export function WeekTimeGrid({
   }, [initialScrollHour, variant]);
 
   useEffect(() => {
-    const timer = window.setInterval(() => setNow(new Date()), 60_000);
-    return () => window.clearInterval(timer);
+    const refreshNow = () => setNow(new Date());
+    const timer = window.setInterval(refreshNow, 60_000);
+    window.addEventListener('focus', refreshNow);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('focus', refreshNow);
+    };
   }, []);
 
   useEffect(() => () => resizeCleanupRef.current?.(), []);
@@ -908,6 +929,7 @@ export function WeekTimeGrid({
                   days={days}
                   columns={columns}
                   items={untimedItems}
+                  now={now}
                   selectedDate={selectedDay}
                   onItemClick={onUntimedItemClick}
                   draggable={editable && Boolean(onUntimedItemSchedule)}
@@ -974,6 +996,7 @@ export function WeekTimeGrid({
                         <PositionedBlock
                           key={segment.key}
                           block={displayBlock}
+                          now={now}
                           start={start}
                           end={end}
                           editable={editable && segment.startsAtSource}
@@ -1000,6 +1023,7 @@ export function WeekTimeGrid({
               style={{ borderLeftColor: blockColor(activeBlock) }}
             >
               <p className="truncate text-[11px] font-semibold">{activeBlock.title}</p>
+              {activeBlock.kind === 'task' && !activeBlock.draft && isScheduleItemOverdue(activeBlock, now) && <OverdueBadge />}
               <p className="text-[9px] text-muted-foreground">
                 <Clock3 className="mr-1 inline h-2.5 w-2.5" />
                 {format(displayIntervals.get(activeBlock.id)?.start || asDate(activeBlock.startAt), 'h:mm a')}
@@ -1011,6 +1035,7 @@ export function WeekTimeGrid({
               style={{ borderLeftColor: activeUntimedItem.color || '#6366f1' }}
             >
               <p className="truncate text-[11px] font-semibold">{activeUntimedItem.title}</p>
+              {isScheduleItemOverdue(activeUntimedItem, now) && <OverdueBadge />}
               <p className="text-[9px] text-muted-foreground">
                 <Clock3 className="mr-1 inline h-2.5 w-2.5" />
                 Drop on a time to schedule

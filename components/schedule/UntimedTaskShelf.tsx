@@ -5,6 +5,8 @@ import { CSS } from '@dnd-kit/utilities';
 import { format, isSameDay } from 'date-fns';
 import { GripVertical, ListTodo } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { isScheduleItemOverdue } from '@/lib/schedule/overdue';
+import { OverdueBadge } from './OverdueBadge';
 
 export interface UntimedScheduleItem {
   id: string;
@@ -14,12 +16,14 @@ export interface UntimedScheduleItem {
   durationSeconds?: number | null;
   color?: string | null;
   completed?: boolean;
+  dueAt?: string | Date | null;
 }
 
 export interface UntimedTaskShelfProps {
   days: Date[];
   columns: string;
   items: UntimedScheduleItem[];
+  now: Date;
   selectedDate?: Date | null;
   onItemClick?: (item: UntimedScheduleItem) => void;
   draggable?: boolean;
@@ -45,14 +49,17 @@ function colorBorder(color: string | null | undefined): string {
 
 function UntimedTask({
   item,
+  now,
   draggable,
   onClick,
 }: {
   item: UntimedScheduleItem;
+  now: Date;
   draggable: boolean;
   onClick?: (item: UntimedScheduleItem) => void;
 }) {
   const duration = durationLabel(item.durationSeconds);
+  const overdue = isScheduleItemOverdue(item, now);
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: item.id,
     data: { type: 'untimed-task', item },
@@ -69,10 +76,12 @@ function UntimedTask({
         if (!isDragging) onClick?.(item);
       }}
       disabled={!onClick && !draggable}
+      data-overdue={overdue || undefined}
       className={cn(
-        'flex min-h-8 w-full min-w-0 items-center gap-1.5 rounded-lg border px-2 py-1.5 text-left text-[11px] transition-[filter,opacity] hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-default',
+        '@container/schedule-item flex min-h-8 w-full min-w-0 items-center gap-1.5 rounded-lg border px-2 py-1.5 text-left text-[11px] transition-[filter,opacity] hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-default',
         draggable && 'cursor-grab touch-none active:cursor-grabbing',
         item.completed && 'opacity-50',
+        overdue && 'outline outline-2 -outline-offset-2 outline-red-500 dark:outline-red-400/90',
         isDragging && 'opacity-20',
       )}
       style={{
@@ -80,13 +89,14 @@ function UntimedTask({
         backgroundColor: colorBackground(item.color),
         transform: CSS.Translate.toString(transform),
       }}
-      aria-label={`${item.title}${duration ? `, ${duration}` : ''}, untimed${draggable ? ', drag to schedule' : ''}`}
-      title={`${item.title}${duration ? ` · ${duration}` : ''}`}
+      aria-label={`${item.title}${duration ? `, ${duration}` : ''}, untimed${overdue ? ', overdue' : ''}${draggable ? ', drag to schedule' : ''}`}
+      title={`${item.title}${duration ? ` · ${duration}` : ''}${overdue ? ' · Overdue' : ''}`}
     >
       {draggable && <GripVertical className="h-3 w-3 shrink-0 text-muted-foreground/70" />}
       <span className={cn('min-w-0 flex-1 truncate font-medium', item.completed && 'line-through')}>
         {item.title}
       </span>
+      {overdue && <OverdueBadge />}
       {duration && <span className="shrink-0 text-[10px] text-muted-foreground">{duration}</span>}
     </button>
   );
@@ -95,6 +105,7 @@ function UntimedTask({
 function UntimedDay({
   day,
   items,
+  now,
   selected,
   draggable,
   acceptsScheduledDrops,
@@ -102,6 +113,7 @@ function UntimedDay({
 }: {
   day: Date;
   items: UntimedScheduleItem[];
+  now: Date;
   selected: boolean;
   draggable: boolean;
   acceptsScheduledDrops: boolean;
@@ -129,6 +141,7 @@ function UntimedDay({
         <UntimedTask
           key={item.id}
           item={item}
+          now={now}
           draggable={draggable && !item.completed}
           onClick={onItemClick}
         />
@@ -141,6 +154,7 @@ export function UntimedTaskShelf({
   days,
   columns,
   items,
+  now,
   selectedDate,
   onItemClick,
   draggable = false,
@@ -175,6 +189,7 @@ export function UntimedTaskShelf({
           key={format(day, 'yyyy-MM-dd')}
           day={day}
           items={items}
+          now={now}
           selected={Boolean(selectedDate && isSameDay(day, selectedDate))}
           draggable={draggable}
           acceptsScheduledDrops={acceptsScheduledDrops}

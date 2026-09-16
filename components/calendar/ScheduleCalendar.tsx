@@ -16,6 +16,7 @@ import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { WeekTimeGrid, type PlannerBlockView } from '@/components/planner';
 import type { UntimedScheduleItem } from '@/components/schedule/UntimedTaskShelf';
+import { scheduleOccurrenceDueAt } from '@/lib/schedule/overdue';
 import { usePlannerStore } from '@/lib/planner/store';
 import {
   getLegacyCalendarEventsRecoveryInfo,
@@ -112,7 +113,7 @@ function occurrenceDeadline(occurrence: ScheduleOccurrence, timeZone: string): s
   return localDateTimeToIso(occurrence.recurrenceSourceDate, `${dueTime}:00`, timeZone);
 }
 
-function occurrenceBlocks(occurrences: readonly ScheduleOccurrence[]): PlannerBlockView[] {
+function occurrenceBlocks(occurrences: readonly ScheduleOccurrence[], timeZone: string): PlannerBlockView[] {
   return occurrences.flatMap(occurrence => {
     if (!occurrence.startAt) return [];
     const start = new Date(occurrence.startAt);
@@ -126,6 +127,7 @@ function occurrenceBlocks(occurrences: readonly ScheduleOccurrence[]): PlannerBl
       title: occurrence.title,
       startAt: start.toISOString(),
       endAt: end.toISOString(),
+      dueAt: scheduleOccurrenceDueAt(occurrence, timeZone),
       description: occurrence.description,
       subjectName: occurrence.subject?.name || occurrence.task.course_name || null,
       subjectColor: occurrence.color,
@@ -284,8 +286,8 @@ export function ScheduleCalendar() {
   }, [allCommitments, plannerRecord?.commitments, timeZone, weekDates]);
 
   const timedBlocks = useMemo(
-    () => [...fixedBlocks, ...occurrenceBlocks(occurrences.timed)],
-    [fixedBlocks, occurrences.timed],
+    () => [...fixedBlocks, ...occurrenceBlocks(occurrences.timed, timeZone)],
+    [fixedBlocks, occurrences.timed, timeZone],
   );
   const occurrenceById = useMemo(
     () => new Map(
@@ -334,9 +336,10 @@ export function ScheduleCalendar() {
       date: occurrence.date,
       durationSeconds: occurrence.durationSeconds,
       color: occurrence.color,
+      dueAt: scheduleOccurrenceDueAt(occurrence, timeZone),
       completed: occurrence.task.status === 'completed',
     })),
-    [occurrences.untimed],
+    [occurrences.untimed, timeZone],
   );
 
   const confirmTaskChange = useCallback(async (taskId: string, successMessage?: string) => {

@@ -18,11 +18,11 @@ const userRecord = { settings, commitments: stored?.events || [initialEvent], es
 const persist = () => {
   if (!schedulePersistenceResult || !plannerPersistenceResult) return;
   localStorage.setItem('calendar-ui-fixture', JSON.stringify({ events: usePlannerStore.getState().users[id].commitments,
-    tasks: useAppStore.getState().tasks, entries: useScheduleStore.getState().entriesByUser[id] }));
+    tasks: useAppStore.getState().tasks, subjects: useAppStore.getState().subjects, entries: useScheduleStore.getState().entriesByUser[id] }));
 };
 export const useAppStore = create<any>((set) => ({
   dataLoaded: true, finalizeTaskCreations: () => {},
-  user: { id, email: 'calendar-test@example.invalid' }, tasks: stored?.tasks || [], subjects: [], exams: [], goals: [], studySessions: [],
+  user: { id, email: 'calendar-test@example.invalid' }, tasks: stored?.tasks || [], subjects: stored?.subjects || [], exams: [], goals: [], studySessions: [],
   addTask: async (input: any) => {
     const task = { id: crypto.randomUUID(), user_id: id, created_at: now, updated_at: now, due_date: null, due_time: null, source: 'manual', status: 'pending', ...input };
     set((state: any) => ({ tasks: [...state.tasks, task] })); persist(); return task;
@@ -54,6 +54,7 @@ export const useScheduleStore = create<any>((set, get) => ({
 }));
 
 Object.assign(window, { calendarFixture: {
+  completeTask: (taskId: string) => useAppStore.getState().completeTask(taskId),
   state: () => ({ events: usePlannerStore.getState().users[id].commitments, tasks: useAppStore.getState().tasks, entries: useScheduleStore.getState().entriesByUser[id] }),
   setPersistenceResult: (kind: 'task' | 'event', value: boolean) => { if (kind === 'task') schedulePersistenceResult = value; else plannerPersistenceResult = value; },
   addPersistenceTask: async () => {
